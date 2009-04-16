@@ -1,0 +1,6 @@
+gdb-rtems4.9 (6.8-1) unstable; urgency=low
+
+  * Initial release (Closes: #nnnn)  <nnnn is the bug number of your ITP>
+
+ -- Michael Davidsaver <mdavidsaver@bnl.gov>  Thu, 16 Apr 2009 13:41:42 -0400
+
