@@ -31,6 +31,7 @@ endif
 	cd build-powerpc && ../configure $(CROSS) --prefix=/usr \
 --mandir=\$${prefix}/share/man --infodir=\$${prefix}/share/info CFLAGS="$(CFLAGS)" \
 LDFLAGS="-Wl,-z,defs" \
+--disable-nls --with-system-zlib \
 --enable-sim --enable-sim-powerpc --enable-sim-timebase --enable-sim-hardware
 
 
@@ -64,6 +65,9 @@ install: build
 
 	# Add here commands to install the package into debian/gdb-rtems4.9.
 	$(MAKE) -C build-powerpc prefix=$(CURDIR)/debian/gdb-powerpc-rtems4.9/usr install
+
+	rm -rf $(CURDIR)/debian/gdb-powerpc-rtems4.9/usr/lib
+	rm -rf $(CURDIR)/debian/gdb-powerpc-rtems4.9/usr/share/info
 
 
 # Build architecture-independent files here.
