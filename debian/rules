@@ -9,6 +9,15 @@
 # Uncomment this to turn on verbose mode.
 #export DH_VERBOSE=1
 
+ifeq (,$(findstring debug,$(DEB_BUILD_OPTIONS)))
+CFLAGS:=$(filter-out -g,$(CFLAGS))
+endif
+
+ifneq (,$(filter parallel=%,$(DEB_BUILD_OPTIONS)))
+NUMJOBS = $(patsubst parallel=%,%,$(filter parallel=%,$(DEB_BUILD_OPTIONS)))
+MAKEFLAGS += -j$(NUMJOBS)
+endif
+
 
 # These are used for cross-compiling and for saving the configure script
 # from having to guess our platform (since we know it already)
@@ -29,10 +38,10 @@ ifneq "$(wildcard /usr/share/misc/config.guess)" ""
 endif
 	install -d build-powerpc
 	cd build-powerpc && ../configure $(CROSS) --prefix=/usr \
---mandir=\$${prefix}/share/man --infodir=\$${prefix}/share/info CFLAGS="$(CFLAGS)" \
-LDFLAGS="-Wl,-z,defs" \
+--mandir=\$${prefix}/share/man --infodir=\$${prefix}/share/info \
 --disable-nls --with-system-zlib \
---enable-sim --enable-sim-powerpc --enable-sim-timebase --enable-sim-hardware
+--enable-sim --enable-sim-powerpc --enable-sim-timebase --enable-sim-hardware \
+CFLAGS="$(CFLAGS)" LDFLAGS="-Wl,-z,defs"
 
 
 build: build-stamp
