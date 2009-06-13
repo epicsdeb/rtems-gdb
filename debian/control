@@ -2,12 +2,18 @@ Source: gdb-rtems4.9
 Section: unknown
 Priority: extra
 Maintainer: Michael Davidsaver <mdavidsaver@bnl.gov>
-Build-Depends: debhelper (>= 7), autotools-dev
+Build-Depends: debhelper (>= 7), autotools-dev, gcc-powerpc-rtems4.9, gcc-i386-rtems4.9
 Standards-Version: 3.7.3
 Homepage: http://www.rtems.com
 
 Package: gdb-powerpc-rtems4.9
 Architecture: any
 Depends: ${shlibs:Depends}, ${misc:Depends}
-Description: <insert up to 60 chars description>
- <insert long description, indented with spaces>
+Description: GDB for RTEMS on powerpc
+ The GNU debugger from the RTEMS real-time OS on powerpc
+
+Package: gdb-i386-rtems4.9
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Description: GDB for RTEMS on i386
+ The GNU debugger from the RTEMS real-time OS on i386

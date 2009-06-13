@@ -18,13 +18,18 @@ NUMJOBS = $(patsubst parallel=%,%,$(filter parallel=%,$(DEB_BUILD_OPTIONS)))
 MAKEFLAGS += -j$(NUMJOBS)
 endif
 
+RTEMS_VER =4.9
 
 # These are used for cross-compiling and for saving the configure script
 # from having to guess our platform (since we know it already)
 DEB_HOST_GNU_TYPE   ?= $(shell dpkg-architecture -qDEB_HOST_GNU_TYPE)
 DEB_BUILD_GNU_TYPE  ?= $(shell dpkg-architecture -qDEB_BUILD_GNU_TYPE)
-DEB_TARGET_GNU_TYPE ?= powerpc-rtems4.9
-CROSS= --target $(DEB_TARGET_GNU_TYPE) --build $(DEB_BUILD_GNU_TYPE) --host $(DEB_HOST_GNU_TYPE)
+DEB_TARGET_GNU_TYPE = $(1)-rtems$(RTEMS_VER)
+CONFIG= --target $(call DEB_TARGET_GNU_TYPE,$(1)) --build $(DEB_BUILD_GNU_TYPE) --host $(DEB_HOST_GNU_TYPE) \
+--prefix=/usr --mandir=\$${prefix}/share/man --infodir=\$${prefix}/share/info \
+--disable-nls --with-system-zlib \
+--enable-sim --enable-sim-$(RTEMS_ARCH) --enable-sim-timebase --enable-sim-hardware \
+CFLAGS="$(CFLAGS)" LDFLAGS="-Wl,-z,defs"
 
 
 config.status: configure
@@ -37,11 +42,9 @@ ifneq "$(wildcard /usr/share/misc/config.guess)" ""
 	cp -f /usr/share/misc/config.guess config.guess
 endif
 	install -d build-powerpc
-	cd build-powerpc && ../configure $(CROSS) --prefix=/usr \
---mandir=\$${prefix}/share/man --infodir=\$${prefix}/share/info \
---disable-nls --with-system-zlib \
---enable-sim --enable-sim-powerpc --enable-sim-timebase --enable-sim-hardware \
-CFLAGS="$(CFLAGS)" LDFLAGS="-Wl,-z,defs"
+	cd build-powerpc && ../configure $(call CONFIG,powerpc)
+	install -d build-i386
+	cd build-i386 && ../configure $(call CONFIG,i386)
 
 
 build: build-stamp
@@ -49,9 +52,8 @@ build: build-stamp
 build-stamp:  config.status 
 	dh_testdir
 
-	# Add here commands to compile the package.
-	$(MAKE) -C build-powerpc -j4
-	#docbook-to-man debian/gdb-rtems4.9.sgml > gdb-rtems4.9.1
+	$(MAKE) -C build-powerpc $(MAKEFLAGS)
+	$(MAKE) -C build-i386 $(MAKEFLAGS)
 
 	touch $@
 
@@ -60,11 +62,14 @@ clean:
 	dh_testroot
 	rm -f build-stamp 
 
-	# Add here commands to clean up after the build process.
 	rm -rf build-powerpc
+	rm -rf build-i386
+
 	rm -f config.sub config.guess
 
 	dh_clean 
+
+tprefix=$(CURDIR)/debian/gdb-$(1)-rtems$(RTEMS_VER)/usr
 
 install: build
 	dh_testdir
@@ -72,11 +77,15 @@ install: build
 	dh_clean -k 
 	dh_installdirs
 
-	# Add here commands to install the package into debian/gdb-rtems4.9.
-	$(MAKE) -C build-powerpc prefix=$(CURDIR)/debian/gdb-powerpc-rtems4.9/usr install
+	$(MAKE) -C build-powerpc prefix=$(call tprefix,powerpc) install
 
-	rm -rf $(CURDIR)/debian/gdb-powerpc-rtems4.9/usr/lib
-	rm -rf $(CURDIR)/debian/gdb-powerpc-rtems4.9/usr/share/info
+	rm -rf $(call tprefix,powerpc)/lib
+	rm -rf $(call tprefix,powerpc)/share/info
+
+	$(MAKE) -C build-i386 prefix=$(call tprefix,i386) install
+
+	rm -rf $(call tprefix,i386)/lib
+	rm -rf $(call tprefix,i386)/share/info
 
 
 # Build architecture-independent files here.
