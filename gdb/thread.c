@@ -441,9 +441,18 @@ info_threads_command (char *arg, int from_tty)
       if (extra_info)
 	printf_filtered (" (%s)", extra_info);
       puts_filtered ("  ");
-      /* That switch put us at the top of the stack (leaf frame).  */
-      switch_to_thread (tp->ptid);
-      print_stack_frame (get_selected_frame (NULL), 0, LOCATION);
+
+    if ( current_target.to_shortname &&
+         strstr (current_target.to_shortname, "rtems-remote") )
+      {
+	    printf_filtered ("\n");
+	  }
+	else
+      {	
+        /* That switch put us at the top of the stack (leaf frame).  */
+        switch_to_thread (tp->ptid);
+        print_stack_frame (get_selected_frame (NULL), 0, LOCATION);
+	  }
     }
 
   /* Restores the current thread and the frame selected before

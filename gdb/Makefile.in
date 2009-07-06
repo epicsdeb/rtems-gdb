@@ -618,6 +618,7 @@ SFILES = ada-exp.y ada-lang.c ada-typeprint.c ada-valprint.c  \
 	p-exp.y p-lang.c p-typeprint.c p-valprint.c parse.c printcmd.c \
 	prologue-value.c \
 	regcache.c reggroups.c remote.c remote-fileio.c \
+	remote-rtems.c \
 	scm-exp.c scm-lang.c scm-valprint.c \
 	sentinel-frame.c \
 	serial.c ser-base.c ser-unix.c \
@@ -2615,7 +2616,7 @@ regcache.o: regcache.c $(defs_h) $(inferior_h) $(target_h) $(gdbarch_h) \
 reggroups.o: reggroups.c $(defs_h) $(reggroups_h) $(gdbtypes_h) \
 	$(gdb_assert_h) $(regcache_h) $(command_h) $(gdbcmd_h)
 regset.o: regset.c $(defs_h) $(regset_h) $(gdb_assert_h)
-remote.o: remote.c $(defs_h) $(gdb_string_h) $(inferior_h) $(bfd_h) \
+remote.o: remote.c remote-rtems.c $(defs_h) $(gdb_string_h) $(inferior_h) $(bfd_h) \
 	$(symfile_h) $(exceptions_h) $(target_h) $(gdbcmd_h) $(objfiles_h) \
 	$(gdb_stabs_h) $(gdbthread_h) $(remote_h) $(regcache_h) $(value_h) \
 	$(gdb_assert_h) $(event_loop_h) $(event_top_h) $(inf_loop_h) \

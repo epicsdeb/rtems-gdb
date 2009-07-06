@@ -200,6 +200,13 @@ open_disk_image(device *me,
 		hw_disk_device *disk,
 		const char *name)
 {
+unsigned32 block_size;
+
+  if (device_find_property(me, "block-size"))
+    block_size = device_find_integer_property(me, "block-size");
+  else
+    block_size = 512;
+
   if (disk->image != NULL)
     fclose(disk->image);
   if (disk->name != NULL)
@@ -209,6 +216,10 @@ open_disk_image(device *me,
   if (disk->image == NULL) {
     perror(device_name(me));
     device_error(me, "open %s failed\n", disk->name);
+  }
+  if (setvbuf(disk->image, malloc(block_size), _IOFBF, block_size)) {
+	perror(device_name(me));
+    device_error(me, "setvbuf %s failed\n", disk->name);
   }
 
   DTRACE(disk, ("image %s (%s)\n",
@@ -244,9 +255,9 @@ hw_disk_init_address(device *me)
 
   /* is it a RO device? */
   disk->read_only =
-    (strcmp(device_name(me), "disk") != 0
-     && strcmp(device_name(me), "floppy") != 0
-     && device_find_property(me, "read-only") == NULL);
+    ( (strcmp(device_name(me), "disk") != 0
+       && strcmp(device_name(me), "floppy") != 0 )
+     || device_find_property(me, "read-only") != NULL);
 
   /* now open it */
   open_disk_image(me, disk, name);

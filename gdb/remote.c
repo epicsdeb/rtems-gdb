@@ -3890,6 +3890,8 @@ send_g_packet (void)
 	fprintf_unfiltered (gdb_stdlog,
 			    "Bad register packet; fetching a new packet\n");
       getpkt (&rs->buf, &rs->buf_size, 0);
+	  if ( rs->buf[0] == 0 )
+	  	break;
     }
 
   buf_len = strlen (rs->buf);
@@ -5872,7 +5874,7 @@ compare_sections_command (char *args, int from_tty)
   if (!exec_bfd)
     error (_("command cannot be used without an exec file"));
   if (!current_target.to_shortname ||
-      strcmp (current_target.to_shortname, "remote") != 0)
+      strstr (current_target.to_shortname, "remote") == 0)
     error (_("command can only be used with remote target"));
 
   for (s = exec_bfd->sections; s; s = s->next)
@@ -7716,3 +7718,10 @@ Show the remote pathname for \"run\""), NULL, NULL, NULL,
   /* Eventually initialize fileio.  See fileio.c */
   initialize_remote_fileio (remote_set_cmdlist, remote_show_cmdlist);
 }
+
+/* need to introduce this name here ( to be
+ * seen by sed -e 's/^_initialize_.../'
+ */
+void
+_initialize_remote_rtems (void);
+#include "remote-rtems.c"

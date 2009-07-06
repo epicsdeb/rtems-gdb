@@ -1402,7 +1402,7 @@ skip_prologue (struct gdbarch *gdbarch, CORE_ADDR pc, CORE_ADDR lim_pc,
 	  continue;
 
 	}
-      else if (lr_reg >= 0 &&
+      else if (lr_reg >= 0 && fdata->nosavedpc &&
 	       /* std Rx, NUM(r1) || stdu Rx, NUM(r1) */
 	       (((op & 0xffff0000) == (lr_reg | 0xf8010000)) ||
 		/* stw Rx, NUM(r1) */
@@ -1458,7 +1458,13 @@ skip_prologue (struct gdbarch *gdbarch, CORE_ADDR pc, CORE_ADDR lim_pc,
 	  continue;
 
 	}
-      else if (op == 0x48000004)
+ 	  else if ( (( op & 0xfe80ffff ) == 0x4280004) || (( op & 0xfe80ffff ) == 0x42800005 && lr_reg > -1 ) )
+ 	{			/* bcl .+4 used in -fpic */
+ 	
+ 	  continue;
+ 
+ 	}
+       else if (op == 0x48000004)
 	{			/* b .+4 (xlc) */
 	  break;
 
