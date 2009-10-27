@@ -2,9 +2,9 @@ Source: gdb-rtems4.9
 Section: unknown
 Priority: extra
 Maintainer: Michael Davidsaver <mdavidsaver@bnl.gov>
-Build-Depends: debhelper (>= 7), autotools-dev, gcc-powerpc-rtems4.9, gcc-i386-rtems4.9
+Build-Depends: debhelper (>= 7), autotools-dev, libncurses5-dev, gcc-powerpc-rtems4.9, gcc-i386-rtems4.9
 Standards-Version: 3.7.3
-Homepage: http://www.rtems.com
+Homepage: http://www.gnu.org/software/gdb/
 
 Package: gdb-powerpc-rtems4.9
 Architecture: any
