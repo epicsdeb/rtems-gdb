@@ -70,8 +70,6 @@ static trace_option_descriptor trace_description[] = {
   { trace_pass_device, "pass-device" },
   { trace_phb_device, "phb-device" },
   { trace_register_device, "register-device", "Device initializing registers" },
-  { trace_sem_device, "sem-device" },
-  { trace_shm_device, "shm-device" },
   { trace_stack_device, "stack-device" },
   { trace_vm_device, "vm-device" },
   /* packages */

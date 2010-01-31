@@ -24,7 +24,6 @@
 
 #include <sys/types.h>
 #include <stdio.h>
-#include <string.h>
 #include <termios.h>
 #include <sys/fcntl.h>
 #include <sys/file.h>
@@ -414,7 +413,7 @@ decode_memcfg()
     if (rom8) mec_memcfg &= ~0x20000;
     else mec_memcfg |= 0x20000;
 
-    mem_ramsz = (512 * 1024) << ((mec_memcfg >> 10) & 7);
+    mem_ramsz = (256 * 1024) << ((mec_memcfg >> 10) & 7);
     mem_romsz = (128 * 1024) << ((mec_memcfg >> 18) & 7);
 
     if (sparclite_board) {
@@ -1660,7 +1659,7 @@ memory_read(asi, addr, data, sz, ws)
 	errmec = 0;
 	return(1);
     }
-#endif
+#endif;
 
     if ((addr >= mem_ramstart) && (addr < (mem_ramstart + mem_ramsz))) {
 	fetch_bytes (asi, &ramb[addr & mem_rammask], data, sz);
@@ -1737,7 +1736,7 @@ memory_write(asi, addr, data, sz, ws)
 	errmec = 0;
 	return(1);
     }
-#endif
+#endif;
 
     if ((addr >= mem_ramstart) && (addr < (mem_ramstart + mem_ramsz))) {
 	if (mem_accprot) {
