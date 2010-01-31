@@ -38,6 +38,12 @@
 # define SIGTRAP 5
 #endif
 
+#ifdef _WIN32
+#ifndef SIGBUS
+#define SIGBUS 10
+#endif
+#endif
+
 int debug;
 
 host_callback *sim_callback;
@@ -599,7 +605,7 @@ decode (SIM_DESC sd, int addr, unsigned char *data, decoded_inst *dst)
   /* Find the exact opcode/arg combo.  */
   for (q = h8_opcodes; q->name; q++)
     {
-      op_type *nib = q->data.nib;
+      const op_type *nib = q->data.nib;
       unsigned int len = 0;
 
       if ((q->available == AV_H8SX && !h8300sxmode) ||
@@ -924,7 +930,7 @@ decode (SIM_DESC sd, int addr, unsigned char *data, decoded_inst *dst)
 #endif
 		  /* Fill in the args.  */
 		  {
-		    op_type *args = q->args.nib;
+		    const op_type *args = q->args.nib;
 		    int hadone = 0;
 		    int nargs;
 

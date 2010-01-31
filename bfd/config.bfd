@@ -712,7 +712,7 @@ case "${targ}" in
     targ_defvec=bfd_elf32_iq2000_vec
     ;;
 
-  m32c-*-elf)
+  m32c-*-elf | m32c-*-rtems*)
     targ_defvec=bfd_elf32_m32c_vec
     ;;
 
@@ -727,6 +727,9 @@ case "${targ}" in
   m32r*le-*-*)
     targ_defvec=bfd_elf32_m32rle_vec
     targ_selvecs="bfd_elf32_m32r_vec bfd_elf32_m32rle_vec"
+    ;;
+  m32r-*-rtems*)
+    targ_defvec=bfd_elf32_m32r_vec
     ;;
   m32r-*-*)
     targ_defvec=bfd_elf32_m32r_vec

@@ -18,12 +18,12 @@
 
 ## COMMON_PRE_CONFIG_FRAG
 
-TERMCAP_LIB = @TERMCAP@
+# TERMCAP_LIB = -lncurses
 READLINE_LIB = @READLINE@
 
 SIM_OBJS = exec.o erc32.o func.o help.o float.o interf.o
 SIM_EXTRA_LIBS = $(READLINE_LIB) $(TERMCAP_LIB) -lm
-SIM_EXTRA_ALL = sis
+SIM_EXTRA_ALL = sis$(EXEEXT)
 SIM_EXTRA_INSTALL = install-sis
 SIM_EXTRA_CLEAN = clean-sis
 
@@ -37,8 +37,8 @@ SIM_EXTRA_CFLAGS = -DSTAT -DFAST_UART -DIUREV0 -DMECREV0
 # `sis' doesn't need interf.o.
 SIS_OFILES = exec.o erc32.o func.o help.o float.o
 
-sis: sis.o $(SIS_OFILES) $(COMMON_OBJS) $(LIBDEPS)
-	$(CC) $(ALL_CFLAGS) -o sis \
+sis$(EXEEXT): sis.o $(SIS_OFILES) $(COMMON_OBJS) $(LIBDEPS)
+	$(CC) $(ALL_CFLAGS) -o sis$(EXEEXT) \
 	  sis.o $(SIS_OFILES) $(COMMON_OBJS) $(EXTRA_LIBS)
 
 # FIXME: This computes the build host's endianness, doesn't it?
@@ -51,11 +51,11 @@ end.h: end
 
 # Copy the files into directories where they will be run.
 install-sis: installdirs
-	n=`echo sis | sed '$(program_transform_name)'`; \
-	$(INSTALL_PROGRAM) sis$(EXEEXT) $(DESTDIR)$(bindir)/$$n$(EXEEXT)
+	n=`echo sis$(EXEEXT) | sed '$(program_transform_name)'`; \
+	$(INSTALL_PROGRAM) sis$(EXEEXT) $(DESTDIR)$(bindir)/$$n
 
 clean-sis:
-	rm -f sis end end.h
+	rm -f sis$(EXEEXT) end end.h
 
 configure:
 	@echo "Rebuilding configure..."

@@ -534,8 +534,12 @@ m32c_signal_to_host (int m32c)
 #endif
 
     case 5:
+#ifdef SIGTRAP
       return SIGTRAP;
-
+#else
+      return SIGSEGV;
+#endif
+    
     case 10:
 #ifdef SIGBUS
       return SIGBUS;
