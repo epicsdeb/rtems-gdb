@@ -15,7 +15,7 @@ endif
 
 ifneq (,$(filter parallel=%,$(DEB_BUILD_OPTIONS)))
 NUMJOBS = $(patsubst parallel=%,%,$(filter parallel=%,$(DEB_BUILD_OPTIONS)))
-MAKEFLAGS += -j$(NUMJOBS)
+PMAKEFLAGS += -j$(NUMJOBS)
 endif
 
 RTEMS_VER =4.9
@@ -32,34 +32,33 @@ CONFIG= --target $(call DEB_TARGET_GNU_TYPE,$(1)) --build $(DEB_BUILD_GNU_TYPE) 
 CFLAGS="$(CFLAGS)" LDFLAGS="-Wl,-z,defs"
 
 
-config.status: configure
-	dh_testdir
-	# Add here commands to configure the package.
+build: build-stamp
+
+build-stamp:
+
+	dh build --before auto_configure
+
 ifneq "$(wildcard /usr/share/misc/config.sub)" ""
 	cp -f /usr/share/misc/config.sub config.sub
 endif
 ifneq "$(wildcard /usr/share/misc/config.guess)" ""
 	cp -f /usr/share/misc/config.guess config.guess
 endif
+
 	install -d build-powerpc
 	cd build-powerpc && ../configure $(call CONFIG,powerpc)
 	install -d build-i386
 	cd build-i386 && ../configure $(call CONFIG,i386)
 
-
-build: build-stamp
-
-build-stamp:  config.status 
-	dh_testdir
-
-	$(MAKE) -C build-powerpc $(MAKEFLAGS)
-	$(MAKE) -C build-i386 $(MAKEFLAGS)
-
+	$(MAKE) -C build-powerpc $(PMAKEFLAGS)
+	$(MAKE) -C build-i386 $(PMAKEFLAGS)
+ 
+	dh build --after auto_test
 	touch $@
 
 clean: 
-	dh_testdir
-	dh_testroot
+	dh clean --before auto_clean
+
 	rm -f build-stamp 
 
 	rm -rf build-powerpc
@@ -67,15 +66,12 @@ clean:
 
 	rm -f config.sub config.guess
 
-	dh_clean 
+	dh clean --after auto_clean
 
 tprefix=$(CURDIR)/debian/gdb-$(1)-rtems$(RTEMS_VER)/usr
 
 install: build
-	dh_testdir
-	dh_testroot
-	dh_clean -k 
-	dh_installdirs
+	dh install --before auto_install
 
 	$(MAKE) -C build-powerpc prefix=$(call tprefix,powerpc) install
 
@@ -87,33 +83,14 @@ install: build
 	rm -rf $(call tprefix,i386)/lib
 	rm -rf $(call tprefix,i386)/share/info
 
+	dh install --after auto_install
 
-# Build architecture-independent files here.
-binary-indep: build install
-# We have nothing to do by default.
 
-# Build architecture-dependent files here.
-binary-arch: build install
-	dh_testdir
-	dh_testroot
-	dh_installchangelogs 
-	dh_installdocs
-	dh_installexamples
-#	dh_install
-#	dh_installmenu
-#	dh_installdebconf	
-#	dh_installinfo
-	dh_installman
-	dh_link
-	dh_strip
-	dh_compress
-	dh_fixperms
-#	dh_makeshlibs
-	dh_installdeb
-	dh_shlibdeps
-	dh_gencontrol
-	dh_md5sums
-	dh_builddeb
+binary-indep: #install
+	#dh binary-indep
+
+binary-arch: install
+	dh binary-arch
 
 binary: binary-indep binary-arch
 .PHONY: build clean binary-indep binary-arch binary install 
