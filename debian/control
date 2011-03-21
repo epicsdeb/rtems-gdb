@@ -1,21 +1,22 @@
-Source: gdb-rtems4.9
+Source: gdb-rtems4.10
 Section: devel
 Priority: extra
 Maintainer: Michael Davidsaver <mdavidsaver@bnl.gov>
 Build-Depends: debhelper (>= 7), autotools-dev,
-               libncurses5-dev,
-               gcc-powerpc-rtems4.9,
-               gcc-i386-rtems4.9,
+               libncurses5-dev, libexpat1-dev,
+               python-dev,
+               gcc-powerpc-rtems4.10,
+               gcc-i386-rtems4.10,
 Standards-Version: 3.8.0
 Homepage: http://www.gnu.org/software/gdb/
 
-Package: gdb-powerpc-rtems4.9
+Package: gdb-powerpc-rtems4.10
 Architecture: any
 Depends: ${shlibs:Depends}, ${misc:Depends}
 Description: GDB for RTEMS on powerpc
  The GNU debugger from the RTEMS real-time OS on powerpc
 
-Package: gdb-i386-rtems4.9
+Package: gdb-i386-rtems4.10
 Architecture: any
 Depends: ${shlibs:Depends}, ${misc:Depends}
 Description: GDB for RTEMS on i386

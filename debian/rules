@@ -18,7 +18,7 @@ NUMJOBS = $(patsubst parallel=%,%,$(filter parallel=%,$(DEB_BUILD_OPTIONS)))
 PMAKEFLAGS += -j$(NUMJOBS)
 endif
 
-RTEMS_VER =4.9
+RTEMS_VER =4.10
 
 # These are used for cross-compiling and for saving the configure script
 # from having to guess our platform (since we know it already)
@@ -29,7 +29,7 @@ CONFIG= --target $(call DEB_TARGET_GNU_TYPE,$(1)) --build $(DEB_BUILD_GNU_TYPE) 
 --prefix=/usr --mandir=\$${prefix}/share/man --infodir=\$${prefix}/share/info \
 --disable-nls --with-system-zlib \
 --enable-sim --enable-sim-$(RTEMS_ARCH) --enable-sim-timebase --enable-sim-hardware \
---disable-werror \
+--disable-werror --with-python --with-expat \
 CFLAGS="$(CFLAGS)" LDFLAGS="-Wl,-z,defs"
 
 
