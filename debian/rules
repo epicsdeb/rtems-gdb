@@ -29,6 +29,7 @@ CONFIG= --target $(call DEB_TARGET_GNU_TYPE,$(1)) --build $(DEB_BUILD_GNU_TYPE) 
 --prefix=/usr --mandir=\$${prefix}/share/man --infodir=\$${prefix}/share/info \
 --disable-nls --with-system-zlib \
 --enable-sim --enable-sim-$(RTEMS_ARCH) --enable-sim-timebase --enable-sim-hardware \
+--disable-werror \
 CFLAGS="$(CFLAGS)" LDFLAGS="-Wl,-z,defs"
 
 
