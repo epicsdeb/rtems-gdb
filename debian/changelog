@@ -1,3 +1,12 @@
+gdb-rtems4.10 (7.1-1) unstable; urgency=low
+
+  * New upstream gdb
+  * New RTEMS version
+  * Apply RTEMS patch 20100812
+  * Switch packaging source format to 3.0 (quilt)
+
+ -- Michael Davidsaver <mdavidsaver@bnl.gov>  Mon, 21 Mar 2011 14:54:46 -0400
+
 gdb-rtems4.9 (6.8-3) unstable; urgency=low
 
   * Omit -Werror.  Causing (apparently) spurious build failures
