@@ -38,6 +38,12 @@
 # define SIGTRAP 5
 #endif
 
+#ifdef _WIN32
+#ifndef SIGBUS
+#define SIGBUS 10
+#endif
+#endif
+
 int debug;
 
 host_callback *sim_callback;

@@ -1100,7 +1100,7 @@ static void
 sparc32_store_return_value (struct type *type, struct regcache *regcache,
 			    const gdb_byte *valbuf)
 {
-  int len = TYPE_LENGTH (type);
+  size_t len = TYPE_LENGTH (type);
   gdb_byte buf[8];
 
   gdb_assert (!sparc_structure_or_union_p (type));

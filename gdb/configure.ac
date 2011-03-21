@@ -638,6 +638,12 @@ else
   LIBS="$LIBS ${python_libs}"
   have_libpython=no
   if test "${have_libpython}" = no; then
+    AC_TRY_LIBPYTHON(python2.7, have_libpython)
+    if test "${HAVE_LIBPYTHON2_7}" = yes; then
+      AC_DEFINE(HAVE_LIBPYTHON2_7, 1, [Define if Python 2.7 is being used.])
+    fi
+  fi
+  if test "${have_libpython}" = no; then
     AC_TRY_LIBPYTHON(python2.6, have_libpython)
     if test "${HAVE_LIBPYTHON2_6}" = yes; then
       AC_DEFINE(HAVE_LIBPYTHON2_6, 1, [Define if Python 2.6 is being used.])

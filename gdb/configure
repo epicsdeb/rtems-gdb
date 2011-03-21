@@ -9471,6 +9471,44 @@ else
   have_libpython=no
   if test "${have_libpython}" = no; then
 
+  version=python2.7
+
+
+  HAVE_LIBPYTHON2_7=no
+  { $as_echo "$as_me:${as_lineno-$LINENO}: checking for ${version}" >&5
+$as_echo_n "checking for ${version}... " >&6; }
+  save_LIBS=$LIBS
+  LIBS="$LIBS -l${version}"
+  cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+#include "${version}/Python.h"
+int
+main ()
+{
+Py_Initialize ();
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_c_try_link "$LINENO"; then :
+  HAVE_LIBPYTHON2_7=yes
+                  have_libpython=yes
+else
+  LIBS=$save_LIBS
+fi
+rm -f core conftest.err conftest.$ac_objext \
+    conftest$ac_exeext conftest.$ac_ext
+  { $as_echo "$as_me:${as_lineno-$LINENO}: result: $HAVE_LIBPYTHON2_7" >&5
+$as_echo "$HAVE_LIBPYTHON2_7" >&6; }
+
+    if test "${HAVE_LIBPYTHON2_7}" = yes; then
+
+$as_echo "#define HAVE_LIBPYTHON2_7 1" >>confdefs.h
+
+    fi
+  fi
+  if test "${have_libpython}" = no; then
+
   version=python2.6
 
 

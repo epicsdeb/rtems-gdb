@@ -591,8 +591,9 @@ ac_includes_default="\
 ac_subst_vars='LTLIBOBJS
 LIBOBJS
 cgen_breaks
+READLINE_CFLAGS
+READLINE_DEPS
 READLINE
-TERMCAP
 REPORT_BUGS_TEXI
 REPORT_BUGS_TO
 PKGVERSION
@@ -716,6 +717,7 @@ enable_sim_trace
 enable_sim_profile
 with_pkgversion
 with_bugurl
+with_system_readline
 '
       ac_precious_vars='build_alias
 host_alias
@@ -1358,6 +1360,7 @@ Optional Packages:
   --with-zlib             include zlib support (auto/yes/no) default=auto
   --with-pkgversion=PKG   Use PKG in the version string in place of "GDB"
   --with-bugurl=URL       Direct users to URL to report a bug
+  --with-system-readline  use installed readline library
 
 Some influential environment variables:
   CC          C compiler command
@@ -2416,7 +2419,6 @@ sim_inline="-DDEFAULT_INLINE=0"
 
 
 
-
 # Bugs in autoconf 2.59 break the call to SIM_AC_COMMON, hack around
 # it by inlining the macro's contents.
 # This file contains common code used by all simulators.
@@ -2916,18 +2918,18 @@ cat confdefs.h - <<_ACEOF >conftest.$ac_ext
 int
 main ()
 {
-
+return 0;
   ;
   return 0;
 }
 _ACEOF
 ac_clean_files_save=$ac_clean_files
-ac_clean_files="$ac_clean_files a.out a.out.dSYM a.exe b.out conftest.out"
+ac_clean_files="$ac_clean_files a.out a.out.dSYM a.exe b.out"
 # Try to create an executable without -o first, disregard a.out.
 # It will help us diagnose broken compilers, and finding out an intuition
 # of exeext.
-{ $as_echo "$as_me:${as_lineno-$LINENO}: checking for C compiler default output file name" >&5
-$as_echo_n "checking for C compiler default output file name... " >&6; }
+{ $as_echo "$as_me:${as_lineno-$LINENO}: checking whether the C compiler works" >&5
+$as_echo_n "checking whether the C compiler works... " >&6; }
 ac_link_default=`$as_echo "$ac_link" | sed 's/ -o *conftest[^ ]*//'`
 
 # The possible output files:
@@ -2989,10 +2991,10 @@ test "$ac_cv_exeext" = no && ac_cv_exeext=
 else
   ac_file=''
 fi
-{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $ac_file" >&5
-$as_echo "$ac_file" >&6; }
 if test -z "$ac_file"; then :
-  $as_echo "$as_me: failed program was:" >&5
+  { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
+$as_echo "no" >&6; }
+$as_echo "$as_me: failed program was:" >&5
 sed 's/^/| /' conftest.$ac_ext >&5
 
 { { $as_echo "$as_me:${as_lineno-$LINENO}: error: in \`$ac_pwd':" >&5
@@ -3000,51 +3002,18 @@ $as_echo "$as_me: error: in \`$ac_pwd':" >&2;}
 { as_fn_set_status 77
 as_fn_error "C compiler cannot create executables
 See \`config.log' for more details." "$LINENO" 5; }; }
+else
+  { $as_echo "$as_me:${as_lineno-$LINENO}: result: yes" >&5
+$as_echo "yes" >&6; }
 fi
+{ $as_echo "$as_me:${as_lineno-$LINENO}: checking for C compiler default output file name" >&5
+$as_echo_n "checking for C compiler default output file name... " >&6; }
+{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $ac_file" >&5
+$as_echo "$ac_file" >&6; }
 ac_exeext=$ac_cv_exeext
 
-# Check that the compiler produces executables we can run.  If not, either
-# the compiler is broken, or we cross compile.
-{ $as_echo "$as_me:${as_lineno-$LINENO}: checking whether the C compiler works" >&5
-$as_echo_n "checking whether the C compiler works... " >&6; }
-# If not cross compiling, check that we can run a simple program.
-if test "$cross_compiling" != yes; then
-  if { ac_try='./$ac_file'
-  { { case "(($ac_try" in
-  *\"* | *\`* | *\\*) ac_try_echo=\$ac_try;;
-  *) ac_try_echo=$ac_try;;
-esac
-eval ac_try_echo="\"\$as_me:${as_lineno-$LINENO}: $ac_try_echo\""
-$as_echo "$ac_try_echo"; } >&5
-  (eval "$ac_try") 2>&5
-  ac_status=$?
-  $as_echo "$as_me:${as_lineno-$LINENO}: \$? = $ac_status" >&5
-  test $ac_status = 0; }; }; then
-    cross_compiling=no
-  else
-    if test "$cross_compiling" = maybe; then
-	cross_compiling=yes
-    else
-	{ { $as_echo "$as_me:${as_lineno-$LINENO}: error: in \`$ac_pwd':" >&5
-$as_echo "$as_me: error: in \`$ac_pwd':" >&2;}
-as_fn_error "cannot run C compiled programs.
-If you meant to cross compile, use \`--host'.
-See \`config.log' for more details." "$LINENO" 5; }
-    fi
-  fi
-fi
-{ $as_echo "$as_me:${as_lineno-$LINENO}: result: yes" >&5
-$as_echo "yes" >&6; }
-
-rm -f -r a.out a.out.dSYM a.exe conftest$ac_cv_exeext b.out conftest.out
+rm -f -r a.out a.out.dSYM a.exe conftest$ac_cv_exeext b.out
 ac_clean_files=$ac_clean_files_save
-# Check that the compiler produces executables we can run.  If not, either
-# the compiler is broken, or we cross compile.
-{ $as_echo "$as_me:${as_lineno-$LINENO}: checking whether we are cross compiling" >&5
-$as_echo_n "checking whether we are cross compiling... " >&6; }
-{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $cross_compiling" >&5
-$as_echo "$cross_compiling" >&6; }
-
 { $as_echo "$as_me:${as_lineno-$LINENO}: checking for suffix of executables" >&5
 $as_echo_n "checking for suffix of executables... " >&6; }
 if { { ac_try="$ac_link"
@@ -3084,6 +3053,63 @@ $as_echo "$ac_cv_exeext" >&6; }
 rm -f conftest.$ac_ext
 EXEEXT=$ac_cv_exeext
 ac_exeext=$EXEEXT
+cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+
+int
+main ()
+{
+
+  ;
+  return 0;
+}
+_ACEOF
+ac_clean_files="$ac_clean_files conftest.out"
+# Check that the compiler produces executables we can run.  If not, either
+# the compiler is broken, or we cross compile.
+{ $as_echo "$as_me:${as_lineno-$LINENO}: checking whether we are cross compiling" >&5
+$as_echo_n "checking whether we are cross compiling... " >&6; }
+if test "$cross_compiling" != yes; then
+  { { ac_try="$ac_link"
+case "(($ac_try" in
+  *\"* | *\`* | *\\*) ac_try_echo=\$ac_try;;
+  *) ac_try_echo=$ac_try;;
+esac
+eval ac_try_echo="\"\$as_me:${as_lineno-$LINENO}: $ac_try_echo\""
+$as_echo "$ac_try_echo"; } >&5
+  (eval "$ac_link") 2>&5
+  ac_status=$?
+  $as_echo "$as_me:${as_lineno-$LINENO}: \$? = $ac_status" >&5
+  test $ac_status = 0; }
+  if { ac_try='./conftest$ac_cv_exeext'
+  { { case "(($ac_try" in
+  *\"* | *\`* | *\\*) ac_try_echo=\$ac_try;;
+  *) ac_try_echo=$ac_try;;
+esac
+eval ac_try_echo="\"\$as_me:${as_lineno-$LINENO}: $ac_try_echo\""
+$as_echo "$ac_try_echo"; } >&5
+  (eval "$ac_try") 2>&5
+  ac_status=$?
+  $as_echo "$as_me:${as_lineno-$LINENO}: \$? = $ac_status" >&5
+  test $ac_status = 0; }; }; then
+    cross_compiling=no
+  else
+    if test "$cross_compiling" = maybe; then
+	cross_compiling=yes
+    else
+	{ { $as_echo "$as_me:${as_lineno-$LINENO}: error: in \`$ac_pwd':" >&5
+$as_echo "$as_me: error: in \`$ac_pwd':" >&2;}
+as_fn_error "cannot run C compiled programs.
+If you meant to cross compile, use \`--host'.
+See \`config.log' for more details." "$LINENO" 5; }
+    fi
+  fi
+fi
+{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $cross_compiling" >&5
+$as_echo "$cross_compiling" >&6; }
+
+rm -f conftest.$ac_ext conftest$ac_cv_exeext conftest.out
+ac_clean_files=$ac_clean_files_save
 { $as_echo "$as_me:${as_lineno-$LINENO}: checking for suffix of object files" >&5
 $as_echo_n "checking for suffix of object files... " >&6; }
 if test "${ac_cv_objext+set}" = set; then :
@@ -4532,86 +4558,19 @@ fi
 done
 
 
-# In the Cygwin environment, we need some additional flags.
-{ $as_echo "$as_me:${as_lineno-$LINENO}: checking for cygwin" >&5
-$as_echo_n "checking for cygwin... " >&6; }
-if test "${sim_cv_os_cygwin+set}" = set; then :
-  $as_echo_n "(cached) " >&6
-else
+
+# Check whether --with-system-readline was given.
+if test "${with_system_readline+set}" = set; then :
+  withval=$with_system_readline;
+fi
+
+
+if test "$with_system_readline" = yes; then
+  { $as_echo "$as_me:${as_lineno-$LINENO}: checking for readline" >&5
+$as_echo_n "checking for readline... " >&6; }
+  save_LIBS="$LIBS"
+  LIBS="-lreadline $save_LIBS"
   cat confdefs.h - <<_ACEOF >conftest.$ac_ext
-/* end confdefs.h.  */
-
-#ifdef __CYGWIN__
-lose
-#endif
-_ACEOF
-if (eval "$ac_cpp conftest.$ac_ext") 2>&5 |
-  $EGREP "lose" >/dev/null 2>&1; then :
-  sim_cv_os_cygwin=yes
-else
-  sim_cv_os_cygwin=no
-fi
-rm -f conftest*
-
-fi
-{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $sim_cv_os_cygwin" >&5
-$as_echo "$sim_cv_os_cygwin" >&6; }
-
-if test x$sim_cv_os_cygwin = xyes; then
-  TERMCAP='`if test -r ../../libtermcap/libtermcap.a; then echo ../../libtermcap/libtermcap.a; else echo -ltermcap; fi` -luser32'
-else
-  { $as_echo "$as_me:${as_lineno-$LINENO}: checking for main in -ltermcap" >&5
-$as_echo_n "checking for main in -ltermcap... " >&6; }
-if test "${ac_cv_lib_termcap_main+set}" = set; then :
-  $as_echo_n "(cached) " >&6
-else
-  ac_check_lib_save_LIBS=$LIBS
-LIBS="-ltermcap  $LIBS"
-cat confdefs.h - <<_ACEOF >conftest.$ac_ext
-/* end confdefs.h.  */
-
-
-int
-main ()
-{
-return main ();
-  ;
-  return 0;
-}
-_ACEOF
-if ac_fn_c_try_link "$LINENO"; then :
-  ac_cv_lib_termcap_main=yes
-else
-  ac_cv_lib_termcap_main=no
-fi
-rm -f core conftest.err conftest.$ac_objext \
-    conftest$ac_exeext conftest.$ac_ext
-LIBS=$ac_check_lib_save_LIBS
-fi
-{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $ac_cv_lib_termcap_main" >&5
-$as_echo "$ac_cv_lib_termcap_main" >&6; }
-if test "x$ac_cv_lib_termcap_main" = x""yes; then :
-  TERMCAP=-ltermcap
-else
-  TERMCAP=""
-fi
-
-fi
-
-
-# We prefer the in-tree readline.  Top-level dependencies make sure
-# src/readline (if it's there) is configured before src/sim.
-if test -r ../../readline/Makefile; then
-  READLINE=../../readline/libreadline.a
-else
-  { $as_echo "$as_me:${as_lineno-$LINENO}: checking for readline in -lreadline" >&5
-$as_echo_n "checking for readline in -lreadline... " >&6; }
-if test "${ac_cv_lib_readline_readline+set}" = set; then :
-  $as_echo_n "(cached) " >&6
-else
-  ac_check_lib_save_LIBS=$LIBS
-LIBS="-lreadline $TERMCAP $LIBS"
-cat confdefs.h - <<_ACEOF >conftest.$ac_ext
 /* end confdefs.h.  */
 
 /* Override any GCC internal prototype to avoid an error.
@@ -4620,33 +4579,61 @@ cat confdefs.h - <<_ACEOF >conftest.$ac_ext
 #ifdef __cplusplus
 extern "C"
 #endif
-char readline ();
+char add_history ();
 int
 main ()
 {
-return readline ();
+return add_history ();
   ;
   return 0;
 }
 _ACEOF
 if ac_fn_c_try_link "$LINENO"; then :
-  ac_cv_lib_readline_readline=yes
+  READLINE=-lreadline
 else
-  ac_cv_lib_readline_readline=no
+   LIBS="-lreadline -lncurses $save_LIBS"
+      cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+
+/* Override any GCC internal prototype to avoid an error.
+   Use char because int might match the return type of a GCC
+   builtin and then its argument prototype would still apply.  */
+#ifdef __cplusplus
+extern "C"
+#endif
+char add_history ();
+int
+main ()
+{
+return add_history ();
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_c_try_link "$LINENO"; then :
+  READLINE="-lreadline -lncurses"
+else
+  as_fn_error "unable to detect readline" "$LINENO" 5
 fi
 rm -f core conftest.err conftest.$ac_objext \
     conftest$ac_exeext conftest.$ac_ext
-LIBS=$ac_check_lib_save_LIBS
-fi
-{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $ac_cv_lib_readline_readline" >&5
-$as_echo "$ac_cv_lib_readline_readline" >&6; }
-if test "x$ac_cv_lib_readline_readline" = x""yes; then :
-  READLINE=-lreadline
-else
-  as_fn_error "the required \"readline\" library is missing" "$LINENO" 5
-fi
 
 fi
+rm -f core conftest.err conftest.$ac_objext \
+    conftest$ac_exeext conftest.$ac_ext
+  LIBS="$save_LIBS"
+  { $as_echo "$as_me:${as_lineno-$LINENO}: result: $READLINE" >&5
+$as_echo "$READLINE" >&6; }
+  READLINE_DEPS=
+  READLINE_CFLAGS=
+else
+  READLINE='../../readline/libreadline.a -lncurses'
+  READLINE_DEPS='$(READLINE)'
+  READLINE_CFLAGS='-I$(READLINE_SRC)/..'
+fi
+
+
+
 
 
 ac_sources="$sim_link_files"
