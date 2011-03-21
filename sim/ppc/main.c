@@ -283,7 +283,7 @@ main(int argc, char **argv)
       print_options ();
       return 0;
     } else {
-      psim_usage(0);
+      psim_usage(0, 0);
     }
   }
   name_of_file = argv[0];
@@ -319,7 +319,7 @@ main(int argc, char **argv)
   status = psim_get_status(simulation);
   switch (status.reason) {
   case was_continuing:
-    error("psim: continuing while stoped!\n");
+    error("psim: continuing while stopped!\n");
     return 0;
   case was_trap:
     error("psim: no trap insn\n");

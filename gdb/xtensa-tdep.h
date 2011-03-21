@@ -1,6 +1,7 @@
 /* Target-dependent code for the Xtensa port of GDB, the GNU debugger.
 
-   Copyright (C) 2003, 2005, 2006, 2007, 2008 Free Software Foundation, Inc.
+   Copyright (C) 2003, 2005, 2006, 2007, 2008, 2009, 2010
+   Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -226,6 +227,14 @@ struct gdbarch_tdep
   unsigned long *fp_layout;	/* Layout of custom/TIE regs in 'FP' area.  */
   unsigned int fp_layout_bytes;	/* Size of layout information (in bytes).  */
   unsigned long *gregmap;
+
+  /* Cached register types.  */
+  struct ctype_cache
+    {
+      struct ctype_cache *next;
+      int size;
+      struct type *virtual_type;
+    } *type_entries;
 };
 
 /* Macro to instantiate a gdbarch_tdep structure.  */

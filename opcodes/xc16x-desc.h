@@ -2,7 +2,7 @@
 
 THIS FILE IS MACHINE GENERATED WITH CGEN.
 
-Copyright 1996-2007 Free Software Foundation, Inc.
+Copyright 1996-2010 Free Software Foundation, Inc.
 
 This file is part of the GNU Binutils and/or GDB, the GNU debugger.
 
@@ -25,16 +25,10 @@ This file is part of the GNU Binutils and/or GDB, the GNU debugger.
 #ifndef XC16X_CPU_H
 #define XC16X_CPU_H
 
-#include "opcode/cgen-bitset.h"
-
 #define CGEN_ARCH xc16x
 
 /* Given symbol S, return xc16x_cgen_<S>.  */
-#if defined (__STDC__) || defined (ALMOST_STDC) || defined (HAVE_STRINGIZE)
 #define CGEN_SYM(s) xc16x##_cgen_##s
-#else
-#define CGEN_SYM(s) xc16x/**/_cgen_/**/s
-#endif
 
 
 /* Selected cpu families.  */
@@ -321,11 +315,12 @@ typedef enum cgen_hw_attr {
 /* Enum declaration for xc16x hardware types.  */
 typedef enum cgen_hw_type {
   HW_H_MEMORY, HW_H_SINT, HW_H_UINT, HW_H_ADDR
- , HW_H_IADDR, HW_H_PC, HW_H_GR, HW_H_EXT
- , HW_H_PSW, HW_H_GRB, HW_H_CC, HW_H_ECC
- , HW_H_GRB8, HW_H_R8, HW_H_REGMEM8, HW_H_REGDIV8
- , HW_H_R0, HW_H_R01, HW_H_REGBMEM8, HW_H_MEMGR8
- , HW_H_COND, HW_H_CBIT, HW_H_SGTDIS, HW_MAX
+ , HW_H_IADDR, HW_H_PC, HW_H_GR, HW_H_CR
+ , HW_H_EXT, HW_H_PSW, HW_H_GRB, HW_H_CC
+ , HW_H_ECC, HW_H_GRB8, HW_H_R8, HW_H_REGMEM8
+ , HW_H_REGDIV8, HW_H_R0, HW_H_R01, HW_H_REGBMEM8
+ , HW_H_MEMGR8, HW_H_COND, HW_H_CBIT, HW_H_SGTDIS
+ , HW_MAX
 } CGEN_HW_TYPE;
 
 #define MAX_HW ((int) HW_MAX)
@@ -429,6 +424,7 @@ extern const CGEN_ATTR_TABLE xc16x_cgen_insn_attr_table[];
 
 /* Hardware decls.  */
 
+extern CGEN_KEYWORD xc16x_cgen_opval_gr_names;
 extern CGEN_KEYWORD xc16x_cgen_opval_gr_names;
 extern CGEN_KEYWORD xc16x_cgen_opval_ext_names;
 extern CGEN_KEYWORD xc16x_cgen_opval_psw_names;

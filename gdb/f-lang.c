@@ -1,7 +1,7 @@
 /* Fortran language support routines for GDB, the GNU debugger.
 
    Copyright (C) 1993, 1994, 1995, 1996, 1998, 1999, 2000, 2001, 2002, 2003,
-   2004, 2005, 2007, 2008 Free Software Foundation, Inc.
+   2004, 2005, 2007, 2008, 2009, 2010 Free Software Foundation, Inc.
 
    Contributed by Motorola.  Adapted from the C parser by Farooq Butt
    (fmbutt@engage.sps.mot.com).
@@ -70,8 +70,9 @@ static SAVED_F77_COMMON_PTR allocate_saved_f77_common_node (void);
 static void patch_common_entries (SAVED_F77_COMMON_PTR, CORE_ADDR, int);
 #endif
 
-static void f_printchar (int c, struct ui_file * stream);
-static void f_emit_char (int c, struct ui_file * stream, int quoter);
+static void f_printchar (int c, struct type *type, struct ui_file * stream);
+static void f_emit_char (int c, struct type *type,
+			 struct ui_file * stream, int quoter);
 
 /* Print the character C on STREAM as part of the contents of a literal
    string whose delimiter is QUOTER.  Note that that format for printing
@@ -80,7 +81,7 @@ static void f_emit_char (int c, struct ui_file * stream, int quoter);
    be replaced with a true F77 version.  */
 
 static void
-f_emit_char (int c, struct ui_file *stream, int quoter)
+f_emit_char (int c, struct type *type, struct ui_file *stream, int quoter)
 {
   c &= 0xFF;			/* Avoid sign bit follies */
 
@@ -126,10 +127,10 @@ f_emit_char (int c, struct ui_file *stream, int quoter)
    be replaced with a true F77version. */
 
 static void
-f_printchar (int c, struct ui_file *stream)
+f_printchar (int c, struct type *type, struct ui_file *stream)
 {
   fputs_filtered ("'", stream);
-  LA_EMIT_CHAR (c, stream, '\'');
+  LA_EMIT_CHAR (c, type, stream, '\'');
   fputs_filtered ("'", stream);
 }
 
@@ -141,13 +142,15 @@ f_printchar (int c, struct ui_file *stream)
    be replaced with a true F77 version. */
 
 static void
-f_printstr (struct ui_file *stream, const gdb_byte *string,
-	    unsigned int length, int width, int force_ellipses)
+f_printstr (struct ui_file *stream, struct type *type, const gdb_byte *string,
+	    unsigned int length, const char *encoding, int force_ellipses,
+	    const struct value_print_options *options)
 {
   unsigned int i;
   unsigned int things_printed = 0;
   int in_quotes = 0;
   int need_comma = 0;
+  int width = TYPE_LENGTH (type);
 
   if (length == 0)
     {
@@ -155,7 +158,7 @@ f_printstr (struct ui_file *stream, const gdb_byte *string,
       return;
     }
 
-  for (i = 0; i < length && things_printed < print_max; ++i)
+  for (i = 0; i < length && things_printed < options->print_max; ++i)
     {
       /* Position of the character we are examining
          to see whether it is repeated.  */
@@ -179,33 +182,33 @@ f_printstr (struct ui_file *stream, const gdb_byte *string,
 	  ++reps;
 	}
 
-      if (reps > repeat_count_threshold)
+      if (reps > options->repeat_count_threshold)
 	{
 	  if (in_quotes)
 	    {
-	      if (inspect_it)
+	      if (options->inspect_it)
 		fputs_filtered ("\\', ", stream);
 	      else
 		fputs_filtered ("', ", stream);
 	      in_quotes = 0;
 	    }
-	  f_printchar (string[i], stream);
+	  f_printchar (string[i], type, stream);
 	  fprintf_filtered (stream, " <repeats %u times>", reps);
 	  i = rep1 - 1;
-	  things_printed += repeat_count_threshold;
+	  things_printed += options->repeat_count_threshold;
 	  need_comma = 1;
 	}
       else
 	{
 	  if (!in_quotes)
 	    {
-	      if (inspect_it)
+	      if (options->inspect_it)
 		fputs_filtered ("\\'", stream);
 	      else
 		fputs_filtered ("'", stream);
 	      in_quotes = 1;
 	    }
-	  LA_EMIT_CHAR (string[i], stream, '"');
+	  LA_EMIT_CHAR (string[i], type, stream, '"');
 	  ++things_printed;
 	}
     }
@@ -213,7 +216,7 @@ f_printstr (struct ui_file *stream, const gdb_byte *string,
   /* Terminate the quotes if necessary.  */
   if (in_quotes)
     {
-      if (inspect_it)
+      if (options->inspect_it)
 	fputs_filtered ("\\'", stream);
       else
 	fputs_filtered ("'", stream);
@@ -298,12 +301,15 @@ f_language_arch_info (struct gdbarch *gdbarch,
     = builtin->builtin_complex_s16;
   lai->primitive_type_vector [f_primitive_type_void]
     = builtin->builtin_void;
+
+  lai->bool_type_symbol = "logical";
+  lai->bool_type_default = builtin->builtin_logical_s2;
 }
 
 /* This is declared in c-lang.h but it is silly to import that file for what
    is already just a hack. */
-extern int c_value_print (struct value *, struct ui_file *, int,
-			  enum val_prettyprint);
+extern int c_value_print (struct value *, struct ui_file *,
+			  const struct value_print_options *);
 
 const struct language_defn f_language_defn =
 {
@@ -313,6 +319,7 @@ const struct language_defn f_language_defn =
   type_check_on,
   case_sensitive_off,
   array_column_major,
+  macro_expansion_no,
   &exp_descriptor_standard,
   f_parse,			/* parser */
   f_error,			/* parser error function */
@@ -321,10 +328,11 @@ const struct language_defn f_language_defn =
   f_printstr,			/* function to print string constant */
   f_emit_char,			/* Function to print a single character */
   f_print_type,			/* Print a type using appropriate syntax */
+  default_print_typedef,	/* Print a typedef using appropriate syntax */
   f_val_print,			/* Print a value using appropriate syntax */
   c_value_print,		/* FIXME */
   NULL,				/* Language specific skip_trampoline */
-  value_of_this,		/* value_of_this */
+  NULL,                    	/* name_of_this */
   basic_lookup_symbol_nonlocal,	/* lookup_symbol_nonlocal */
   basic_lookup_transparent_type,/* lookup_transparent_type */
   NULL,				/* Language specific symbol demangler */
@@ -337,6 +345,7 @@ const struct language_defn f_language_defn =
   f_language_arch_info,
   default_print_array_index,
   default_pass_by_reference,
+  default_get_string,
   LANG_MAGIC
 };
 
@@ -346,85 +355,50 @@ build_fortran_types (struct gdbarch *gdbarch)
   struct builtin_f_type *builtin_f_type
     = GDBARCH_OBSTACK_ZALLOC (gdbarch, struct builtin_f_type);
 
-  builtin_f_type->builtin_void =
-    init_type (TYPE_CODE_VOID, 1,
-	       0,
-	       "VOID", (struct objfile *) NULL);
+  builtin_f_type->builtin_void
+    = arch_type (gdbarch, TYPE_CODE_VOID, 1, "VOID");
 
-  builtin_f_type->builtin_character =
-    init_type (TYPE_CODE_INT, TARGET_CHAR_BIT / TARGET_CHAR_BIT,
-	       0,
-	       "character", (struct objfile *) NULL);
+  builtin_f_type->builtin_character
+    = arch_integer_type (gdbarch, TARGET_CHAR_BIT, 0, "character");
 
-  builtin_f_type->builtin_logical_s1 =
-    init_type (TYPE_CODE_BOOL, TARGET_CHAR_BIT / TARGET_CHAR_BIT,
-	       TYPE_FLAG_UNSIGNED,
-	       "logical*1", (struct objfile *) NULL);
+  builtin_f_type->builtin_logical_s1
+    = arch_boolean_type (gdbarch, TARGET_CHAR_BIT, 1, "logical*1");
 
-  builtin_f_type->builtin_integer_s2 =
-    init_type (TYPE_CODE_INT,
-	       gdbarch_short_bit (gdbarch) / TARGET_CHAR_BIT,
-	       0, "integer*2", (struct objfile *) NULL);
+  builtin_f_type->builtin_integer_s2
+    = arch_integer_type (gdbarch, gdbarch_short_bit (gdbarch), 0,
+			 "integer*2");
 
-  builtin_f_type->builtin_logical_s2 =
-    init_type (TYPE_CODE_BOOL,
-	       gdbarch_short_bit (gdbarch) / TARGET_CHAR_BIT,
-	       TYPE_FLAG_UNSIGNED, "logical*2", (struct objfile *) NULL);
+  builtin_f_type->builtin_logical_s2
+    = arch_boolean_type (gdbarch, gdbarch_short_bit (gdbarch), 1,
+			 "logical*2");
 
-  builtin_f_type->builtin_integer =
-    init_type (TYPE_CODE_INT, 
-	       gdbarch_int_bit (gdbarch) / TARGET_CHAR_BIT,
-	       0, "integer", (struct objfile *) NULL);
+  builtin_f_type->builtin_integer
+    = arch_integer_type (gdbarch, gdbarch_int_bit (gdbarch), 0,
+			 "integer");
 
-  builtin_f_type->builtin_logical =
-    init_type (TYPE_CODE_BOOL, 
-	       gdbarch_int_bit (gdbarch) / TARGET_CHAR_BIT,
-	       TYPE_FLAG_UNSIGNED, "logical*4", (struct objfile *) NULL);
+  builtin_f_type->builtin_logical
+    = arch_boolean_type (gdbarch, gdbarch_int_bit (gdbarch), 1,
+			 "logical*4");
 
-  builtin_f_type->builtin_real =
-    init_type (TYPE_CODE_FLT,
-	       gdbarch_float_bit (gdbarch) / TARGET_CHAR_BIT,
-	       0,
-	       "real", (struct objfile *) NULL);
+  builtin_f_type->builtin_real
+    = arch_float_type (gdbarch, gdbarch_float_bit (gdbarch),
+		       "real", NULL);
+  builtin_f_type->builtin_real_s8
+    = arch_float_type (gdbarch, gdbarch_double_bit (gdbarch),
+		       "real*8", NULL);
+  builtin_f_type->builtin_real_s16
+    = arch_float_type (gdbarch, gdbarch_long_double_bit (gdbarch),
+		       "real*16", NULL);
 
-  builtin_f_type->builtin_real_s8 =
-    init_type (TYPE_CODE_FLT,
-	       gdbarch_double_bit (gdbarch) / TARGET_CHAR_BIT,
-	       0,
-	       "real*8", (struct objfile *) NULL);
-
-  builtin_f_type->builtin_real_s16 =
-    init_type (TYPE_CODE_FLT,
-	       gdbarch_long_double_bit (gdbarch) / TARGET_CHAR_BIT,
-	       0,
-	       "real*16", (struct objfile *) NULL);
-
-  builtin_f_type->builtin_complex_s8 =
-    init_type (TYPE_CODE_COMPLEX,
-	       2 * gdbarch_float_bit (gdbarch) / TARGET_CHAR_BIT,
-	       0,
-	       "complex*8", (struct objfile *) NULL);
-  TYPE_TARGET_TYPE (builtin_f_type->builtin_complex_s8)
-    = builtin_f_type->builtin_real;
-
-  builtin_f_type->builtin_complex_s16 =
-    init_type (TYPE_CODE_COMPLEX,
-	       2 * gdbarch_double_bit (gdbarch) / TARGET_CHAR_BIT,
-	       0,
-	       "complex*16", (struct objfile *) NULL);
-  TYPE_TARGET_TYPE (builtin_f_type->builtin_complex_s16)
-    = builtin_f_type->builtin_real_s8;
-
-  /* We have a new size == 4 double floats for the
-     complex*32 data type */
-
-  builtin_f_type->builtin_complex_s32 =
-    init_type (TYPE_CODE_COMPLEX,
-	       2 * gdbarch_long_double_bit (gdbarch) / TARGET_CHAR_BIT,
-	       0,
-	       "complex*32", (struct objfile *) NULL);
-  TYPE_TARGET_TYPE (builtin_f_type->builtin_complex_s32)
-    = builtin_f_type->builtin_real_s16;
+  builtin_f_type->builtin_complex_s8
+    = arch_complex_type (gdbarch, "complex*8",
+			 builtin_f_type->builtin_real);
+  builtin_f_type->builtin_complex_s16
+    = arch_complex_type (gdbarch, "complex*16",
+			 builtin_f_type->builtin_real_s8);
+  builtin_f_type->builtin_complex_s32
+    = arch_complex_type (gdbarch, "complex*32",
+			 builtin_f_type->builtin_real_s16);
 
   return builtin_f_type;
 }

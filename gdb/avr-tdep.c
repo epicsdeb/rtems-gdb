@@ -1,7 +1,7 @@
 /* Target-dependent code for Atmel AVR, for GDB.
 
    Copyright (C) 1996, 1997, 1998, 1999, 2000, 2001, 2002, 2003, 2004, 2005,
-   2006, 2007, 2008 Free Software Foundation, Inc.
+   2006, 2007, 2008, 2009, 2010 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -72,9 +72,6 @@
 #undef XMALLOC
 #define XMALLOC(TYPE) ((TYPE*) xmalloc (sizeof (TYPE)))
 
-#undef EXTRACT_INSN
-#define EXTRACT_INSN(addr) extract_unsigned_integer(addr,2)
-
 /* Constants: prefixed with AVR_ to avoid name space clashes */
 
 enum
@@ -91,6 +88,10 @@ enum
 
   AVR_NUM_REGS = 32 + 1 /*SREG*/ + 1 /*SP*/ + 1 /*PC*/,
   AVR_NUM_REG_BYTES = 32 + 1 /*SREG*/ + 2 /*SP*/ + 4 /*PC*/,
+
+  /* Pseudo registers.  */
+  AVR_PSEUDO_PC_REGNUM = 35,
+  AVR_NUM_PSEUDO_REGS = 1,
 
   AVR_PC_REG_INDEX = 35,	/* index into array of registers */
 
@@ -181,8 +182,16 @@ struct avr_unwind_cache
 
 struct gdbarch_tdep
 {
-  /* FIXME: TRoth: is there anything to put here? */
-  int foo;
+  /* Number of bytes stored to the stack by call instructions.
+     2 bytes for avr1-5, 3 bytes for avr6.  */
+  int call_length;
+
+  /* Type for void.  */
+  struct type *void_type;
+  /* Type for a function returning void.  */
+  struct type *func_void_type;
+  /* Type for a pointer to a function.  Used for the type of PC.  */
+  struct type *pc_type;
 };
 
 /* Lookup the name of a register given it's number. */
@@ -190,12 +199,13 @@ struct gdbarch_tdep
 static const char *
 avr_register_name (struct gdbarch *gdbarch, int regnum)
 {
-  static char *register_names[] = {
+  static const char * const register_names[] = {
     "r0", "r1", "r2", "r3", "r4", "r5", "r6", "r7",
     "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15",
     "r16", "r17", "r18", "r19", "r20", "r21", "r22", "r23",
     "r24", "r25", "r26", "r27", "r28", "r29", "r30", "r31",
-    "SREG", "SP", "PC"
+    "SREG", "SP", "PC2",
+    "pc"
   };
   if (regnum < 0)
     return NULL;
@@ -211,11 +221,12 @@ static struct type *
 avr_register_type (struct gdbarch *gdbarch, int reg_nr)
 {
   if (reg_nr == AVR_PC_REGNUM)
-    return builtin_type_uint32;
+    return builtin_type (gdbarch)->builtin_uint32;
+  if (reg_nr == AVR_PSEUDO_PC_REGNUM)
+    return gdbarch_tdep (gdbarch)->pc_type;
   if (reg_nr == AVR_SP_REGNUM)
-    return builtin_type_void_data_ptr;
-  else
-    return builtin_type_uint8;
+    return builtin_type (gdbarch)->builtin_data_ptr;
+  return builtin_type (gdbarch)->builtin_uint8;
 }
 
 /* Instruction address checks and convertions. */
@@ -242,6 +253,10 @@ avr_convert_iaddr_to_raw (CORE_ADDR x)
 static CORE_ADDR
 avr_make_saddr (CORE_ADDR x)
 {
+  /* Return 0 for NULL.  */
+  if (x == 0)
+    return 0;
+
   return ((x) | AVR_SMEM_START);
 }
 
@@ -278,27 +293,33 @@ avr_convert_saddr_to_raw (CORE_ADDR x)
 /* Convert from address to pointer and vice-versa. */
 
 static void
-avr_address_to_pointer (struct type *type, gdb_byte *buf, CORE_ADDR addr)
+avr_address_to_pointer (struct gdbarch *gdbarch,
+			struct type *type, gdb_byte *buf, CORE_ADDR addr)
 {
+  enum bfd_endian byte_order = gdbarch_byte_order (gdbarch);
+
   /* Is it a code address?  */
   if (TYPE_CODE (TYPE_TARGET_TYPE (type)) == TYPE_CODE_FUNC
       || TYPE_CODE (TYPE_TARGET_TYPE (type)) == TYPE_CODE_METHOD)
     {
-      store_unsigned_integer (buf, TYPE_LENGTH (type),
+      store_unsigned_integer (buf, TYPE_LENGTH (type), byte_order,
 			      avr_convert_iaddr_to_raw (addr >> 1));
     }
   else
     {
       /* Strip off any upper segment bits.  */
-      store_unsigned_integer (buf, TYPE_LENGTH (type),
+      store_unsigned_integer (buf, TYPE_LENGTH (type), byte_order,
 			      avr_convert_saddr_to_raw (addr));
     }
 }
 
 static CORE_ADDR
-avr_pointer_to_address (struct type *type, const gdb_byte *buf)
+avr_pointer_to_address (struct gdbarch *gdbarch,
+			struct type *type, const gdb_byte *buf)
 {
-  CORE_ADDR addr = extract_unsigned_integer (buf, TYPE_LENGTH (type));
+  enum bfd_endian byte_order = gdbarch_byte_order (gdbarch);
+  CORE_ADDR addr
+    = extract_unsigned_integer (buf, TYPE_LENGTH (type), byte_order);
 
   /* Is it a code address?  */
   if (TYPE_CODE (TYPE_TARGET_TYPE (type)) == TYPE_CODE_FUNC
@@ -307,6 +328,15 @@ avr_pointer_to_address (struct type *type, const gdb_byte *buf)
     return avr_make_iaddr (addr << 1);
   else
     return avr_make_saddr (addr);
+}
+
+static CORE_ADDR
+avr_integer_to_address (struct gdbarch *gdbarch,
+			struct type *type, const gdb_byte *buf)
+{
+  ULONGEST addr = unpack_long (type, buf);
+
+  return avr_make_saddr (addr);
 }
 
 static CORE_ADDR
@@ -321,26 +351,43 @@ static void
 avr_write_pc (struct regcache *regcache, CORE_ADDR val)
 {
   regcache_cooked_write_unsigned (regcache, AVR_PC_REGNUM,
-				  avr_convert_iaddr_to_raw (val));
+                                  avr_convert_iaddr_to_raw (val));
 }
 
-static int
-avr_scan_arg_moves (int vpc, unsigned char *prologue)
+static void
+avr_pseudo_register_read (struct gdbarch *gdbarch, struct regcache *regcache,
+                          int regnum, gdb_byte *buf)
 {
-  unsigned short insn;
+  ULONGEST val;
 
-  for (; vpc < AVR_MAX_PROLOGUE_SIZE; vpc += 2)
+  switch (regnum)
     {
-      insn = EXTRACT_INSN (&prologue[vpc]);
-      if ((insn & 0xff00) == 0x0100)	/* movw rXX, rYY */
-        continue;
-      else if ((insn & 0xfc00) == 0x2c00) /* mov rXX, rYY */
-        continue;
-      else
-          break;
+    case AVR_PSEUDO_PC_REGNUM:
+      regcache_raw_read_unsigned (regcache, AVR_PC_REGNUM, &val);
+      val >>= 1;
+      store_unsigned_integer (buf, 4, gdbarch_byte_order (gdbarch), val);
+      break;
+    default:
+      internal_error (__FILE__, __LINE__, _("invalid regnum"));
     }
-    
-  return vpc;
+}
+
+static void
+avr_pseudo_register_write (struct gdbarch *gdbarch, struct regcache *regcache,
+                           int regnum, const gdb_byte *buf)
+{
+  ULONGEST val;
+
+  switch (regnum)
+    {
+    case AVR_PSEUDO_PC_REGNUM:
+      val = extract_unsigned_integer (buf, 4, gdbarch_byte_order (gdbarch));
+      val <<= 1;
+      regcache_raw_write_unsigned (regcache, AVR_PC_REGNUM, val);
+      break;
+    default:
+      internal_error (__FILE__, __LINE__, _("invalid regnum"));
+    }
 }
 
 /* Function: avr_scan_prologue
@@ -439,20 +486,27 @@ avr_scan_arg_moves (int vpc, unsigned char *prologue)
    types.  */
 
 static CORE_ADDR
-avr_scan_prologue (CORE_ADDR pc, struct avr_unwind_cache *info)
+avr_scan_prologue (struct gdbarch *gdbarch, CORE_ADDR pc_beg, CORE_ADDR pc_end,
+		   struct avr_unwind_cache *info)
 {
+  enum bfd_endian byte_order = gdbarch_byte_order (gdbarch);
   int i;
   unsigned short insn;
   int scan_stage = 0;
   struct minimal_symbol *msymbol;
   unsigned char prologue[AVR_MAX_PROLOGUE_SIZE];
   int vpc = 0;
+  int len;
+
+  len = pc_end - pc_beg;
+  if (len > AVR_MAX_PROLOGUE_SIZE)
+    len = AVR_MAX_PROLOGUE_SIZE;
 
   /* FIXME: TRoth/2003-06-11: This could be made more efficient by only
      reading in the bytes of the prologue. The problem is that the figuring
      out where the end of the prologue is is a bit difficult. The old code 
      tried to do that, but failed quite often.  */
-  read_memory (pc, prologue, AVR_MAX_PROLOGUE_SIZE);
+  read_memory (pc_beg, prologue, len);
 
   /* Scanning main()'s prologue
      ldi r28,lo8(<RAM_ADDR> - <LOCALS_SIZE>)
@@ -460,29 +514,30 @@ avr_scan_prologue (CORE_ADDR pc, struct avr_unwind_cache *info)
      out __SP_H__,r29
      out __SP_L__,r28 */
 
-  if (1)
+  if (len >= 4)
     {
       CORE_ADDR locals;
-      unsigned char img[] = {
+      static const unsigned char img[] = {
 	0xde, 0xbf,		/* out __SP_H__,r29 */
 	0xcd, 0xbf		/* out __SP_L__,r28 */
       };
 
-      insn = EXTRACT_INSN (&prologue[vpc]);
+      insn = extract_unsigned_integer (&prologue[vpc], 2, byte_order);
       /* ldi r28,lo8(<RAM_ADDR> - <LOCALS_SIZE>) */
       if ((insn & 0xf0f0) == 0xe0c0)
 	{
 	  locals = (insn & 0xf) | ((insn & 0x0f00) >> 4);
-	  insn = EXTRACT_INSN (&prologue[vpc + 2]);
+	  insn = extract_unsigned_integer (&prologue[vpc + 2], 2, byte_order);
 	  /* ldi r29,hi8(<RAM_ADDR> - <LOCALS_SIZE>) */
 	  if ((insn & 0xf0f0) == 0xe0d0)
 	    {
 	      locals |= ((insn & 0xf) | ((insn & 0x0f00) >> 4)) << 8;
-	      if (memcmp (prologue + vpc + 4, img, sizeof (img)) == 0)
+	      if (vpc + 4 + sizeof (img) < len
+		  && memcmp (prologue + vpc + 4, img, sizeof (img)) == 0)
 		{
                   info->prologue_type = AVR_PROLOGUE_MAIN;
                   info->base = locals;
-                  return pc + 4;
+                  return pc_beg + 4;
 		}
 	    }
 	}
@@ -498,28 +553,33 @@ avr_scan_prologue (CORE_ADDR pc, struct avr_unwind_cache *info)
       unsigned num_pushes;
       int pc_offset = 0;
 
-      insn = EXTRACT_INSN (&prologue[vpc]);
+      /* At least the fifth instruction must have been executed to
+	 modify frame shape.  */
+      if (len < 10)
+	break;
+
+      insn = extract_unsigned_integer (&prologue[vpc], 2, byte_order);
       /* ldi r26,<LOCALS_SIZE> */
       if ((insn & 0xf0f0) != 0xe0a0)
 	break;
       loc_size = (insn & 0xf) | ((insn & 0x0f00) >> 4);
       pc_offset += 2;
 
-      insn = EXTRACT_INSN (&prologue[vpc + 2]);
+      insn = extract_unsigned_integer (&prologue[vpc + 2], 2, byte_order);
       /* ldi r27,<LOCALS_SIZE> / 256 */
       if ((insn & 0xf0f0) != 0xe0b0)
 	break;
       loc_size |= ((insn & 0xf) | ((insn & 0x0f00) >> 4)) << 8;
       pc_offset += 2;
 
-      insn = EXTRACT_INSN (&prologue[vpc + 4]);
+      insn = extract_unsigned_integer (&prologue[vpc + 4], 2, byte_order);
       /* ldi r30,pm_lo8(.L_foo_body) */
       if ((insn & 0xf0f0) != 0xe0e0)
 	break;
       body_addr = (insn & 0xf) | ((insn & 0x0f00) >> 4);
       pc_offset += 2;
 
-      insn = EXTRACT_INSN (&prologue[vpc + 6]);
+      insn = extract_unsigned_integer (&prologue[vpc + 6], 2, byte_order);
       /* ldi r31,pm_hi8(.L_foo_body) */
       if ((insn & 0xf0f0) != 0xe0f0)
 	break;
@@ -530,7 +590,7 @@ avr_scan_prologue (CORE_ADDR pc, struct avr_unwind_cache *info)
       if (!msymbol)
 	break;
 
-      insn = EXTRACT_INSN (&prologue[vpc + 8]);
+      insn = extract_unsigned_integer (&prologue[vpc + 8], 2, byte_order);
       /* rjmp __prologue_saves__+RRR */
       if ((insn & 0xf000) == 0xc000)
         {
@@ -539,9 +599,9 @@ avr_scan_prologue (CORE_ADDR pc, struct avr_unwind_cache *info)
           /* Convert offset to byte addressable mode */
           i *= 2;
           /* Destination address */
-          i += pc + 10;
+          i += pc_beg + 10;
 
-          if (body_addr != (pc + 10)/2)
+          if (body_addr != (pc_beg + 10)/2)
             break;
 
           pc_offset += 2;
@@ -550,11 +610,12 @@ avr_scan_prologue (CORE_ADDR pc, struct avr_unwind_cache *info)
         {
           /* Extract absolute PC address from JMP */
           i = (((insn & 0x1) | ((insn & 0x1f0) >> 3) << 16)
-            | (EXTRACT_INSN (&prologue[vpc + 10]) & 0xffff));
+	       | (extract_unsigned_integer (&prologue[vpc + 10], 2, byte_order)
+		  & 0xffff));
           /* Convert address to byte addressable mode */
           i *= 2;
 
-          if (body_addr != (pc + 12)/2)
+          if (body_addr != (pc_beg + 12)/2)
             break;
 
           pc_offset += 4;
@@ -589,7 +650,7 @@ avr_scan_prologue (CORE_ADDR pc, struct avr_unwind_cache *info)
       info->size = loc_size + num_pushes;
       info->prologue_type = AVR_PROLOGUE_CALL;
 
-      return pc + pc_offset;
+      return pc_beg + pc_offset;
     }
 
   /* Scan for the beginning of the prologue for an interrupt or signal
@@ -599,7 +660,7 @@ avr_scan_prologue (CORE_ADDR pc, struct avr_unwind_cache *info)
 
   if (1)
     {
-      unsigned char img[] = {
+      static const unsigned char img[] = {
 	0x78, 0x94,		/* sei */
 	0x1f, 0x92,		/* push r1 */
 	0x0f, 0x92,		/* push r0 */
@@ -607,7 +668,8 @@ avr_scan_prologue (CORE_ADDR pc, struct avr_unwind_cache *info)
 	0x0f, 0x92,		/* push r0 */
 	0x11, 0x24		/* clr r1 */
       };
-      if (memcmp (prologue, img, sizeof (img)) == 0)
+      if (len >= sizeof (img)
+	  && memcmp (prologue, img, sizeof (img)) == 0)
 	{
           info->prologue_type = AVR_PROLOGUE_INTR;
 	  vpc += sizeof (img);
@@ -616,23 +678,24 @@ avr_scan_prologue (CORE_ADDR pc, struct avr_unwind_cache *info)
           info->saved_regs[1].addr = 1;
           info->size += 3;
 	}
-      else if (memcmp (img + 2, prologue, sizeof (img) - 2) == 0)
+      else if (len >= sizeof (img) - 2
+	       && memcmp (img + 2, prologue, sizeof (img) - 2) == 0)
 	{
           info->prologue_type = AVR_PROLOGUE_SIG;
           vpc += sizeof (img) - 2;
           info->saved_regs[AVR_SREG_REGNUM].addr = 3;
           info->saved_regs[0].addr = 2;
           info->saved_regs[1].addr = 1;
-          info->size += 3;
+          info->size += 2;
 	}
     }
 
   /* First stage of the prologue scanning.
      Scan pushes (saved registers) */
 
-  for (; vpc < AVR_MAX_PROLOGUE_SIZE; vpc += 2)
+  for (; vpc < len; vpc += 2)
     {
-      insn = EXTRACT_INSN (&prologue[vpc]);
+      insn = extract_unsigned_integer (&prologue[vpc], 2, byte_order);
       if ((insn & 0xfe0f) == 0x920f)	/* push rXX */
 	{
 	  /* Bits 4-9 contain a mask for registers R0-R32. */
@@ -645,24 +708,42 @@ avr_scan_prologue (CORE_ADDR pc, struct avr_unwind_cache *info)
 	break;
     }
 
-  if (vpc >= AVR_MAX_PROLOGUE_SIZE)
-     fprintf_unfiltered (gdb_stderr,
-                         _("Hit end of prologue while scanning pushes\n"));
+  gdb_assert (vpc < AVR_MAX_PROLOGUE_SIZE);
+
+  /* Handle static small stack allocation using rcall or push.  */
+
+  while (scan_stage == 1 && vpc < len)
+    {
+      insn = extract_unsigned_integer (&prologue[vpc], 2, byte_order);
+      if (insn == 0xd000)	/* rcall .+0 */
+        {
+          info->size += gdbarch_tdep (gdbarch)->call_length;
+          vpc += 2;
+        }
+      else if (insn == 0x920f)  /* push r0 */
+        {
+          info->size += 1;
+          vpc += 2;
+        }
+      else
+        break;
+    }
 
   /* Second stage of the prologue scanning.
      Scan:
      in r28,__SP_L__
      in r29,__SP_H__ */
 
-  if (scan_stage == 1 && vpc < AVR_MAX_PROLOGUE_SIZE)
+  if (scan_stage == 1 && vpc < len)
     {
-      unsigned char img[] = {
+      static const unsigned char img[] = {
 	0xcd, 0xb7,		/* in r28,__SP_L__ */
 	0xde, 0xb7		/* in r29,__SP_H__ */
       };
       unsigned short insn1;
 
-      if (memcmp (prologue + vpc, img, sizeof (img)) == 0)
+      if (vpc + sizeof (img) < len
+	  && memcmp (prologue + vpc, img, sizeof (img)) == 0)
 	{
 	  vpc += 4;
 	  scan_stage = 2;
@@ -679,54 +760,60 @@ avr_scan_prologue (CORE_ADDR pc, struct avr_unwind_cache *info)
      out __SREG__,__tmp_reg__
      out __SP_L__,r28 */
 
-  if (scan_stage == 2 && vpc < AVR_MAX_PROLOGUE_SIZE)
+  if (scan_stage == 2 && vpc < len)
     {
       int locals_size = 0;
-      unsigned char img[] = {
+      static const unsigned char img[] = {
 	0x0f, 0xb6,		/* in r0,0x3f */
 	0xf8, 0x94,		/* cli */
 	0xde, 0xbf,		/* out 0x3e,r29 ; SPH */
 	0x0f, 0xbe,		/* out 0x3f,r0  ; SREG */
 	0xcd, 0xbf		/* out 0x3d,r28 ; SPL */
       };
-      unsigned char img_sig[] = {
+      static const unsigned char img_sig[] = {
 	0xde, 0xbf,		/* out 0x3e,r29 ; SPH */
 	0xcd, 0xbf		/* out 0x3d,r28 ; SPL */
       };
-      unsigned char img_int[] = {
+      static const unsigned char img_int[] = {
 	0xf8, 0x94,		/* cli */
 	0xde, 0xbf,		/* out 0x3e,r29 ; SPH */
 	0x78, 0x94,		/* sei */
 	0xcd, 0xbf		/* out 0x3d,r28 ; SPL */
       };
 
-      insn = EXTRACT_INSN (&prologue[vpc]);
-      vpc += 2;
+      insn = extract_unsigned_integer (&prologue[vpc], 2, byte_order);
       if ((insn & 0xff30) == 0x9720)	/* sbiw r28,XXX */
-	locals_size = (insn & 0xf) | ((insn & 0xc0) >> 2);
+        {
+          locals_size = (insn & 0xf) | ((insn & 0xc0) >> 2);
+          vpc += 2;
+        }
       else if ((insn & 0xf0f0) == 0x50c0)	/* subi r28,lo8(XX) */
 	{
 	  locals_size = (insn & 0xf) | ((insn & 0xf00) >> 4);
-	  insn = EXTRACT_INSN (&prologue[vpc]);
 	  vpc += 2;
-	  locals_size += ((insn & 0xf) | ((insn & 0xf00) >> 4) << 8);
+	  insn = extract_unsigned_integer (&prologue[vpc], 2, byte_order);
+	  vpc += 2;
+	  locals_size += ((insn & 0xf) | ((insn & 0xf00) >> 4)) << 8;
 	}
       else
-	return pc + vpc;
+        return pc_beg + vpc;
 
       /* Scan the last part of the prologue. May not be present for interrupt
          or signal handler functions, which is why we set the prologue type
          when we saw the beginning of the prologue previously.  */
 
-      if (memcmp (prologue + vpc, img_sig, sizeof (img_sig)) == 0)
+      if (vpc + sizeof (img_sig) < len
+	  && memcmp (prologue + vpc, img_sig, sizeof (img_sig)) == 0)
         {
           vpc += sizeof (img_sig);
         }
-      else if (memcmp (prologue + vpc, img_int, sizeof (img_int)) == 0)
+      else if (vpc + sizeof (img_int) < len 
+	       && memcmp (prologue + vpc, img_int, sizeof (img_int)) == 0)
         {
           vpc += sizeof (img_int);
         }
-      if (memcmp (prologue + vpc, img, sizeof (img)) == 0)
+      if (vpc + sizeof (img) < len
+	  && memcmp (prologue + vpc, img, sizeof (img)) == 0)
         {
           info->prologue_type = AVR_PROLOGUE_NORMAL;
           vpc += sizeof (img);
@@ -734,53 +821,63 @@ avr_scan_prologue (CORE_ADDR pc, struct avr_unwind_cache *info)
 
       info->size += locals_size;
 
-      return pc + avr_scan_arg_moves (vpc, prologue);
+      /* Fall through.  */
     }
 
   /* If we got this far, we could not scan the prologue, so just return the pc
      of the frame plus an adjustment for argument move insns.  */
 
-  return pc + avr_scan_arg_moves (vpc, prologue);;
+  for (; vpc < len; vpc += 2)
+    {
+      insn = extract_unsigned_integer (&prologue[vpc], 2, byte_order);
+      if ((insn & 0xff00) == 0x0100)	/* movw rXX, rYY */
+        continue;
+      else if ((insn & 0xfc00) == 0x2c00) /* mov rXX, rYY */
+        continue;
+      else
+          break;
+    }
+    
+  return pc_beg + vpc;
 }
 
 static CORE_ADDR
 avr_skip_prologue (struct gdbarch *gdbarch, CORE_ADDR pc)
 {
   CORE_ADDR func_addr, func_end;
-  CORE_ADDR prologue_end = pc;
+  CORE_ADDR post_prologue_pc;
 
   /* See what the symbol table says */
 
-  if (find_pc_partial_function (pc, NULL, &func_addr, &func_end))
-    {
-      struct symtab_and_line sal;
-      struct avr_unwind_cache info = {0};
-      struct trad_frame_saved_reg saved_regs[AVR_NUM_REGS];
+  if (!find_pc_partial_function (pc, NULL, &func_addr, &func_end))
+    return pc;
 
-      info.saved_regs = saved_regs;
+  post_prologue_pc = skip_prologue_using_sal (gdbarch, func_addr);
+  if (post_prologue_pc != 0)
+    return max (pc, post_prologue_pc);
 
-      /* Need to run the prologue scanner to figure out if the function has a
-         prologue and possibly skip over moving arguments passed via registers
-         to other registers.  */
+  {
+    CORE_ADDR prologue_end = pc;
+    struct avr_unwind_cache info = {0};
+    struct trad_frame_saved_reg saved_regs[AVR_NUM_REGS];
 
-      prologue_end = avr_scan_prologue (pc, &info);
+    info.saved_regs = saved_regs;
+    
+    /* Need to run the prologue scanner to figure out if the function has a
+       prologue and possibly skip over moving arguments passed via registers
+       to other registers.  */
+    
+    prologue_end = avr_scan_prologue (gdbarch, func_addr, func_end, &info);
+    
+    if (info.prologue_type != AVR_PROLOGUE_NONE)
+      return prologue_end;
+  }
 
-      if (info.prologue_type == AVR_PROLOGUE_NONE)
-        return pc;
-      else
-        {
-          sal = find_pc_line (func_addr, 0);
+  /* Either we didn't find the start of this function (nothing we can do),
+     or there's no line info, or the line after the prologue is after
+     the end of the function (there probably isn't a prologue). */
 
-          if (sal.line != 0 && sal.end < func_end)
-            return sal.end;
-        }
-    }
-
-/* Either we didn't find the start of this function (nothing we can do),
-   or there's no line info, or the line after the prologue is after
-   the end of the function (there probably isn't a prologue). */
-
-  return prologue_end;
+  return pc;
 }
 
 /* Not all avr devices support the BREAK insn. Those that don't should treat
@@ -790,41 +887,9 @@ avr_skip_prologue (struct gdbarch *gdbarch, CORE_ADDR pc)
 static const unsigned char *
 avr_breakpoint_from_pc (struct gdbarch *gdbarch, CORE_ADDR * pcptr, int *lenptr)
 {
-    static unsigned char avr_break_insn [] = { 0x98, 0x95 };
+    static const unsigned char avr_break_insn [] = { 0x98, 0x95 };
     *lenptr = sizeof (avr_break_insn);
     return avr_break_insn;
-}
-
-/* Given a return value in `regbuf' with a type `valtype', 
-   extract and copy its value into `valbuf'.
-
-   Return values are always passed via registers r25:r24:...  */
-
-static void
-avr_extract_return_value (struct type *type, struct regcache *regcache,
-                          gdb_byte *valbuf)
-{
-  ULONGEST r24, r25;
-  ULONGEST c;
-  int len;
-  if (TYPE_LENGTH (type) == 1)
-    {
-      regcache_cooked_read_unsigned (regcache, 24, &c);
-      store_unsigned_integer (valbuf, 1, c);
-    }
-  else
-    {
-      int i;
-      /* The MSB of the return value is always in r25, calculate which
-         register holds the LSB.  */
-      int lsb_reg = 25 - TYPE_LENGTH (type) + 1;
-
-      for (i=0; i< TYPE_LENGTH (type); i++)
-        {
-          regcache_cooked_read (regcache, lsb_reg + i,
-                                (bfd_byte *) valbuf + i);
-        }
-    }
 }
 
 /* Determine, for architecture GDBARCH, how a return value of TYPE
@@ -833,35 +898,45 @@ avr_extract_return_value (struct type *type, struct regcache *regcache,
    and copy it into READBUF.  If WRITEBUF is non-zero, write the value
    from WRITEBUF into REGCACHE.  */
 
-enum return_value_convention
-avr_return_value (struct gdbarch *gdbarch, struct type *valtype,
-		  struct regcache *regcache, gdb_byte *readbuf,
-		  const gdb_byte *writebuf)
+static enum return_value_convention
+avr_return_value (struct gdbarch *gdbarch, struct type *func_type,
+		  struct type *valtype, struct regcache *regcache,
+		  gdb_byte *readbuf, const gdb_byte *writebuf)
 {
-  int struct_return = ((TYPE_CODE (valtype) == TYPE_CODE_STRUCT
-			|| TYPE_CODE (valtype) == TYPE_CODE_UNION
-			|| TYPE_CODE (valtype) == TYPE_CODE_ARRAY)
-		       && !(TYPE_LENGTH (valtype) == 1
-			    || TYPE_LENGTH (valtype) == 2
-			    || TYPE_LENGTH (valtype) == 4
-			    || TYPE_LENGTH (valtype) == 8));
+  int i;
+  /* Single byte are returned in r24.
+     Otherwise, the MSB of the return value is always in r25, calculate which
+     register holds the LSB.  */
+  int lsb_reg;
+
+  if ((TYPE_CODE (valtype) == TYPE_CODE_STRUCT
+       || TYPE_CODE (valtype) == TYPE_CODE_UNION
+       || TYPE_CODE (valtype) == TYPE_CODE_ARRAY)
+      && TYPE_LENGTH (valtype) > 8)
+    return RETURN_VALUE_STRUCT_CONVENTION;
+
+  if (TYPE_LENGTH (valtype) <= 2)
+    lsb_reg = 24;
+  else if (TYPE_LENGTH (valtype) <= 4)
+    lsb_reg = 22;
+  else if (TYPE_LENGTH (valtype) <= 8)
+    lsb_reg = 18;
+  else
+    gdb_assert (0);
 
   if (writebuf != NULL)
     {
-      gdb_assert (!struct_return);
-      error (_("Cannot store return value."));
+      for (i = 0; i < TYPE_LENGTH (valtype); i++)
+        regcache_cooked_write (regcache, lsb_reg + i, writebuf + i);
     }
 
   if (readbuf != NULL)
     {
-      gdb_assert (!struct_return);
-      avr_extract_return_value (valtype, regcache, readbuf);
+      for (i = 0; i < TYPE_LENGTH (valtype); i++)
+        regcache_cooked_read (regcache, lsb_reg + i, readbuf + i);
     }
 
-  if (struct_return)
-    return RETURN_VALUE_STRUCT_CONVENTION;
-  else
-    return RETURN_VALUE_REGISTER_CONVENTION;
+  return RETURN_VALUE_REGISTER_CONVENTION;
 }
 
 
@@ -871,30 +946,33 @@ avr_return_value (struct gdbarch *gdbarch, struct type *valtype,
    in the stack frame.  sp is even more special: the address we return
    for it IS the sp for the next frame. */
 
-struct avr_unwind_cache *
-avr_frame_unwind_cache (struct frame_info *next_frame,
+static struct avr_unwind_cache *
+avr_frame_unwind_cache (struct frame_info *this_frame,
                         void **this_prologue_cache)
 {
-  CORE_ADDR pc;
+  CORE_ADDR start_pc, current_pc;
   ULONGEST prev_sp;
   ULONGEST this_base;
   struct avr_unwind_cache *info;
+  struct gdbarch *gdbarch;
+  struct gdbarch_tdep *tdep;
   int i;
 
-  if ((*this_prologue_cache))
-    return (*this_prologue_cache);
+  if (*this_prologue_cache)
+    return *this_prologue_cache;
 
   info = FRAME_OBSTACK_ZALLOC (struct avr_unwind_cache);
-  (*this_prologue_cache) = info;
-  info->saved_regs = trad_frame_alloc_saved_regs (next_frame);
+  *this_prologue_cache = info;
+  info->saved_regs = trad_frame_alloc_saved_regs (this_frame);
 
   info->size = 0;
   info->prologue_type = AVR_PROLOGUE_NONE;
 
-  pc = frame_func_unwind (next_frame, NORMAL_FRAME);
-
-  if ((pc > 0) && (pc < frame_pc_unwind (next_frame)))
-    avr_scan_prologue (pc, info);
+  start_pc = get_frame_func (this_frame);
+  current_pc = get_frame_pc (this_frame);
+  if ((start_pc > 0) && (start_pc <= current_pc))
+    avr_scan_prologue (get_frame_arch (this_frame),
+		       start_pc, current_pc, info);
 
   if ((info->prologue_type != AVR_PROLOGUE_NONE)
       && (info->prologue_type != AVR_PROLOGUE_MAIN))
@@ -904,8 +982,8 @@ avr_frame_unwind_cache (struct frame_info *next_frame,
       /* The SP was moved to the FP.  This indicates that a new frame
          was created.  Get THIS frame's FP value by unwinding it from
          the next frame.  */
-      this_base = frame_unwind_register_unsigned (next_frame, AVR_FP_REGNUM);
-      high_base = frame_unwind_register_unsigned (next_frame, AVR_FP_REGNUM+1);
+      this_base = get_frame_register_unsigned (this_frame, AVR_FP_REGNUM);
+      high_base = get_frame_register_unsigned (this_frame, AVR_FP_REGNUM + 1);
       this_base += (high_base << 8);
       
       /* The FP points at the last saved register.  Adjust the FP back
@@ -916,35 +994,34 @@ avr_frame_unwind_cache (struct frame_info *next_frame,
     {
       /* Assume that the FP is this frame's SP but with that pushed
          stack space added back.  */
-      this_base = frame_unwind_register_unsigned (next_frame, AVR_SP_REGNUM);
+      this_base = get_frame_register_unsigned (this_frame, AVR_SP_REGNUM);
       prev_sp = this_base + info->size;
     }
 
   /* Add 1 here to adjust for the post-decrement nature of the push
      instruction.*/
-  info->prev_sp = avr_make_saddr (prev_sp+1);
-
+  info->prev_sp = avr_make_saddr (prev_sp + 1);
   info->base = avr_make_saddr (this_base);
+
+  gdbarch = get_frame_arch (this_frame);
 
   /* Adjust all the saved registers so that they contain addresses and not
      offsets.  */
-  for (i = 0; i < gdbarch_num_regs (get_frame_arch (next_frame)) - 1; i++)
-    if (info->saved_regs[i].addr)
-      {
-        info->saved_regs[i].addr = (info->prev_sp - info->saved_regs[i].addr);
-      }
+  for (i = 0; i < gdbarch_num_regs (gdbarch) - 1; i++)
+    if (info->saved_regs[i].addr > 0)
+      info->saved_regs[i].addr = info->prev_sp - info->saved_regs[i].addr;
 
   /* Except for the main and startup code, the return PC is always saved on
      the stack and is at the base of the frame. */
 
   if (info->prologue_type != AVR_PROLOGUE_MAIN)
-    {
-      info->saved_regs[AVR_PC_REGNUM].addr = info->prev_sp;
-    }  
+    info->saved_regs[AVR_PC_REGNUM].addr = info->prev_sp;
 
   /* The previous frame's SP needed to be computed.  Save the computed
      value.  */
-  trad_frame_set_value (info->saved_regs, AVR_SP_REGNUM, info->prev_sp+1);
+  tdep = gdbarch_tdep (gdbarch);
+  trad_frame_set_value (info->saved_regs, AVR_SP_REGNUM,
+                        info->prev_sp - 1 + tdep->call_length);
 
   return info;
 }
@@ -973,18 +1050,18 @@ avr_unwind_sp (struct gdbarch *gdbarch, struct frame_info *next_frame)
    frame.  This will be used to create a new GDB frame struct.  */
 
 static void
-avr_frame_this_id (struct frame_info *next_frame,
+avr_frame_this_id (struct frame_info *this_frame,
                    void **this_prologue_cache,
                    struct frame_id *this_id)
 {
   struct avr_unwind_cache *info
-    = avr_frame_unwind_cache (next_frame, this_prologue_cache);
+    = avr_frame_unwind_cache (this_frame, this_prologue_cache);
   CORE_ADDR base;
   CORE_ADDR func;
   struct frame_id id;
 
   /* The FUNC is easy.  */
-  func = frame_func_unwind (next_frame, NORMAL_FRAME);
+  func = get_frame_func (this_frame);
 
   /* Hopefully the prologue analysis either correctly determined the
      frame's base (which is the SP from the previous frame), or set
@@ -997,83 +1074,70 @@ avr_frame_this_id (struct frame_info *next_frame,
   (*this_id) = id;
 }
 
-static void
-avr_frame_prev_register (struct frame_info *next_frame,
-			  void **this_prologue_cache,
-			  int regnum, int *optimizedp,
-			  enum lval_type *lvalp, CORE_ADDR *addrp,
-			  int *realnump, gdb_byte *bufferp)
+static struct value *
+avr_frame_prev_register (struct frame_info *this_frame,
+			 void **this_prologue_cache, int regnum)
 {
+  struct gdbarch *gdbarch = get_frame_arch (this_frame);
+  enum bfd_endian byte_order = gdbarch_byte_order (gdbarch);
   struct avr_unwind_cache *info
-    = avr_frame_unwind_cache (next_frame, this_prologue_cache);
+    = avr_frame_unwind_cache (this_frame, this_prologue_cache);
 
-  if (regnum == AVR_PC_REGNUM)
+  if (regnum == AVR_PC_REGNUM || regnum == AVR_PSEUDO_PC_REGNUM)
     {
-      if (trad_frame_addr_p (info->saved_regs, regnum))
+      if (trad_frame_addr_p (info->saved_regs, AVR_PC_REGNUM))
         {
-          *optimizedp = 0;
-          *lvalp = lval_memory;
-          *addrp = info->saved_regs[regnum].addr;
-          *realnump = -1;
-          if (bufferp != NULL)
-            {
-              /* Reading the return PC from the PC register is slightly
-                 abnormal.  register_size(AVR_PC_REGNUM) says it is 4 bytes,
-                 but in reality, only two bytes (3 in upcoming mega256) are
-                 stored on the stack.
+	  /* Reading the return PC from the PC register is slightly
+	     abnormal.  register_size(AVR_PC_REGNUM) says it is 4 bytes,
+	     but in reality, only two bytes (3 in upcoming mega256) are
+	     stored on the stack.
 
-                 Also, note that the value on the stack is an addr to a word
-                 not a byte, so we will need to multiply it by two at some
-                 point. 
+	     Also, note that the value on the stack is an addr to a word
+	     not a byte, so we will need to multiply it by two at some
+	     point. 
 
-                 And to confuse matters even more, the return address stored
-                 on the stack is in big endian byte order, even though most
-                 everything else about the avr is little endian. Ick!  */
+	     And to confuse matters even more, the return address stored
+	     on the stack is in big endian byte order, even though most
+	     everything else about the avr is little endian. Ick!  */
+	  ULONGEST pc;
+	  int i;
+	  unsigned char buf[3];
+	  struct gdbarch *gdbarch = get_frame_arch (this_frame);
+	  struct gdbarch_tdep *tdep = gdbarch_tdep (gdbarch);
 
-              /* FIXME: number of bytes read here will need updated for the
-                 mega256 when it is available.  */
+	  read_memory (info->saved_regs[AVR_PC_REGNUM].addr,
+                       buf, tdep->call_length);
 
-              ULONGEST pc;
-              unsigned char tmp;
-              unsigned char buf[2];
+	  /* Extract the PC read from memory as a big-endian.  */
+	  pc = 0;
+	  for (i = 0; i < tdep->call_length; i++)
+	    pc = (pc << 8) | buf[i];
 
-              read_memory (info->saved_regs[regnum].addr, buf, 2);
+          if (regnum == AVR_PC_REGNUM)
+            pc <<= 1;
 
-              /* Convert the PC read from memory as a big-endian to
-                 little-endian order. */
-              tmp = buf[0];
-              buf[0] = buf[1];
-              buf[1] = tmp;
-
-              pc = (extract_unsigned_integer (buf, 2) * 2);
-              store_unsigned_integer
-		(bufferp, register_size (get_frame_arch (next_frame), regnum),
-		 pc);
-            }
+	  return frame_unwind_got_constant (this_frame, regnum, pc);
         }
+
+      return frame_unwind_got_optimized (this_frame, regnum);
     }
-  else
-    trad_frame_get_prev_register (next_frame, info->saved_regs, regnum,
-				  optimizedp, lvalp, addrp, realnump, bufferp);
+
+  return trad_frame_get_prev_register (this_frame, info->saved_regs, regnum);
 }
 
 static const struct frame_unwind avr_frame_unwind = {
   NORMAL_FRAME,
   avr_frame_this_id,
-  avr_frame_prev_register
+  avr_frame_prev_register,
+  NULL,
+  default_frame_sniffer
 };
 
-const struct frame_unwind *
-avr_frame_sniffer (struct frame_info *next_frame)
-{
-  return &avr_frame_unwind;
-}
-
 static CORE_ADDR
-avr_frame_base_address (struct frame_info *next_frame, void **this_cache)
+avr_frame_base_address (struct frame_info *this_frame, void **this_cache)
 {
   struct avr_unwind_cache *info
-    = avr_frame_unwind_cache (next_frame, this_cache);
+    = avr_frame_unwind_cache (this_frame, this_cache);
 
   return info->base;
 }
@@ -1085,18 +1149,17 @@ static const struct frame_base avr_frame_base = {
   avr_frame_base_address
 };
 
-/* Assuming NEXT_FRAME->prev is a dummy, return the frame ID of that
-   dummy frame.  The frame ID's base needs to match the TOS value
-   saved by save_dummy_frame_tos(), and the PC match the dummy frame's
-   breakpoint.  */
+/* Assuming THIS_FRAME is a dummy, return the frame ID of that dummy
+   frame.  The frame ID's base needs to match the TOS value saved by
+   save_dummy_frame_tos(), and the PC match the dummy frame's breakpoint.  */
 
 static struct frame_id
-avr_unwind_dummy_id (struct gdbarch *gdbarch, struct frame_info *next_frame)
+avr_dummy_id (struct gdbarch *gdbarch, struct frame_info *this_frame)
 {
   ULONGEST base;
 
-  base = frame_unwind_register_unsigned (next_frame, AVR_SP_REGNUM);
-  return frame_id_build (avr_make_saddr (base), frame_pc_unwind (next_frame));
+  base = get_frame_register_unsigned (this_frame, AVR_SP_REGNUM);
+  return frame_id_build (avr_make_saddr (base), get_frame_pc (this_frame));
 }
 
 /* When arguments must be pushed onto the stack, they go on in reverse
@@ -1177,21 +1240,25 @@ avr_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
                      int nargs, struct value **args, CORE_ADDR sp,
                      int struct_return, CORE_ADDR struct_addr)
 {
+  enum bfd_endian byte_order = gdbarch_byte_order (gdbarch);
   int i;
-  unsigned char buf[2];
+  unsigned char buf[3];
+  int call_length = gdbarch_tdep (gdbarch)->call_length;
   CORE_ADDR return_pc = avr_convert_iaddr_to_raw (bp_addr);
   int regnum = AVR_ARGN_REGNUM;
   struct stack_item *si = NULL;
 
-#if 0
-  /* FIXME: TRoth/2003-06-18: Not sure what to do when returning a struct. */
   if (struct_return)
     {
-      fprintf_unfiltered (gdb_stderr, "struct_return: 0x%lx\n", struct_addr);
-      regcache_cooked_write_unsigned (regcache, argreg--, struct_addr & 0xff);
-      regcache_cooked_write_unsigned (regcache, argreg--, (struct_addr >>8) & 0xff);
+      regcache_cooked_write_unsigned
+        (regcache, regnum--, (struct_addr >> 8) & 0xff);
+      regcache_cooked_write_unsigned
+        (regcache, regnum--, struct_addr & 0xff);
+      /* SP being post decremented, we need to reserve one byte so that the
+         return address won't overwrite the result (or vice-versa).  */
+      if (sp == struct_addr)
+        sp--;
     }
-#endif
 
   for (i = 0; i < nargs; i++)
     {
@@ -1215,12 +1282,10 @@ avr_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
           if (len & 1)
             regnum--;
 
-          val = extract_unsigned_integer (contents, len);
-          for (j=0; j<len; j++)
-            {
-              regcache_cooked_write_unsigned (regcache, regnum--,
-                                              val >> (8*(len-j-1)));
-            }
+          val = extract_unsigned_integer (contents, len, byte_order);
+          for (j = 0; j < len; j++)
+            regcache_cooked_write_unsigned
+              (regcache, regnum--, val >> (8 * (len - j - 1)));
         }
       /* No registers available, push the args onto the stack. */
       else
@@ -1235,24 +1300,45 @@ avr_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
     {
       sp -= si->len;
       /* Add 1 to sp here to account for post decr nature of pushes. */
-      write_memory (sp+1, si->data, si->len);
+      write_memory (sp + 1, si->data, si->len);
       si = pop_stack_item (si);
     }
 
   /* Set the return address.  For the avr, the return address is the BP_ADDR.
      Need to push the return address onto the stack noting that it needs to be
      in big-endian order on the stack.  */
-  buf[0] = (return_pc >> 8) & 0xff;
-  buf[1] = return_pc & 0xff;
+  for (i = 1; i <= call_length; i++)
+    {
+      buf[call_length - i] = return_pc & 0xff;
+      return_pc >>= 8;
+    }
 
-  sp -= 2;
-  write_memory (sp+1, buf, 2);  /* Add one since pushes are post decr ops. */
+  sp -= call_length;
+  /* Use 'sp + 1' since pushes are post decr ops. */
+  write_memory (sp + 1, buf, call_length);
 
   /* Finally, update the SP register. */
   regcache_cooked_write_unsigned (regcache, AVR_SP_REGNUM,
 				  avr_convert_saddr_to_raw (sp));
 
-  return sp;
+  /* Return SP value for the dummy frame, where the return address hasn't been
+     pushed.  */
+  return sp + call_length;
+}
+
+/* Unfortunately dwarf2 register for SP is 32.  */
+
+static int
+avr_dwarf_reg_to_regnum (struct gdbarch *gdbarch, int reg)
+{
+  if (reg >= 0 && reg < 32)
+    return reg;
+  if (reg == 32)
+    return AVR_SP_REGNUM;
+
+  warning (_("Unmapped DWARF Register #%d encountered."), reg);
+
+  return -1;
 }
 
 /* Initialize the gdbarch structure for the AVR's. */
@@ -1262,17 +1348,10 @@ avr_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
 {
   struct gdbarch *gdbarch;
   struct gdbarch_tdep *tdep;
+  struct gdbarch_list *best_arch;
+  int call_length;
 
-  /* Find a candidate among the list of pre-declared architectures. */
-  arches = gdbarch_list_lookup_by_info (arches, &info);
-  if (arches != NULL)
-    return arches->gdbarch;
-
-  /* None found, create a new architecture from the information provided. */
-  tdep = XMALLOC (struct gdbarch_tdep);
-  gdbarch = gdbarch_alloc (&info, tdep);
-
-  /* If we ever need to differentiate the device types, do it here. */
+  /* Avr-6 call instructions save 3 bytes.  */
   switch (info.bfd_arch_info->mach)
     {
     case bfd_mach_avr1:
@@ -1280,8 +1359,36 @@ avr_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
     case bfd_mach_avr3:
     case bfd_mach_avr4:
     case bfd_mach_avr5:
+    default:
+      call_length = 2;
+      break;
+    case bfd_mach_avr6:
+      call_length = 3;
       break;
     }
+
+  /* If there is already a candidate, use it.  */
+  for (best_arch = gdbarch_list_lookup_by_info (arches, &info);
+       best_arch != NULL;
+       best_arch = gdbarch_list_lookup_by_info (best_arch->next, &info))
+    {
+      if (gdbarch_tdep (best_arch->gdbarch)->call_length == call_length)
+	return best_arch->gdbarch;
+    }
+
+  /* None found, create a new architecture from the information provided. */
+  tdep = XMALLOC (struct gdbarch_tdep);
+  gdbarch = gdbarch_alloc (&info, tdep);
+  
+  tdep->call_length = call_length;
+
+  /* Create a type for PC.  We can't use builtin types here, as they may not
+     be defined.  */
+  tdep->void_type = arch_type (gdbarch, TYPE_CODE_VOID, 1, "void");
+  tdep->func_void_type = make_function_type (tdep->void_type, NULL);
+  tdep->pc_type = arch_type (gdbarch, TYPE_CODE_PTR, 4, NULL);
+  TYPE_TARGET_TYPE (tdep->pc_type) = tdep->func_void_type;
+  TYPE_UNSIGNED (tdep->pc_type) = 1;
 
   set_gdbarch_short_bit (gdbarch, 2 * TARGET_CHAR_BIT);
   set_gdbarch_int_bit (gdbarch, 2 * TARGET_CHAR_BIT);
@@ -1309,23 +1416,30 @@ avr_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
   set_gdbarch_register_name (gdbarch, avr_register_name);
   set_gdbarch_register_type (gdbarch, avr_register_type);
 
+  set_gdbarch_num_pseudo_regs (gdbarch, AVR_NUM_PSEUDO_REGS);
+  set_gdbarch_pseudo_register_read (gdbarch, avr_pseudo_register_read);
+  set_gdbarch_pseudo_register_write (gdbarch, avr_pseudo_register_write);
+
   set_gdbarch_return_value (gdbarch, avr_return_value);
   set_gdbarch_print_insn (gdbarch, print_insn_avr);
 
   set_gdbarch_push_dummy_call (gdbarch, avr_push_dummy_call);
 
+  set_gdbarch_dwarf2_reg_to_regnum (gdbarch, avr_dwarf_reg_to_regnum);
+
   set_gdbarch_address_to_pointer (gdbarch, avr_address_to_pointer);
   set_gdbarch_pointer_to_address (gdbarch, avr_pointer_to_address);
+  set_gdbarch_integer_to_address (gdbarch, avr_integer_to_address);
 
   set_gdbarch_skip_prologue (gdbarch, avr_skip_prologue);
   set_gdbarch_inner_than (gdbarch, core_addr_lessthan);
 
   set_gdbarch_breakpoint_from_pc (gdbarch, avr_breakpoint_from_pc);
 
-  frame_unwind_append_sniffer (gdbarch, avr_frame_sniffer);
+  frame_unwind_append_unwinder (gdbarch, &avr_frame_unwind);
   frame_base_set_default (gdbarch, &avr_frame_base);
 
-  set_gdbarch_unwind_dummy_id (gdbarch, avr_unwind_dummy_id);
+  set_gdbarch_dummy_id (gdbarch, avr_dummy_id);
 
   set_gdbarch_unwind_pc (gdbarch, avr_unwind_pc);
   set_gdbarch_unwind_sp (gdbarch, avr_unwind_sp);

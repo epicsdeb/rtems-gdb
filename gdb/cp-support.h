@@ -1,5 +1,5 @@
 /* Helper routines for C++ support in GDB.
-   Copyright (C) 2002, 2003, 2004, 2005, 2007, 2008
+   Copyright (C) 2002, 2003, 2004, 2005, 2007, 2008, 2009, 2010
    Free Software Foundation, Inc.
 
    Contributed by MontaVista Software.
@@ -37,16 +37,26 @@ struct type;
 struct demangle_component;
 
 /* This struct is designed to store data from using directives.  It
-   says that names from namespace INNER should be visible within
-   namespace OUTER.  OUTER should always be a strict initial substring
-   of INNER.  These form a linked list; NEXT is the next element of
-   the list.  */
+   says that names from namespace IMPORT_SRC should be visible within
+   namespace IMPORT_DEST.  These form a linked list; NEXT is the next element
+   of the list.  If the imported namespace has been aliased, ALIAS is set to a
+   string representing the alias.  Otherwise, ALIAS is NULL.
+   Eg:
+       namespace C = A::B;
+   ALIAS = "C"
+*/
 
 struct using_direct
 {
-  char *inner;
-  char *outer;
+  char *import_src;
+  char *import_dest;
+
+  char *alias;
+
   struct using_direct *next;
+
+  /* Used during import search to temporarily mark this node as searched.  */
+  int searched;
 };
 
 
@@ -64,23 +74,28 @@ extern unsigned int cp_entire_prefix_len (const char *name);
 
 extern char *cp_func_name (const char *full_name);
 
+extern char *cp_remove_params (const char *demangled_name);
+
 extern struct symbol **make_symbol_overload_list (const char *,
 						  const char *);
 
 extern struct type *cp_lookup_rtti_type (const char *name,
 					 struct block *block);
 
+extern int cp_validate_operator (const char *input);
+
 /* Functions/variables from cp-namespace.c.  */
-
-extern unsigned char processing_has_namespace_info;
-
-extern const char *processing_current_prefix;
 
 extern int cp_is_anonymous (const char *namespace);
 
-extern void cp_add_using_directive (const char *name,
-				    unsigned int outer_length,
-				    unsigned int inner_length);
+extern void cp_add_using_directive (const char *dest,
+                                    const char *src,
+                                    const char *alias);
+
+extern struct using_direct *cp_add_using (const char *dest,
+                                          const char *src,
+                                          const char *alias,
+					  struct using_direct *next);
 
 extern void cp_initialize_namespace (void);
 
@@ -89,22 +104,23 @@ extern void cp_finalize_namespace (struct block *static_block,
 
 extern void cp_set_block_scope (const struct symbol *symbol,
 				struct block *block,
-				struct obstack *obstack);
+				struct obstack *obstack,
+				const char *processing_current_prefix,
+				int processing_has_namespace_info);
 
 extern void cp_scan_for_anonymous_namespaces (const struct symbol *symbol);
 
 extern struct symbol *cp_lookup_symbol_nonlocal (const char *name,
 						 const char *linkage_name,
 						 const struct block *block,
-						 const domain_enum domain,
-						 struct symtab **symtab);
+						 const domain_enum domain);
 
 extern struct symbol *cp_lookup_symbol_namespace (const char *namespace,
 						  const char *name,
 						  const char *linkage_name,
 						  const struct block *block,
 						  const domain_enum domain,
-						  struct symtab **symtab);
+						  const int search_parents);
 
 extern struct type *cp_lookup_nested_type (struct type *parent_type,
 					   const char *nested_name,
@@ -126,11 +142,5 @@ extern char *cp_comp_to_string (struct demangle_component *result,
 /* The list of "maint cplus" commands.  */
 
 extern struct cmd_list_element *maint_cplus_cmd_list;
-
-/* Pointer to member function.  Depends on compiler implementation.  */
-
-#define METHOD_PTR_IS_VIRTUAL(ADDR)  ((ADDR) & 0x80000000)
-#define METHOD_PTR_FROM_VOFFSET(OFFSET) (0x80000000 + (OFFSET))
-#define METHOD_PTR_TO_VOFFSET(ADDR) (~0x80000000 & (ADDR))
 
 #endif /* CP_SUPPORT_H */

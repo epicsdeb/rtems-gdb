@@ -1,5 +1,5 @@
 /* Support for printing Java types for GDB, the GNU debugger.
-   Copyright (C) 1997, 1998, 1999, 2000, 2007, 2008
+   Copyright (C) 1997, 1998, 1999, 2000, 2007, 2008, 2009, 2010
    Free Software Foundation, Inc.
 
    This file is part of GDB.
@@ -185,7 +185,7 @@ java_type_print_base (struct type *type, struct ui_file *stream, int show,
 		    fprintf_filtered (stream, "public ");
 		}
 
-	      if (TYPE_FIELD_STATIC (type, i))
+	      if (field_is_static (&TYPE_FIELD (type, i)))
 		fprintf_filtered (stream, "static ");
 
 	      java_print_type (TYPE_FIELD_TYPE (type, i),

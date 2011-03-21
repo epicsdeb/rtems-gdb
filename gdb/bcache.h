@@ -2,7 +2,7 @@
    Written by Fred Fish <fnf@cygnus.com>
    Rewritten by Jim Blandy <jimb@cygnus.com>
 
-   Copyright (C) 1999, 2000, 2002, 2003, 2007, 2008
+   Copyright (C) 1999, 2000, 2002, 2003, 2007, 2008, 2009, 2010
    Free Software Foundation, Inc.
 
    This file is part of GDB.
@@ -145,10 +145,14 @@ struct bcache;
    either case, return a pointer to BCACHE's copy of that string.
    Since the cached value is ment to be read-only, return a const
    buffer.  */
-extern void *deprecated_bcache (const void *addr, int length,
-				struct bcache *bcache);
 extern const void *bcache (const void *addr, int length,
 			   struct bcache *bcache);
+
+/* Like bcache, but if ADDED is not NULL, set *ADDED to true if the
+   bytes were newly added to the cache, or to false if the bytes were
+   found in the cache.  */
+extern const void *bcache_full (const void *addr, int length,
+				struct bcache *bcache, int *added);
 
 /* Free all the storage used by BCACHE.  */
 extern void bcache_xfree (struct bcache *bcache);

@@ -1,6 +1,6 @@
 /* SPARC-specific support for 64-bit ELF
    Copyright 1993, 1994, 1995, 1996, 1997, 1998, 1999, 2000, 2001, 2002,
-   2003, 2004, 2005, 2007, 2008 Free Software Foundation, Inc.
+   2003, 2004, 2005, 2006, 2007, 2008, 2009 Free Software Foundation, Inc.
 
    This file is part of BFD, the Binary File Descriptor library.
 
@@ -424,6 +424,9 @@ elf64_sparc_add_symbol_hook (bfd *abfd, struct bfd_link_info *info,
 {
   static const char *const stt_types[] = { "NOTYPE", "OBJECT", "FUNCTION" };
 
+  if (ELF_ST_TYPE (sym->st_info) == STT_GNU_IFUNC)
+    elf_tdata (info->output_bfd)->has_ifunc_symbols = TRUE;
+
   if (ELF_ST_TYPE (sym->st_info) == STT_REGISTER)
     {
       int reg;
@@ -538,10 +541,11 @@ elf64_sparc_add_symbol_hook (bfd *abfd, struct bfd_link_info *info,
 static bfd_boolean
 elf64_sparc_output_arch_syms (bfd *output_bfd ATTRIBUTE_UNUSED,
 			      struct bfd_link_info *info,
-			      PTR finfo, bfd_boolean (*func) (PTR, const char *,
-							      Elf_Internal_Sym *,
-							      asection *,
-							      struct elf_link_hash_entry *))
+			      PTR finfo,
+			      int (*func) (PTR, const char *,
+					   Elf_Internal_Sym *,
+					   asection *,
+					   struct elf_link_hash_entry *))
 {
   int reg;
   struct _bfd_sparc_elf_app_reg *app_regs =
@@ -585,10 +589,10 @@ elf64_sparc_output_arch_syms (bfd *output_bfd ATTRIBUTE_UNUSED,
 	sym.st_other = 0;
 	sym.st_info = ELF_ST_INFO (app_regs [reg].bind, STT_REGISTER);
 	sym.st_shndx = app_regs [reg].shndx;
-	if (! (*func) (finfo, app_regs [reg].name, &sym,
-		       sym.st_shndx == SHN_ABS
-			 ? bfd_abs_section_ptr : bfd_und_section_ptr,
-		       NULL))
+	if ((*func) (finfo, app_regs [reg].name, &sym,
+		     sym.st_shndx == SHN_ABS
+		     ? bfd_abs_section_ptr : bfd_und_section_ptr,
+		     NULL) != 1)
 	  return FALSE;
       }
 
@@ -855,6 +859,8 @@ const struct elf_size_info elf64_sparc_size_info =
   _bfd_sparc_elf_plt_sym_val
 #define bfd_elf64_bfd_link_hash_table_create \
   _bfd_sparc_elf_link_hash_table_create
+#define bfd_elf64_bfd_link_hash_table_free \
+  _bfd_sparc_elf_link_hash_table_free
 #define elf_info_to_howto \
   _bfd_sparc_elf_info_to_howto
 #define elf_backend_copy_indirect_symbol \
@@ -909,6 +915,8 @@ const struct elf_size_info elf64_sparc_size_info =
 /* Section 5.2.4 of the ABI specifies a 256-byte boundary for the table.  */
 #define elf_backend_plt_alignment 8
 
+#define elf_backend_post_process_headers	_bfd_elf_set_osabi
+
 #include "elf64-target.h"
 
 /* FreeBSD support */
@@ -919,8 +927,6 @@ const struct elf_size_info elf64_sparc_size_info =
 #undef	ELF_OSABI
 #define	ELF_OSABI ELFOSABI_FREEBSD
 
-#undef  elf_backend_post_process_headers
-#define elf_backend_post_process_headers	_bfd_elf_set_osabi
 #undef  elf64_bed
 #define elf64_bed				elf64_sparc_fbsd_bed
 

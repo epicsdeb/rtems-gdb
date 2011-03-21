@@ -1,7 +1,7 @@
 /* Declarations for caching.  Typically used by remote back ends for
    caching remote memory.
 
-   Copyright (C) 1992, 1993, 1995, 1999, 2000, 2001, 2007, 2008
+   Copyright (C) 1992, 1993, 1995, 1999, 2000, 2001, 2007, 2008, 2009, 2010
    Free Software Foundation, Inc.
 
    This file is part of GDB.
@@ -35,7 +35,10 @@ void dcache_free (DCACHE *);
 
 /* Simple to call from <remote>_xfer_memory */
 
-int dcache_xfer_memory (DCACHE *cache, CORE_ADDR mem, gdb_byte *my,
-			int len, int should_write);
+int dcache_xfer_memory (struct target_ops *ops, DCACHE *cache, CORE_ADDR mem,
+			gdb_byte *my, int len, int should_write);
+
+void dcache_update (DCACHE *dcache, CORE_ADDR memaddr, gdb_byte *myaddr,
+		    int len);
 
 #endif /* DCACHE_H */

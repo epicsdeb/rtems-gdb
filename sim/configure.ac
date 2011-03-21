@@ -1,4 +1,5 @@
 dnl Process this file with autoconf to produce a configure script.
+m4_include([../config/override.m4])
 AC_PREREQ(2.59)dnl
 AC_INIT(Makefile.in)
 
@@ -51,6 +52,13 @@ if test "${enable_sim}" != no; then
            AC_CONFIG_SUBDIRS(arm)
 	   testsuite=yes
 	   ;;
+       avr*-*-*)
+           AC_CONFIG_SUBDIRS(avr)
+	   ;;
+       cr16*-*-*)
+	   AC_CONFIG_SUBDIRS(cr16)
+	   testsuite=yes
+	   ;;
        cris-*-* | crisv32-*-*)
 	   AC_CONFIG_SUBDIRS(cris)
 	   testsuite=yes
@@ -70,6 +78,10 @@ if test "${enable_sim}" != no; then
            AC_CONFIG_SUBDIRS(iq2000)
 	   testsuite=yes
 	   ;;
+       lm32-*-*)
+           AC_CONFIG_SUBDIRS(lm32)
+	   testsuite=yes
+           ;;
        m32c-*-*)
            AC_CONFIG_SUBDIRS(m32c)
            ;;
@@ -85,6 +97,10 @@ if test "${enable_sim}" != no; then
            AC_CONFIG_SUBDIRS(mcore)
 	   testsuite=yes
 	   ;;
+       microblaze-*-*)
+           AC_CONFIG_SUBDIRS(microblaze)
+	   testsuite=yes
+	   ;;
        mips*-*-*)
            AC_CONFIG_SUBDIRS(mips)
 	   testsuite=yes
@@ -93,6 +109,13 @@ if test "${enable_sim}" != no; then
        mn10300*-*-*)
            AC_CONFIG_SUBDIRS(mn10300)
 	   igen=yes
+	   ;;
+       moxie-*-*)
+	   AC_CONFIG_SUBDIRS(moxie)
+	   testsuite=yes
+	   ;;
+       rx-*-*)
+           AC_CONFIG_SUBDIRS(rx)
 	   ;;
        sh64*-*-*)
            AC_CONFIG_SUBDIRS(sh64)

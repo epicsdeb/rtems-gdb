@@ -1,7 +1,7 @@
 /* Java language support routines for GDB, the GNU debugger.
 
-   Copyright (C) 1997, 1998, 1999, 2000, 2003, 2004, 2005, 2007, 2008
-   Free Software Foundation, Inc.
+   Copyright (C) 1997, 1998, 1999, 2000, 2003, 2004, 2005, 2007, 2008, 2009,
+   2010 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -39,16 +39,6 @@
 #include <ctype.h>
 #include "gdb_assert.h"
 
-struct type *java_int_type;
-struct type *java_byte_type;
-struct type *java_short_type;
-struct type *java_long_type;
-struct type *java_boolean_type;
-struct type *java_char_type;
-struct type *java_float_type;
-struct type *java_double_type;
-struct type *java_void_type;
-
 /* Local functions */
 
 extern void _initialize_java_language (void);
@@ -61,7 +51,8 @@ static char *get_java_utf8_name (struct obstack *obstack, struct value *name);
 static int java_class_is_primitive (struct value *clas);
 static struct value *java_value_string (char *ptr, int len);
 
-static void java_emit_char (int c, struct ui_file * stream, int quoter);
+static void java_emit_char (int c, struct type *type,
+			    struct ui_file * stream, int quoter);
 
 static char *java_class_name_from_physname (const char *physname);
 
@@ -71,7 +62,8 @@ static char *java_class_name_from_physname (const char *physname);
 
 static struct objfile *dynamics_objfile = NULL;
 
-static struct type *java_link_class_type (struct type *, struct value *);
+static struct type *java_link_class_type (struct gdbarch *,
+					  struct type *, struct value *);
 
 /* FIXME: carlton/2003-02-04: This is the main or only caller of
    allocate_objfile with first argument NULL; as a result, this code
@@ -145,7 +137,7 @@ add_class_symbol (struct type *type, CORE_ADDR addr)
     obstack_alloc (&dynamics_objfile->objfile_obstack, sizeof (struct symbol));
   memset (sym, 0, sizeof (struct symbol));
   SYMBOL_LANGUAGE (sym) = language_java;
-  DEPRECATED_SYMBOL_NAME (sym) = TYPE_TAG_NAME (type);
+  SYMBOL_SET_LINKAGE_NAME (sym, TYPE_TAG_NAME (type));
   SYMBOL_CLASS (sym) = LOC_TYPEDEF;
   /*  SYMBOL_VALUE (sym) = valu; */
   SYMBOL_TYPE (sym) = type;
@@ -169,8 +161,7 @@ struct type *
 java_lookup_class (char *name)
 {
   struct symbol *sym;
-  sym = lookup_symbol (name, expression_context_block, STRUCT_DOMAIN,
-		       (int *) 0, (struct symtab **) NULL);
+  sym = lookup_symbol (name, expression_context_block, STRUCT_DOMAIN, NULL);
   if (sym != NULL)
     return SYMBOL_TYPE (sym);
 #if 0
@@ -190,7 +181,7 @@ java_lookup_class (char *name)
   TYPE_CODE (type) = TYPE_CODE_STRUCT;
   INIT_CPLUS_SPECIFIC (type);
   TYPE_TAG_NAME (type) = obsavestring (name, strlen (name), &objfile->objfile_obstack);
-  TYPE_FLAGS (type) |= TYPE_FLAG_STUB;
+  TYPE_STUB (type) = 1;
   TYPE ? = addr;
   return type;
 #else
@@ -211,8 +202,7 @@ get_java_utf8_name (struct obstack *obstack, struct value *name)
   CORE_ADDR data_addr;
   temp = value_struct_elt (&temp, NULL, "length", NULL, "structure");
   name_length = (int) value_as_long (temp);
-  data_addr = VALUE_ADDRESS (temp) + value_offset (temp)
-    + TYPE_LENGTH (value_type (temp));
+  data_addr = value_address (temp) + TYPE_LENGTH (value_type (temp));
   chrs = obstack_alloc (obstack, name_length + 1);
   chrs[name_length] = '\0';
   read_memory (data_addr, (gdb_byte *) chrs, name_length);
@@ -247,7 +237,7 @@ java_class_is_primitive (struct value *clas)
 /* Read a GCJ Class object, and generated a gdb (TYPE_CODE_STRUCT) type. */
 
 struct type *
-type_from_class (struct value *clas)
+type_from_class (struct gdbarch *gdbarch, struct value *clas)
 {
   struct type *type;
   char *name;
@@ -267,7 +257,7 @@ type_from_class (struct value *clas)
 	return NULL;
       clas = value_ind (clas);
     }
-  addr = VALUE_ADDRESS (clas) + value_offset (clas);
+  addr = value_address (clas);
 
 #if 0
   get_java_class_symtab ();
@@ -285,7 +275,7 @@ type_from_class (struct value *clas)
       struct value *sig;
       temp = clas;
       sig = value_struct_elt (&temp, NULL, "method_count", NULL, "structure");
-      return java_primitive_type (value_as_long (sig));
+      return java_primitive_type (gdbarch, value_as_long (sig));
     }
 
   /* Get Class name. */
@@ -303,7 +293,10 @@ type_from_class (struct value *clas)
   if (type != NULL)
     return type;
 
-  type = alloc_type (objfile);
+  /* Do not use the "fake" dynamics objfile to own dynamically generated
+     types, as it does not provide an architecture, and it would not help
+     manage the lifetime of these types anyway.  */
+  type = alloc_type_arch (gdbarch);
   TYPE_CODE (type) = TYPE_CODE_STRUCT;
   INIT_CPLUS_SPECIFIC (type);
 
@@ -320,20 +313,21 @@ type_from_class (struct value *clas)
       /* Set array element type. */
       temp = value_struct_elt (&temp, NULL, "methods", NULL, "structure");
       deprecated_set_value_type (temp, lookup_pointer_type (value_type (clas)));
-      TYPE_TARGET_TYPE (type) = type_from_class (temp);
+      TYPE_TARGET_TYPE (type) = type_from_class (gdbarch, temp);
     }
 
   ALLOCATE_CPLUS_STRUCT_TYPE (type);
   TYPE_TAG_NAME (type) = name;
 
   add_class_symtab_symbol (add_class_symbol (type, addr));
-  return java_link_class_type (type, clas);
+  return java_link_class_type (gdbarch, type, clas);
 }
 
 /* Fill in class TYPE with data from the CLAS value. */
 
 struct type *
-java_link_class_type (struct type *type, struct value *clas)
+java_link_class_type (struct gdbarch *gdbarch,
+		      struct type *type, struct value *clas)
 {
   struct value *temp;
   char *unqualified_name;
@@ -365,7 +359,7 @@ java_link_class_type (struct type *type, struct value *clas)
       type_is_object = 1;
     }
   else
-    tsuper = type_from_class (temp);
+    tsuper = type_from_class (gdbarch, temp);
 
 #if 1
   ninterfaces = 0;
@@ -422,8 +416,7 @@ java_link_class_type (struct type *type, struct value *clas)
 
   fields = NULL;
   nfields--;			/* First set up dummy "class" field. */
-  SET_FIELD_PHYSADDR (TYPE_FIELD (type, nfields),
-		      VALUE_ADDRESS (clas) + value_offset (clas));
+  SET_FIELD_PHYSADDR (TYPE_FIELD (type, nfields), value_address (clas));
   TYPE_FIELD_NAME (type, nfields) = "class";
   TYPE_FIELD_TYPE (type, nfields) = value_type (clas);
   SET_TYPE_FIELD_PRIVATE (type, nfields);
@@ -440,7 +433,9 @@ java_link_class_type (struct type *type, struct value *clas)
 	}
       else
 	{			/* Re-use field value for next field. */
-	  VALUE_ADDRESS (field) += TYPE_LENGTH (value_type (field));
+	  CORE_ADDR addr
+	    = value_address (field) + TYPE_LENGTH (value_type (field));
+	  set_value_address (field, addr);
 	  set_value_lazy (field, 1);
 	}
       temp = field;
@@ -479,7 +474,7 @@ java_link_class_type (struct type *type, struct value *clas)
 	  struct type *ftype;
 	  temp = field;
 	  temp = value_struct_elt (&temp, NULL, "type", NULL, "structure");
-	  ftype = type_from_class (temp);
+	  ftype = type_from_class (gdbarch, temp);
 	  if (TYPE_CODE (ftype) == TYPE_CODE_STRUCT)
 	    ftype = lookup_pointer_type (ftype);
 	  TYPE_FIELD_TYPE (type, i) = ftype;
@@ -510,7 +505,9 @@ java_link_class_type (struct type *type, struct value *clas)
 	}
       else
 	{			/* Re-use method value for next method. */
-	  VALUE_ADDRESS (method) += TYPE_LENGTH (value_type (method));
+	  CORE_ADDR addr
+	    = value_address (method) + TYPE_LENGTH (value_type (method));
+	  set_value_address (method, addr);
 	  set_value_lazy (method, 1);
 	}
 
@@ -557,7 +554,9 @@ java_link_class_type (struct type *type, struct value *clas)
 	}
       fn_fields[k].physname = "";
       fn_fields[k].is_stub = 1;
-      fn_fields[k].type = make_function_type (java_void_type, NULL);	/* FIXME */
+      /* FIXME */
+      fn_fields[k].type = lookup_function_type
+			   (builtin_java_type (gdbarch)->builtin_void);
       TYPE_CODE (fn_fields[k].type) = TYPE_CODE_METHOD;
     }
 
@@ -577,8 +576,7 @@ get_java_object_type (void)
   if (java_object_type == NULL)
     {
       struct symbol *sym;
-      sym = lookup_symbol ("java.lang.Object", NULL, STRUCT_DOMAIN,
-			   (int *) 0, (struct symtab **) NULL);
+      sym = lookup_symbol ("java.lang.Object", NULL, STRUCT_DOMAIN, NULL);
       if (sym == NULL)
 	error (_("cannot find java.lang.Object"));
       java_object_type = SYMBOL_TYPE (sym);
@@ -587,11 +585,11 @@ get_java_object_type (void)
 }
 
 int
-get_java_object_header_size (void)
+get_java_object_header_size (struct gdbarch *gdbarch)
 {
   struct type *objtype = get_java_object_type ();
   if (objtype == NULL)
-    return (2 * gdbarch_ptr_bit (current_gdbarch) / TARGET_CHAR_BIT);
+    return (2 * gdbarch_ptr_bit (gdbarch) / TARGET_CHAR_BIT);
   else
     return TYPE_LENGTH (objtype);
 }
@@ -623,28 +621,30 @@ is_object_type (struct type *type)
 }
 
 struct type *
-java_primitive_type (int signature)
+java_primitive_type (struct gdbarch *gdbarch, int signature)
 {
+  const struct builtin_java_type *builtin = builtin_java_type (gdbarch);
+
   switch (signature)
     {
     case 'B':
-      return java_byte_type;
+      return builtin->builtin_byte;
     case 'S':
-      return java_short_type;
+      return builtin->builtin_short;
     case 'I':
-      return java_int_type;
+      return builtin->builtin_int;
     case 'J':
-      return java_long_type;
+      return builtin->builtin_long;
     case 'Z':
-      return java_boolean_type;
+      return builtin->builtin_boolean;
     case 'C':
-      return java_char_type;
+      return builtin->builtin_char;
     case 'F':
-      return java_float_type;
+      return builtin->builtin_float;
     case 'D':
-      return java_double_type;
+      return builtin->builtin_double;
     case 'V':
-      return java_void_type;
+      return builtin->builtin_void;
     }
   error (_("unknown signature '%c' for primitive type"), (char) signature);
 }
@@ -653,45 +653,75 @@ java_primitive_type (int signature)
    return that type.  Otherwise, return NULL. */
 
 struct type *
-java_primitive_type_from_name (char *name, int namelen)
+java_primitive_type_from_name (struct gdbarch *gdbarch,
+			       char *name, int namelen)
 {
+  const struct builtin_java_type *builtin = builtin_java_type (gdbarch);
+
   switch (name[0])
     {
     case 'b':
       if (namelen == 4 && memcmp (name, "byte", 4) == 0)
-	return java_byte_type;
+	return builtin->builtin_byte;
       if (namelen == 7 && memcmp (name, "boolean", 7) == 0)
-	return java_boolean_type;
+	return builtin->builtin_boolean;
       break;
     case 'c':
       if (namelen == 4 && memcmp (name, "char", 4) == 0)
-	return java_char_type;
+	return builtin->builtin_char;
     case 'd':
       if (namelen == 6 && memcmp (name, "double", 6) == 0)
-	return java_double_type;
+	return builtin->builtin_double;
       break;
     case 'f':
       if (namelen == 5 && memcmp (name, "float", 5) == 0)
-	return java_float_type;
+	return builtin->builtin_float;
       break;
     case 'i':
       if (namelen == 3 && memcmp (name, "int", 3) == 0)
-	return java_int_type;
+	return builtin->builtin_int;
       break;
     case 'l':
       if (namelen == 4 && memcmp (name, "long", 4) == 0)
-	return java_long_type;
+	return builtin->builtin_long;
       break;
     case 's':
       if (namelen == 5 && memcmp (name, "short", 5) == 0)
-	return java_short_type;
+	return builtin->builtin_short;
       break;
     case 'v':
       if (namelen == 4 && memcmp (name, "void", 4) == 0)
-	return java_void_type;
+	return builtin->builtin_void;
       break;
     }
   return NULL;
+}
+
+static char *
+java_primitive_type_name (int signature)
+{
+  switch (signature)
+    {
+    case 'B':
+      return "byte";
+    case 'S':
+      return "short";
+    case 'I':
+      return "int";
+    case 'J':
+      return "long";
+    case 'Z':
+      return "boolean";
+    case 'C':
+      return "char";
+    case 'F':
+      return "float";
+    case 'D':
+      return "double";
+    case 'V':
+      return "void";
+    }
+  error (_("unknown signature '%c' for primitive type"), (char) signature);
 }
 
 /* Return the length (in bytes) of demangled name of the Java type
@@ -709,7 +739,7 @@ java_demangled_signature_length (char *signature)
       /* Subtract 2 for 'L' and ';'. */
       return strlen (signature) - 2 + array;
     default:
-      return strlen (TYPE_NAME (java_primitive_type (signature[0]))) + array;
+      return strlen (java_primitive_type_name (signature[0])) + array;
     }
 }
 
@@ -741,7 +771,7 @@ java_demangled_signature_copy (char *result, char *signature)
 	}
       break;
     default:
-      ptr = TYPE_NAME (java_primitive_type (signature[0]));
+      ptr = java_primitive_type_name (signature[0]);
       i = strlen (ptr);
       strcpy (result, ptr);
       ptr = result + i;
@@ -773,13 +803,10 @@ java_demangle_type_signature (char *signature)
 struct type *
 java_array_type (struct type *type, int dims)
 {
-  struct type *range_type;
-
   while (dims-- > 0)
     {
-      range_type = create_range_type (NULL, builtin_type_int, 0, 0);
       /* FIXME  This is bogus!  Java arrays are not gdb arrays! */
-      type = create_array_type (NULL, type, range_type);
+      type = lookup_array_range_type (type, 0, 0);
     }
 
   return type;
@@ -798,7 +825,7 @@ java_value_string (char *ptr, int len)
    characters and strings is language specific. */
 
 static void
-java_emit_char (int c, struct ui_file *stream, int quoter)
+java_emit_char (int c, struct type *type, struct ui_file *stream, int quoter)
 {
   switch (c)
     {
@@ -852,7 +879,7 @@ evaluate_subexp_java (struct type *expect_type, struct expression *exp,
 	{
 	  struct type *type;
 
-	  type = type_from_class (java_class_from_object (arg1));
+	  type = type_from_class (exp->gdbarch, java_class_from_object (arg1));
 	  arg1 = value_cast (lookup_pointer_type (type), arg1);
 	}
       if (noside == EVAL_SKIP)
@@ -880,6 +907,7 @@ evaluate_subexp_java (struct type *expect_type, struct expression *exp,
       if (TYPE_CODE (type) == TYPE_CODE_STRUCT
 	  && i > 2 && name[i - 1] == ']')
 	{
+	  enum bfd_endian byte_order = gdbarch_byte_order (exp->gdbarch);
 	  CORE_ADDR address;
 	  long length, index;
 	  struct type *el_type;
@@ -891,16 +919,16 @@ evaluate_subexp_java (struct type *expect_type, struct expression *exp,
 	  temp = value_struct_elt (&temp, NULL, "methods",
 				   NULL, "structure");
 	  deprecated_set_value_type (temp, value_type (clas));
-	  el_type = type_from_class (temp);
+	  el_type = type_from_class (exp->gdbarch, temp);
 	  if (TYPE_CODE (el_type) == TYPE_CODE_STRUCT)
 	    el_type = lookup_pointer_type (el_type);
 
 	  if (noside == EVAL_AVOID_SIDE_EFFECTS)
 	    return value_zero (el_type, VALUE_LVAL (arg1));
 	  address = value_as_address (arg1);
-	  address += JAVA_OBJECT_SIZE;
+	  address += get_java_object_header_size (exp->gdbarch);
 	  read_memory (address, buf4, 4);
-	  length = (long) extract_signed_integer (buf4, 4);
+	  length = (long) extract_signed_integer (buf4, 4, byte_order);
 	  index = (long) value_as_long (arg2);
 	  if (index >= length || index < 0)
 	    error (_("array index (%ld) out of bounds (length: %ld)"),
@@ -913,7 +941,7 @@ evaluate_subexp_java (struct type *expect_type, struct expression *exp,
 	  if (noside == EVAL_AVOID_SIDE_EFFECTS)
 	    return value_zero (TYPE_TARGET_TYPE (type), VALUE_LVAL (arg1));
 	  else
-	    return value_subscript (arg1, arg2);
+	    return value_subscript (arg1, value_as_long (arg2));
 	}
       if (name)
 	error (_("cannot subscript something of type `%s'"), name);
@@ -940,7 +968,7 @@ evaluate_subexp_java (struct type *expect_type, struct expression *exp,
 standard:
   return evaluate_subexp_standard (expect_type, exp, pos, noside);
 nosideret:
-  return value_from_longest (builtin_type_long, (LONGEST) 1);
+  return value_from_longest (builtin_type (exp->gdbarch)->builtin_int, 1);
 }
 
 static char *java_demangle (const char *mangled, int options)
@@ -1042,6 +1070,53 @@ const struct op_print java_op_print_tab[] =
   {NULL, 0, 0, 0}
 };
 
+enum java_primitive_types
+{
+  java_primitive_type_int,
+  java_primitive_type_short,
+  java_primitive_type_long,
+  java_primitive_type_byte,
+  java_primitive_type_boolean,
+  java_primitive_type_char,
+  java_primitive_type_float,
+  java_primitive_type_double,
+  java_primitive_type_void,
+  nr_java_primitive_types
+};
+
+static void
+java_language_arch_info (struct gdbarch *gdbarch,
+			 struct language_arch_info *lai)
+{
+  const struct builtin_java_type *builtin = builtin_java_type (gdbarch);
+
+  lai->string_char_type = builtin->builtin_char;
+  lai->primitive_type_vector
+    = GDBARCH_OBSTACK_CALLOC (gdbarch, nr_java_primitive_types + 1,
+                              struct type *);
+  lai->primitive_type_vector [java_primitive_type_int]
+    = builtin->builtin_int;
+  lai->primitive_type_vector [java_primitive_type_short]
+    = builtin->builtin_short;
+  lai->primitive_type_vector [java_primitive_type_long]
+    = builtin->builtin_long;
+  lai->primitive_type_vector [java_primitive_type_byte]
+    = builtin->builtin_byte;
+  lai->primitive_type_vector [java_primitive_type_boolean]
+    = builtin->builtin_boolean;
+  lai->primitive_type_vector [java_primitive_type_char]
+    = builtin->builtin_char;
+  lai->primitive_type_vector [java_primitive_type_float]
+    = builtin->builtin_float;
+  lai->primitive_type_vector [java_primitive_type_double]
+    = builtin->builtin_double;
+  lai->primitive_type_vector [java_primitive_type_void]
+    = builtin->builtin_void;
+
+  lai->bool_type_symbol = "boolean";
+  lai->bool_type_default = builtin->builtin_boolean;
+}
+
 const struct exp_descriptor exp_descriptor_java = 
 {
   print_subexp_standard,
@@ -1059,6 +1134,7 @@ const struct language_defn java_language_defn =
   type_check_off,
   case_sensitive_on,
   array_row_major,
+  macro_expansion_no,
   &exp_descriptor_java,
   java_parse,
   java_error,
@@ -1067,10 +1143,11 @@ const struct language_defn java_language_defn =
   c_printstr,			/* Function to print string constant */
   java_emit_char,		/* Function to print a single character */
   java_print_type,		/* Print a type using appropriate syntax */
+  default_print_typedef,	/* Print a typedef using appropriate syntax */
   java_val_print,		/* Print a value using appropriate syntax */
   java_value_print,		/* Print a top-level value */
   NULL,				/* Language specific skip_trampoline */
-  value_of_this,		/* value_of_this */
+  "this",	                /* name_of_this */
   basic_lookup_symbol_nonlocal,	/* lookup_symbol_nonlocal */
   basic_lookup_transparent_type,/* lookup_transparent_type */
   java_demangle,		/* Language specific symbol demangler */
@@ -1080,25 +1157,53 @@ const struct language_defn java_language_defn =
   0,				/* String lower bound */
   default_word_break_characters,
   default_make_symbol_completion_list,
-  c_language_arch_info,
+  java_language_arch_info,
   default_print_array_index,
   default_pass_by_reference,
+  default_get_string,
   LANG_MAGIC
 };
+
+static void *
+build_java_types (struct gdbarch *gdbarch)
+{
+  struct builtin_java_type *builtin_java_type
+    = GDBARCH_OBSTACK_ZALLOC (gdbarch, struct builtin_java_type);
+
+  builtin_java_type->builtin_int
+    = arch_integer_type (gdbarch, 32, 0, "int");
+  builtin_java_type->builtin_short
+    = arch_integer_type (gdbarch, 16, 0, "short");
+  builtin_java_type->builtin_long
+    = arch_integer_type (gdbarch, 64, 0, "long");
+  builtin_java_type->builtin_byte
+    = arch_integer_type (gdbarch, 8, 0, "byte");
+  builtin_java_type->builtin_boolean
+    = arch_boolean_type (gdbarch, 8, 0, "boolean");
+  builtin_java_type->builtin_char
+    = arch_character_type (gdbarch, 16, 1, "char");
+  builtin_java_type->builtin_float
+    = arch_float_type (gdbarch, 32, "float", NULL);
+  builtin_java_type->builtin_double
+    = arch_float_type (gdbarch, 64, "double", NULL);
+  builtin_java_type->builtin_void
+    = arch_type (gdbarch, TYPE_CODE_VOID, 1, "void");
+
+  return builtin_java_type;
+}
+
+static struct gdbarch_data *java_type_data;
+
+const struct builtin_java_type *
+builtin_java_type (struct gdbarch *gdbarch)
+{
+  return gdbarch_data (gdbarch, java_type_data);
+}
 
 void
 _initialize_java_language (void)
 {
-
-  java_int_type = init_type (TYPE_CODE_INT, 4, 0, "int", NULL);
-  java_short_type = init_type (TYPE_CODE_INT, 2, 0, "short", NULL);
-  java_long_type = init_type (TYPE_CODE_INT, 8, 0, "long", NULL);
-  java_byte_type = init_type (TYPE_CODE_INT, 1, 0, "byte", NULL);
-  java_boolean_type = init_type (TYPE_CODE_BOOL, 1, 0, "boolean", NULL);
-  java_char_type = init_type (TYPE_CODE_CHAR, 2, TYPE_FLAG_UNSIGNED, "char", NULL);
-  java_float_type = init_type (TYPE_CODE_FLT, 4, 0, "float", NULL);
-  java_double_type = init_type (TYPE_CODE_FLT, 8, 0, "double", NULL);
-  java_void_type = init_type (TYPE_CODE_VOID, 1, 0, "void", NULL);
+  java_type_data = gdbarch_data_register_post_init (build_java_types);
 
   add_language (&java_language_defn);
 }

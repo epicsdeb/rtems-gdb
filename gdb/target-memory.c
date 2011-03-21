@@ -1,7 +1,7 @@
 /* Parts of target interface that deal with accessing memory and memory-like
    objects.
 
-   Copyright (C) 2006, 2007, 2008 Free Software Foundation, Inc.
+   Copyright (C) 2006, 2007, 2008, 2009, 2010 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -393,7 +393,7 @@ target_write_memory_blocks (VEC(memory_write_request_s) *requests,
     {
       LONGEST len;
 
-      len = target_write_with_progress (&current_target,
+      len = target_write_with_progress (current_target.beneath,
 					TARGET_OBJECT_MEMORY, NULL,
 					r->data, r->begin, r->end - r->begin,
 					progress_cb, r->baton);

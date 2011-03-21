@@ -1,6 +1,7 @@
 /* Remote File-I/O communications
 
-   Copyright (C) 2003, 2005, 2006, 2007, 2008 Free Software Foundation, Inc.
+   Copyright (C) 2003, 2005, 2006, 2007, 2008, 2009, 2010
+   Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -28,6 +29,7 @@
 #include "gdb_stat.h"
 #include "exceptions.h"
 #include "remote-fileio.h"
+#include "event-loop.h"
 
 #include <fcntl.h>
 #include <sys/time.h>
@@ -46,6 +48,8 @@ static struct {
 #define FIO_FD_CONSOLE_OUT	-3
 
 static int remote_fio_system_call_allowed = 0;
+
+static struct async_signal_handler *sigint_fileio_token;
 
 static int
 remote_fileio_init_fd_map (void)
@@ -504,12 +508,18 @@ remote_fileio_sig_exit (void)
 }
 
 static void
+async_remote_fileio_interrupt (gdb_client_data arg)
+{
+  deprecated_throw_reason (RETURN_QUIT);
+}
+
+static void
 remote_fileio_ctrl_c_signal_handler (int signo)
 {
   remote_fileio_sig_set (SIG_IGN);
   remote_fio_ctrl_c_flag = 1;
   if (!remote_fio_no_longjmp)
-    deprecated_throw_reason (RETURN_QUIT);
+    gdb_call_async_signal_handler (sigint_fileio_token, 1);
   remote_fileio_sig_set (remote_fileio_ctrl_c_signal_handler);
 }
 
@@ -731,7 +741,7 @@ remote_fileio_func_read (char *buf)
 	  static char *remaining_buf = NULL;
 	  static int remaining_length = 0;
 
-	  buffer = (gdb_byte *) xmalloc (32768);
+	  buffer = (gdb_byte *) xmalloc (16384);
 	  if (remaining_buf)
 	    {
 	      remote_fio_no_longjmp = 1;
@@ -753,7 +763,18 @@ remote_fileio_func_read (char *buf)
 	    }
 	  else
 	    {
-	      ret = ui_file_read (gdb_stdtargin, (char *) buffer, 32767);
+	      /* Windows (at least XP and Server 2003) has difficulty
+		 with large reads from consoles.  If a handle is
+		 backed by a real console device, overly large reads
+		 from the handle will fail and set errno == ENOMEM.
+		 On a Windows Server 2003 system where I tested,
+		 reading 26608 bytes from the console was OK, but
+		 anything above 26609 bytes would fail.  The limit has
+		 been observed to vary on different systems.  So, we
+		 limit this read to something smaller than that - by a
+		 safe margin, in case the limit depends on system
+		 resources or version.  */
+	      ret = ui_file_read (gdb_stdtargin, (char *) buffer, 16383);
 	      remote_fio_no_longjmp = 1;
 	      if (ret > 0 && (size_t)ret > length)
 		{
@@ -1389,34 +1410,50 @@ remote_fileio_reset (void)
     }
   if (remote_fio_data.fd_map)
     {
-      free (remote_fio_data.fd_map);
+      xfree (remote_fio_data.fd_map);
       remote_fio_data.fd_map = NULL;
       remote_fio_data.fd_map_size = 0;
     }
 }
 
+/* Handle a file I/O request. BUF points to the packet containing the
+   request. CTRLC_PENDING_P should be nonzero if the target has not
+   acknowledged the Ctrl-C sent asynchronously earlier.  */
+
 void
-remote_fileio_request (char *buf)
+remote_fileio_request (char *buf, int ctrlc_pending_p)
 {
   int ex;
 
   remote_fileio_sig_init ();
 
-  remote_fio_ctrl_c_flag = 0;
-  remote_fio_no_longjmp = 0;
-
-  ex = catch_exceptions (uiout, do_remote_fileio_request, (void *)buf,
-			 RETURN_MASK_ALL);
-  switch (ex)
+  if (ctrlc_pending_p)
     {
-      case RETURN_ERROR:
-	remote_fileio_reply (-1, FILEIO_ENOSYS);
-        break;
-      case RETURN_QUIT:
-        remote_fileio_reply (-1, FILEIO_EINTR);
-	break;
-      default:
-        break;
+      /* If the target hasn't responded to the Ctrl-C sent
+	 asynchronously earlier, take this opportunity to send the
+	 Ctrl-C synchronously.  */
+      remote_fio_ctrl_c_flag = 1;
+      remote_fio_no_longjmp = 0;
+      remote_fileio_reply (-1, FILEIO_EINTR);
+    }
+  else
+    {
+      remote_fio_ctrl_c_flag = 0;
+      remote_fio_no_longjmp = 0;
+
+      ex = catch_exceptions (uiout, do_remote_fileio_request, (void *)buf,
+			     RETURN_MASK_ALL);
+      switch (ex)
+	{
+	case RETURN_ERROR:
+	  remote_fileio_reply (-1, FILEIO_ENOSYS);
+	  break;
+	case RETURN_QUIT:
+	  remote_fileio_reply (-1, FILEIO_EINTR);
+	  break;
+	default:
+	  break;
+	}
     }
 
   remote_fileio_sig_exit ();
@@ -1451,6 +1488,9 @@ void
 initialize_remote_fileio (struct cmd_list_element *remote_set_cmdlist,
 			  struct cmd_list_element *remote_show_cmdlist)
 {
+  sigint_fileio_token =
+    create_async_signal_handler (async_remote_fileio_interrupt, NULL);
+
   add_cmd ("system-call-allowed", no_class,
 	   set_system_call_allowed,
 	   _("Set if the host system(3) call is allowed for the target."),

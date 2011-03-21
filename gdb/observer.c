@@ -1,6 +1,7 @@
 /* GDB Notifications to Observers.
 
-   Copyright (C) 2003, 2004, 2007, 2008 Free Software Foundation, Inc.
+   Copyright (C) 2003, 2004, 2007, 2008, 2009, 2010
+   Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -181,19 +182,19 @@ int observer_test_second_observer = 0;
 int observer_test_third_observer = 0;
 
 void
-observer_test_first_notification_function (struct bpstats *bs)
+observer_test_first_notification_function (int arg)
 {
   observer_test_first_observer++;
 }
 
 void
-observer_test_second_notification_function (struct bpstats *bs)
+observer_test_second_notification_function (int arg)
 {
   observer_test_second_observer++;
 }
 
 void
-observer_test_third_notification_function (struct bpstats *bs)
+observer_test_third_notification_function (int arg)
 {
   observer_test_third_observer++;
 }

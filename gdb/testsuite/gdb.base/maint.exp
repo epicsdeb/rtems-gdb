@@ -1,4 +1,4 @@
-# Copyright 1998, 1999, 2000, 2001, 2002, 2003, 2007, 2008
+# Copyright 1998, 1999, 2000, 2001, 2002, 2003, 2007, 2008, 2009, 2010
 # Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
@@ -13,9 +13,6 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
-
-# Please email any bugs, comments, and/or additions to this file to:
-# bug-gdb@prep.ai.mit.edu
 
 # This file was written by Elena Zannoni (ezannoni@cygnus.com)
 
@@ -99,8 +96,6 @@ if ![runto_main] then {
 send_gdb "set height 0\n"
 gdb_expect -re "$gdb_prompt $"
 
-# use a larger expect input buffer for long help outputs.
-match_max 6000
 
 #
 # this command does not produce any output
@@ -402,13 +397,12 @@ gdb_expect  {
         timeout         { fail "(timeout) maint print symbols" }
         }
 
-send_gdb "maint print type argc\n"
-gdb_expect  {
-        -re "type node $hex\r\nname .int. \\($hex\\)\r\ntagname .<NULL>. \\($hex\\)\r\ncode $hex \\(TYPE_CODE_INT\\)\r\nlength \[24\]\r\nupper_bound_type $hex \\(BOUND_SIMPLE\\)\r\nlower_bound_type $hex \\(BOUND_SIMPLE\\)\r\nobjfile $hex\r\ntarget_type $hex\r\npointer_type $hex\r\nreference_type $hex\r\ntype_chain $hex\r\ninstance_flags $hex\r\nflags $hex\r\nnfields 0 $hex\r\nvptr_basetype $hex\r\nvptr_fieldno -1\r\ntype_specific $hex\r\n$gdb_prompt $"\
-                        { pass "maint print type" }
-        -re ".*$gdb_prompt $"       { fail "maint print type" }
-        timeout         { fail "(timeout) maint print type" }
-        }
+set msg "maint print type"
+gdb_test_multiple "maint print type argc" $msg {
+    -re "type node $hex\r\nname .int. \\($hex\\)\r\ntagname .<NULL>. \\($hex\\)\r\ncode $hex \\(TYPE_CODE_INT\\)\r\nlength \[24\]\r\nobjfile $hex\r\ntarget_type $hex\r\npointer_type $hex\r\nreference_type $hex\r\ntype_chain $hex\r\ninstance_flags $hex\r\nflags\r\nnfields 0 $hex\r\nvptr_basetype $hex\r\nvptr_fieldno -1\r\n$gdb_prompt $" {
+        pass $msg
+    }
+}
 
 if [istarget "hppa*-*-11*"] {
     setup_xfail hppa*-*-*11* CLLbs14860
@@ -483,9 +477,9 @@ set bp_location6 [gdb_get_line_number "set breakpoint 6 here"]
 
 send_gdb "maint info breakpoints\n"
 gdb_expect {
-    -re "Num\[ \t\]+Type\[ \t\]+Disp\[ \t\]+Enb\[ \t\]+Address\[ \t\]+What\r\n1\[ \t\]+breakpoint\[ \t\]+keep\[ \t\]+y\[ \t\]+$hex\[ \t\]+in main at.*break.c:$bp_location6\r\n\[ \t\]+breakpoint already hit 1 time\r\n.*$gdb_prompt $"\
+    -re "Num\[ \t\]+Type\[ \t\]+Disp\[ \t\]+Enb\[ \t\]+Address\[ \t\]+What\r\n1\[ \t\]+breakpoint\[ \t\]+keep\[ \t\]+y\[ \t\]+$hex\[ \t\]+in main at.*break.c:$bp_location6 inf 1\r\n\[ \t\]+breakpoint already hit 1 time\r\n.*$gdb_prompt $"\
 		{ pass "maint info breakpoints" }
-	-re "Num\[ \t\]+Type\[ \t\]+Disp\[ \t\]+Enb\[ \t\]+Address\[ \t\]+What\r\n1\[ \t\]+breakpoint\[ \t\]+keep\[ \t\]+y\[ \t\]+$hex in main at.*break.c:$bp_location6\r\n\[ \t\]+breakpoint already hit 1 time\r\n-1\[ \t\]+shlib events\[ \t\]+keep\[ \t\]+y\[ \t\]+$hex.*breakpoint already hit.*$gdb_prompt $"\
+	-re "Num\[ \t\]+Type\[ \t\]+Disp\[ \t\]+Enb\[ \t\]+Address\[ \t\]+What\r\n1\[ \t\]+breakpoint\[ \t\]+keep\[ \t\]+y\[ \t\]+$hex in main at.*break.c:$bp_location6 sspace 1\r\n\[ \t\]+breakpoint already hit 1 time\r\n-1\[ \t\]+shlib events\[ \t\]+keep\[ \t\]+y\[ \t\]+$hex.*breakpoint already hit.*$gdb_prompt $"\
 		{ pass "maint info breakpoints (with shlib events)" }
 	-re ".*$gdb_prompt $"       { fail "maint info breakpoints" }
 	timeout         { fail "(timeout) maint info breakpoints" }

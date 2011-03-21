@@ -1,6 +1,6 @@
 /* Handle PA64 shared libraries for GDB, the GNU Debugger.
 
-   Copyright (C) 2004, 2007, 2008 Free Software Foundation, Inc.
+   Copyright (C) 2004, 2007, 2008, 2009, 2010 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -36,6 +36,7 @@
 #include "gdbcore.h"
 #include "target.h"
 #include "inferior.h"
+#include "regcache.h"
 
 #include "hppa-tdep.h"
 #include "solist.h"
@@ -46,7 +47,7 @@
 
 /* We can build this file only when running natively on 64-bit HP/UX.
    We check for that by checking for the elf_hp.h header file.  */
-#ifdef HAVE_ELF_HP_H
+#if defined(HAVE_ELF_HP_H) && defined(__LP64__)
 
 /* FIXME: kettenis/20041213: These includes should be eliminated.  */
 #include <dlfcn.h>
@@ -79,7 +80,7 @@ read_dynamic_info (asection *dyninfo_sect, dld_cache_t *dld_cache_p);
 
 static void
 pa64_relocate_section_addresses (struct so_list *so,
-				 struct section_table *sec)
+				 struct target_section *sec)
 {
   asection *asec = sec->the_bfd_section;
   CORE_ADDR load_offset;
@@ -125,8 +126,8 @@ pa64_target_read_memory (void *buffer, CORE_ADDR ptr, size_t bufsiz, int ident)
 
    This must happen after dld starts running, so we can't do it in
    read_dynamic_info.  Record the fact that we have loaded the
-   descriptor.  If the library is archive bound, then return zero, else
-   return nonzero.  */
+   descriptor.  If the library is archive bound or the load map
+   hasn't been setup, then return zero; else return nonzero.  */
 
 static int
 read_dld_descriptor (void)
@@ -160,6 +161,9 @@ read_dld_descriptor (void)
     {
       error (_("Error while reading in load map pointer."));
     }
+
+  if (!dld_cache.load_map)
+    return 0;
 
   /* Read in the dld load module descriptor */
   if (dlgetmodinfo (-1, 
@@ -209,9 +213,7 @@ read_dynamic_info (asection *dyninfo_sect, dld_cache_t *dld_cache_p)
       Elf64_Dyn *x_dynp = (Elf64_Dyn*)buf;
       Elf64_Sxword dyn_tag;
       CORE_ADDR	dyn_ptr;
-      char *pbuf;
 
-      pbuf = alloca (gdbarch_ptr_bit (current_gdbarch) / HOST_CHAR_BIT);
       dyn_tag = bfd_h_get_64 (symfile_objfile->obfd, 
 			      (bfd_byte*) &x_dynp->d_tag);
 
@@ -319,16 +321,15 @@ bfd_lookup_symbol (bfd *abfd, char *symname)
    to tell the dynamic linker that a private copy of the library is
    needed (so GDB can set breakpoints in the library).
 
-   We need to set two flag bits in this routine.
-
-     DT_HP_DEBUG_PRIVATE to indicate that shared libraries should be
-     mapped private.
-
-     DT_HP_DEBUG_CALLBACK to indicate that we want the dynamic linker to
-     call the breakpoint routine for significant events.  */
+   We need to set DT_HP_DEBUG_CALLBACK to indicate that we want the
+   dynamic linker to call the breakpoint routine for significant events.
+   We used to set DT_HP_DEBUG_PRIVATE to indicate that shared libraries
+   should be mapped private.  However, this flag can be set using
+   "chatr +dbg enable".  Not setting DT_HP_DEBUG_PRIVATE allows debugging
+   with shared libraries mapped shareable.  */
 
 static void
-pa64_solib_create_inferior_hook (void)
+pa64_solib_create_inferior_hook (int from_tty)
 {
   struct minimal_symbol *msymbol;
   unsigned int dld_flags, status;
@@ -357,8 +358,15 @@ pa64_solib_create_inferior_hook (void)
   if (! read_dynamic_info (shlib_info, &dld_cache))
     error (_("Unable to read the .dynamic section."));
 
+  /* If the libraries were not mapped private, warn the user.  */
+  if ((dld_cache.dld_flags & DT_HP_DEBUG_PRIVATE) == 0)
+    warning
+      (_("Private mapping of shared library text was not specified\n"
+	 "by the executable; setting a breakpoint in a shared library which\n"
+	 "is not privately mapped will not work.  See the HP-UX 11i v3 chatr\n"
+	 "manpage for methods to privately map shared library text."));
+
   /* Turn on the flags we care about.  */
-  dld_cache.dld_flags |= DT_HP_DEBUG_PRIVATE;
   dld_cache.dld_flags |= DT_HP_DEBUG_CALLBACK;
   status = target_write_memory (dld_cache.dld_flags_addr,
 				(char *) &dld_cache.dld_flags,
@@ -412,14 +420,15 @@ pa64_solib_create_inferior_hook (void)
 
 	 Also note the breakpoint is the second instruction in the
 	 routine.  */
-      load_addr = read_pc () - tmp_bfd->start_address;
+      load_addr = regcache_read_pc (get_current_regcache ())
+		  - tmp_bfd->start_address;
       sym_addr = bfd_lookup_symbol (tmp_bfd, "__dld_break");
       sym_addr = load_addr + sym_addr + 4;
       
       /* Create the shared library breakpoint.  */
       {
 	struct breakpoint *b
-	  = create_solib_event_breakpoint (sym_addr);
+	  = create_solib_event_breakpoint (target_gdbarch, sym_addr);
 
 	/* The breakpoint is actually hard-coded into the dynamic linker,
 	   so we don't need to actually insert a breakpoint instruction
@@ -450,12 +459,6 @@ pa64_current_sos (void)
   if (! dld_cache.have_read_dld_descriptor)
     if (! read_dld_descriptor ())
       return NULL;
-
-  /* If the libraries were not mapped private, warn the user.  */
-  if ((dld_cache.dld_flags & DT_HP_DEBUG_PRIVATE) == 0)
-    warning (_("The shared libraries were not privately mapped; setting a\n"
-    	     "breakpoint in a shared library will not work until you rerun "
-	     "the program.\n"));
 
   for (dll_index = -1; ; dll_index++)
     {
@@ -526,7 +529,7 @@ pa64_open_symbol_file_object (void *from_ttyp)
   char *dll_path;
 
   if (symfile_objfile)
-    if (!query ("Attempt to reload symbols from process? "))
+    if (!query (_("Attempt to reload symbols from process? ")))
       return 0;
 
   /* Read in the load map pointer if we have not done so already.  */
@@ -655,6 +658,7 @@ _initialize_pa64_solib (void)
   pa64_so_ops.current_sos = pa64_current_sos;
   pa64_so_ops.open_symbol_file_object = pa64_open_symbol_file_object;
   pa64_so_ops.in_dynsym_resolve_code = pa64_in_dynsym_resolve_code;
+  pa64_so_ops.bfd_open = solib_bfd_open;
 
   memset (&dld_cache, 0, sizeof (dld_cache));
 }

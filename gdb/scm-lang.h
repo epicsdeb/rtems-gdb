@@ -1,6 +1,6 @@
 /* Scheme/Guile language support routines for GDB, the GNU debugger.
 
-   Copyright (C) 1995, 1996, 1998, 1999, 2000, 2003, 2005, 2008
+   Copyright (C) 1995, 1996, 1998, 1999, 2000, 2003, 2005, 2008, 2009, 2010
    Free Software Foundation, Inc.
 
    This file is part of GDB.
@@ -35,8 +35,8 @@
 #define SCM_LENGTH(x) (((unsigned long)SCM_CAR(x))>>8)
 #define SCM_NCONSP(x) (1 & (int)SCM_CAR(x))
 #define SCM_NECONSP(x) (SCM_NCONSP(x) && (1 != SCM_TYP3(x)))
-#define SCM_CAR(x) scm_get_field (x, 0)
-#define SCM_CDR(x) scm_get_field (x, 1)
+#define SCM_CAR(x) scm_get_field (x, 0, SCM_SIZE, SCM_BYTE_ORDER)
+#define SCM_CDR(x) scm_get_field (x, 1, SCM_SIZE, SCM_BYTE_ORDER)
 #define SCM_VELTS(x) ((SCM *)SCM_CDR(x))
 #define SCM_CLOSCAR(x) (SCM_CAR(x)-scm_tc3_closure)
 #define SCM_CODE(x) SCM_CAR(SCM_CLOSCAR (x))
@@ -46,25 +46,31 @@
 struct value;
 
 extern int scm_value_print (struct value *, struct ui_file *,
-			    int, enum val_prettyprint);
+			    const struct value_print_options *);
 
 extern int scm_val_print (struct type *, const gdb_byte *, int, CORE_ADDR,
-			  struct ui_file *, int, int, int,
-			  enum val_prettyprint);
+			  struct ui_file *, int,
+			  const struct value_print_options *);
 
-extern LONGEST scm_get_field (LONGEST, int);
-
-extern void scm_scmval_print (LONGEST, struct ui_file *, int, int, int,
-			      enum val_prettyprint);
+extern LONGEST scm_get_field (LONGEST, int, int, enum bfd_endian);
 
 extern int is_scmvalue_type (struct type *);
 
-extern void scm_printchar (int, struct ui_file *);
+extern void scm_printchar (int, struct type *, struct ui_file *);
 
 extern struct value *scm_evaluate_string (char *, int);
-
-extern struct type *builtin_type_scm;
 
 extern int scm_parse (void);
 
 extern LONGEST scm_unpack (struct type *, const gdb_byte *, enum type_code);
+
+/* Scheme types */
+
+struct builtin_scm_type
+{
+  struct type *builtin_scm;
+};
+
+/* Return the Scheme type table for the specified architecture.  */
+extern const struct builtin_scm_type *builtin_scm_type (struct gdbarch *gdbarch);
+

@@ -1,6 +1,6 @@
 /* Obstack wrapper for GDB.
 
-   Copyright (C) 2002, 2007, 2008 Free Software Foundation, Inc.
+   Copyright (C) 2002, 2007, 2008, 2009, 2010 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -44,5 +44,8 @@
   obstack_grow (OBSTACK, STRING, strlen (STRING))
 #define obstack_grow_str0(OBSTACK,STRING) \
   obstack_grow0 (OBSTACK, STRING, strlen (STRING))
+
+#define obstack_grow_wstr(OBSTACK, WSTRING) \
+  obstack_grow (OBSTACK, WSTRING, sizeof (gdb_wchar_t) * gdb_wcslen (WSTRING))
 
 #endif

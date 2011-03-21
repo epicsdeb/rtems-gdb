@@ -1,5 +1,5 @@
 /* Remote debugging interface to dBUG ROM monitor for GDB, the GNU debugger.
-   Copyright (C) 1996, 1998, 1999, 2000, 2001, 2007, 2008
+   Copyright (C) 1996, 1998, 1999, 2000, 2001, 2007, 2008, 2009, 2010
    Free Software Foundation, Inc.
 
    Written by Stan Shebs of Cygnus Support.
@@ -90,8 +90,7 @@ dbug_regname (int index)
     /* no float registers */
   };
 
-  if ((index >= (sizeof (regnames) / sizeof (regnames[0]))) 
-      || (index < 0) || (index >= gdbarch_num_regs (current_gdbarch)))
+  if (index >= ARRAY_SIZE (regnames) || index < 0)
     return NULL;
   else
     return regnames[index];

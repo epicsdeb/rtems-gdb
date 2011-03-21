@@ -1,6 +1,6 @@
 /* Stack manipulation commands, for GDB the GNU Debugger.
 
-   Copyright (C) 2003, 2007, 2008 Free Software Foundation, Inc.
+   Copyright (C) 2003, 2007, 2008, 2009, 2010 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -21,5 +21,10 @@
 #define STACK_H
 
 void select_frame_command (char *level_exp, int from_tty);
+
+/* Attempt to obtain the FUNNAME and FUNLANG of the function corresponding
+   to FRAME.  */
+void find_frame_funname (struct frame_info *frame, char **funname,
+			 enum language *funlang);
 
 #endif /* #ifndef STACK_H */

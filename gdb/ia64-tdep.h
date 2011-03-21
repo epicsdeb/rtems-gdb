@@ -1,6 +1,7 @@
 /* Target-dependent code for the ia64.
 
-   Copyright (C) 2004, 2005, 2007, 2008 Free Software Foundation, Inc.
+   Copyright (C) 2004, 2005, 2007, 2008, 2009, 2010
+   Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -196,8 +197,11 @@
 
 struct gdbarch_tdep
 {
-  CORE_ADDR (*sigcontext_register_address) (CORE_ADDR, int);
+  CORE_ADDR (*sigcontext_register_address) (struct gdbarch *, CORE_ADDR, int);
   int (*pc_in_sigtramp) (CORE_ADDR);
+
+  /* ISA-specific data types.  */
+  struct type *ia64_ext_type;
 };
 
 extern void ia64_write_pc (struct regcache *, CORE_ADDR);

@@ -1,6 +1,7 @@
 /* Frame unwinder for frames with DWARF Call Frame Information.
 
-   Copyright (C) 2003, 2004, 2005, 2007, 2008 Free Software Foundation, Inc.
+   Copyright (C) 2003, 2004, 2005, 2007, 2008, 2009, 2010
+   Free Software Foundation, Inc.
 
    Contributed by Mark Kettenis.
 
@@ -55,6 +56,7 @@ enum dwarf2_frame_reg_rule
 
   /* These aren't defined by the DWARF2 CFI specification, but are
      used internally by GDB.  */
+  DWARF2_FRAME_REG_FN,		/* Call a registered function.  */
   DWARF2_FRAME_REG_RA,		/* Return Address.  */
   DWARF2_FRAME_REG_RA_OFFSET,	/* Return Address with offset.  */
   DWARF2_FRAME_REG_CFA,		/* Call Frame Address.  */
@@ -71,6 +73,8 @@ struct dwarf2_frame_state_reg
     LONGEST offset;
     ULONGEST reg;
     unsigned char *exp;
+    struct value *(*fn) (struct frame_info *this_frame, void **this_cache,
+			 int regnum);
   } loc;
   ULONGEST exp_len;
   enum dwarf2_frame_reg_rule how;
@@ -100,20 +104,22 @@ extern void
 				  int (*adjust_regnum) (struct gdbarch *,
 							int, int));
 
-/* Return the frame unwind methods for the function that contains PC,
-   or NULL if it can't be handled by DWARF CFI frame unwinder.  */
+/* Append the DWARF-2 frame unwinders to GDBARCH's list.  */
 
-extern const struct frame_unwind *
-  dwarf2_frame_sniffer (struct frame_info *next_frame);
+void dwarf2_append_unwinders (struct gdbarch *gdbarch);
 
 /* Return the frame base methods for the function that contains PC, or
    NULL if it can't be handled by the DWARF CFI frame unwinder.  */
 
 extern const struct frame_base *
-  dwarf2_frame_base_sniffer (struct frame_info *next_frame);
+  dwarf2_frame_base_sniffer (struct frame_info *this_frame);
 
 /* Register the DWARF CFI for OBJFILE.  */
 
 void dwarf2_frame_build_info (struct objfile *objfile);
+
+/* Compute the DWARF CFA for a frame.  */
+
+CORE_ADDR dwarf2_frame_cfa (struct frame_info *this_frame);
 
 #endif /* dwarf2-frame.h */

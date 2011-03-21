@@ -1,7 +1,7 @@
 /* Scheme/Guile language support routines for GDB, the GNU debugger.
 
    Copyright (C) 1995, 1996, 1998, 2000, 2001, 2002, 2003, 2004, 2005, 2007,
-   2008 Free Software Foundation, Inc.
+   2008, 2009, 2010 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -32,24 +32,22 @@
 #include "gdb_string.h"
 #include "gdbcore.h"
 #include "infcall.h"
+#include "objfiles.h"
 
 extern void _initialize_scheme_language (void);
-static struct value *evaluate_subexp_scm (struct type *, struct expression *,
-				      int *, enum noside);
-static struct value *scm_lookup_name (char *);
+static struct value *scm_lookup_name (struct gdbarch *, char *);
 static int in_eval_c (void);
 
-struct type *builtin_type_scm;
-
 void
-scm_printchar (int c, struct ui_file *stream)
+scm_printchar (int c, struct type *type, struct ui_file *stream)
 {
   fprintf_filtered (stream, "#\\%c", c);
 }
 
 static void
-scm_printstr (struct ui_file *stream, const gdb_byte *string,
-	      unsigned int length, int width, int force_ellipses)
+scm_printstr (struct ui_file *stream, struct type *type, const gdb_byte *string,
+	      unsigned int length, const char *encoding, int force_ellipses,
+	      const struct value_print_options *options)
 {
   fprintf_filtered (stream, "\"%s\"", string);
 }
@@ -68,12 +66,12 @@ is_scmvalue_type (struct type *type)
    of the 0'th one.  */
 
 LONGEST
-scm_get_field (LONGEST svalue, int index)
+scm_get_field (LONGEST svalue, int index, int size,
+	       enum bfd_endian byte_order)
 {
   gdb_byte buffer[20];
-  read_memory (SCM2PTR (svalue) + index * TYPE_LENGTH (builtin_type_scm),
-	       buffer, TYPE_LENGTH (builtin_type_scm));
-  return extract_signed_integer (buffer, TYPE_LENGTH (builtin_type_scm));
+  read_memory (SCM2PTR (svalue) + index * size, buffer, size);
+  return extract_signed_integer (buffer, size, byte_order);
 }
 
 /* Unpack a value of type TYPE in buffer VALADDR as an integer
@@ -85,7 +83,10 @@ scm_unpack (struct type *type, const gdb_byte *valaddr, enum type_code context)
 {
   if (is_scmvalue_type (type))
     {
-      LONGEST svalue = extract_signed_integer (valaddr, TYPE_LENGTH (type));
+      enum bfd_endian byte_order = gdbarch_byte_order (get_type_arch (type));
+      LONGEST svalue
+	= extract_signed_integer (valaddr, TYPE_LENGTH (type), byte_order);
+
       if (context == TYPE_CODE_BOOL)
 	{
 	  if (svalue == SCM_BOOL_F)
@@ -145,36 +146,37 @@ in_eval_c (void)
    function), then try lookup_symbol for compiled variables. */
 
 static struct value *
-scm_lookup_name (char *str)
+scm_lookup_name (struct gdbarch *gdbarch, char *str)
 {
   struct value *args[3];
   int len = strlen (str);
   struct value *func;
   struct value *val;
   struct symbol *sym;
+
+  func = find_function_in_inferior ("scm_lookup_cstr", NULL);
+
   args[0] = value_allocate_space_in_inferior (len);
-  args[1] = value_from_longest (builtin_type_int, len);
+  args[1] = value_from_longest (builtin_type (gdbarch)->builtin_int, len);
   write_memory (value_as_long (args[0]), (gdb_byte *) str, len);
 
   if (in_eval_c ()
       && (sym = lookup_symbol ("env",
 			       expression_context_block,
-			       VAR_DOMAIN, (int *) NULL,
-			       (struct symtab **) NULL)) != NULL)
+			       VAR_DOMAIN, (int *) NULL)) != NULL)
     args[2] = value_of_variable (sym, expression_context_block);
   else
     /* FIXME in this case, we should try lookup_symbol first */
-    args[2] = value_from_longest (builtin_type_scm, SCM_EOL);
+    args[2] = value_from_longest (builtin_scm_type (gdbarch)->builtin_scm,
+				  SCM_EOL);
 
-  func = find_function_in_inferior ("scm_lookup_cstr");
   val = call_function_by_hand (func, 3, args);
   if (!value_logical_not (val))
     return value_ind (val);
 
   sym = lookup_symbol (str,
 		       expression_context_block,
-		       VAR_DOMAIN, (int *) NULL,
-		       (struct symtab **) NULL);
+		       VAR_DOMAIN, (int *) NULL);
   if (sym)
     return value_of_variable (sym, NULL);
   error (_("No symbol \"%s\" in current context."), str);
@@ -189,7 +191,7 @@ scm_evaluate_string (char *str, int len)
   write_memory (iaddr, (gdb_byte *) str, len);
   /* FIXME - should find and pass env */
   write_memory (iaddr + len, (gdb_byte *) "", 1);
-  func = find_function_in_inferior ("scm_evstr");
+  func = find_function_in_inferior ("scm_evstr", NULL);
   return call_function_by_hand (func, 1, &addr);
 }
 
@@ -209,7 +211,7 @@ evaluate_exp (struct type *expect_type, struct expression *exp,
       if (noside == EVAL_SKIP)
 	goto nosideret;
       str = &exp->elts[pc + 2].string;
-      return scm_lookup_name (str);
+      return scm_lookup_name (exp->gdbarch, str);
     case OP_STRING:
       pc = (*pos)++;
       len = longest_to_int (exp->elts[pc + 1].longconst);
@@ -222,7 +224,7 @@ evaluate_exp (struct type *expect_type, struct expression *exp,
     }
   return evaluate_subexp_standard (expect_type, exp, pos, noside);
 nosideret:
-  return value_from_longest (builtin_type_long, (LONGEST) 1);
+  return value_from_longest (builtin_type (exp->gdbarch)->builtin_int, 1);
 }
 
 const struct exp_descriptor exp_descriptor_scm = 
@@ -242,6 +244,7 @@ const struct language_defn scm_language_defn =
   type_check_off,
   case_sensitive_off,
   array_row_major,
+  macro_expansion_no,
   &exp_descriptor_scm,
   scm_parse,
   c_error,
@@ -250,10 +253,11 @@ const struct language_defn scm_language_defn =
   scm_printstr,			/* Function to print string constant */
   NULL,				/* Function to print a single character */
   c_print_type,			/* Print a type using appropriate syntax */
+  default_print_typedef,	/* Print a typedef using appropriate syntax */
   scm_val_print,		/* Print a value using appropriate syntax */
   scm_value_print,		/* Print a top-level value */
   NULL,				/* Language specific skip_trampoline */
-  value_of_this,		/* value_of_this */
+  NULL,	                        /* name_of_this */
   basic_lookup_symbol_nonlocal,	/* lookup_symbol_nonlocal */
   basic_lookup_transparent_type,/* lookup_transparent_type */
   NULL,				/* Language specific symbol demangler */
@@ -266,15 +270,34 @@ const struct language_defn scm_language_defn =
   c_language_arch_info,
   default_print_array_index,
   default_pass_by_reference,
+  default_get_string,
   LANG_MAGIC
 };
+
+static void *
+build_scm_types (struct gdbarch *gdbarch)
+{
+  struct builtin_scm_type *builtin_scm_type
+    = GDBARCH_OBSTACK_ZALLOC (gdbarch, struct builtin_scm_type);
+
+  builtin_scm_type->builtin_scm
+    = arch_integer_type (gdbarch, gdbarch_long_bit (gdbarch), 0, "SCM");
+
+  return builtin_scm_type;
+}
+
+static struct gdbarch_data *scm_type_data;
+
+const struct builtin_scm_type *
+builtin_scm_type (struct gdbarch *gdbarch)
+{
+  return gdbarch_data (gdbarch, scm_type_data);
+}
 
 void
 _initialize_scheme_language (void)
 {
+  scm_type_data = gdbarch_data_register_post_init (build_scm_types);
+
   add_language (&scm_language_defn);
-  builtin_type_scm =
-    init_type (TYPE_CODE_INT,
-	       gdbarch_long_bit (current_gdbarch) / TARGET_CHAR_BIT,
-	       0, "SCM", (struct objfile *) NULL);
 }

@@ -1,7 +1,7 @@
 # This testcase is part of GDB, the GNU debugger.
 
 # Copyright 1992, 1994, 1995, 1996, 1997, 1999, 2000, 2002, 2003, 2004, 2007,
-# 2008 Free Software Foundation, Inc.
+# 2008, 2009, 2010 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -78,6 +78,13 @@ proc test_integer_literals_accepted {} {
     gdb_test "p 0xabcdef" " = 11259375"
     gdb_test "p 0xAbCdEf" " = 11259375"
     gdb_test "p/x 0x123" " = 0x123"
+
+    # Test various binary values.
+
+    gdb_test "p 0b0" " = 0"
+    gdb_test "p 0b1111" " = 15"
+    gdb_test "p 0B1111" " = 15"
+    gdb_test "p -0b1111" " = -15"
 }
 
 proc test_character_literals_accepted {} {
@@ -99,7 +106,8 @@ proc test_character_literals_accepted {} {
 proc test_integer_literals_rejected {} {
     global gdb_prompt
 
-    test_print_reject "p 0x" 
+    test_print_reject "p 0x"
+    test_print_reject "p 0b"
     gdb_test "p ''" "(Empty character constant\\.|A character constant must contain at least one character\\.)"
     gdb_test "p '''" "(Empty character constant\\.|A character constant must contain at least one character\\.)"
     test_print_reject "p '\\'"
@@ -131,12 +139,17 @@ proc test_integer_literals_rejected {} {
 
     test_print_reject "p 0xG" 
     test_print_reject "p 0xAG" 
+
+    # Test various binary values.
+
+    test_print_reject "p 0b2" 
+    test_print_reject "p 0b12" 
 }
 
 proc test_print_all_chars {} {
     global gdb_prompt
 
-    gdb_test "p ctable1\[0\]"   " = 0 '\\\\0'"
+    gdb_test "p ctable1\[0\]"   " = 0 '\\\\000'"
     gdb_test "p ctable1\[1\]"   " = 1 '\\\\001'"
     gdb_test "p ctable1\[2\]"   " = 2 '\\\\002'"
     gdb_test "p ctable1\[3\]"   " = 3 '\\\\003'"
@@ -569,6 +582,11 @@ proc test_print_typedef_arrays {} {
 	" = \"abcd\""
     gdb_test "p a2\[0\]" " = 97 'a'"
     gdb_test "p a2\[3\]" " = 100 'd'"
+
+    # Regression test of null-stop; PR 11049.
+    gdb_test "set print null-stop on" ""
+    gdb_test "p a2" " = \"abcd\"" "print a2 with null-stop on"
+    gdb_test "set print null-stop off" ""
 }
 
 proc test_artificial_arrays {} {
@@ -629,7 +647,6 @@ proc test_print_string_constants {} {
     gdb_test "p *\"foo\""		" = 102 'f'"
     gdb_test "ptype *\"foo\""		" = char"
     gdb_test "p &*\"foo\""		" = \"foo\""
-    setup_kfail "gdb/538" *-*-*
     gdb_test "ptype &*\"foo\""	"type = char \\*"
     gdb_test "p (char *)\"foo\""	" = \"foo\""
 }
@@ -651,7 +668,7 @@ proc test_print_array_constants {} {
     gdb_test_escape_braces "print {(long)0,(long)1,(long)2}"  " = {0, 1, 2}"
     gdb_test_escape_braces "print {{0,1,2},{3,4,5}}"  " = {{0, 1, 2}, {3, 4, 5}}"
     gdb_test "print {4,5,6}\[2\]"	" = 6"
-    gdb_test "print *&{4,5,6}\[1\]"	" = 5"
+    gdb_test "print *&{4,5,6}\[1\]"	"Attempt to take address of value not located in memory."
 }
 
 proc test_printf {} {
@@ -666,6 +683,13 @@ proc test_printf {} {
     gdb_test "printf \"x=%d,y=%f,z=%d\\n\", 5, 6.0, 7" "x=5,y=6\.0+,z=7"
     gdb_test "printf \"%x %f, %c %x, %x, %f\\n\", 0xbad, -99.541, 'z',\
 0xfeedface, 0xdeadbeef, 5.0" "bad -99.54\[0-9\]+, z feedface, deadbeef, 5.0+"
+
+    # Regression test for C lexer bug.
+    gdb_test "printf \"%c\\n\", \"x\"\[1,0\]" "x"
+
+    # Regression test for "%% at end of format string.
+    # See http://sourceware.org/bugzilla/show_bug.cgi?id=11345
+    gdb_test "printf \"%%%d%%\\n\", 5" "%5%"
 }
 
 #Test printing DFP values with printf
@@ -735,10 +759,18 @@ gdb_start
 gdb_reinitialize_dir $srcdir/$subdir
 
 gdb_test "print \$pc" "No registers\\."
-# FIXME: should also test "print $pc" when there is an execfile but no
-# remote debugging target, process or corefile.
+
+# Some simple operations on strings should work even without a target
+# (and therefore without calling malloc).
+gdb_test "print \"abc\"" " = \"abc\""
+gdb_test "print sizeof (\"abc\")" " = 4"
+gdb_test "ptype \"abc\"" " = char \\\[4\\\]"
+gdb_test "print \$cvar = \"abc\"" " = \"abc\""
+gdb_test "print sizeof (\$cvar)" " = 4"
 
 gdb_load ${binfile}
+
+gdb_test "print \$pc" "No registers\\." "print \$pc (with file)"
 
 gdb_test "set print sevenbit-strings" ""
 gdb_test "set print address off" ""

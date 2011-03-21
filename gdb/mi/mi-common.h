@@ -1,5 +1,5 @@
 /* Interface for common GDB/MI data
-   Copyright (C) 2005, 2007, 2008 Free Software Foundation, Inc.
+   Copyright (C) 2005, 2007, 2008, 2009, 2010 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -40,5 +40,20 @@ enum async_reply_reason
 };
 
 const char *async_reason_lookup (enum async_reply_reason reason);
+
+struct mi_interp
+{
+  /* MI's output channels */
+  struct ui_file *out;
+  struct ui_file *err;
+  struct ui_file *log;
+  struct ui_file *targ;
+  struct ui_file *event_channel;
+
+  /* This is the interpreter for the mi... */
+  struct interp *mi2_interp;
+  struct interp *mi1_interp;
+  struct interp *mi_interp;
+};
 
 #endif

@@ -1,4 +1,5 @@
-# Copyright (C) 2002, 2003, 2005, 2007, 2008 Free Software Foundation, Inc.
+# Copyright (C) 2002, 2003, 2005, 2007, 2008, 2009, 2010
+# Free Software Foundation, Inc.
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -27,7 +28,6 @@ if $tracelevel then {
 
 if {![istarget "powerpc*"] || [skip_altivec_tests]} then {
     verbose "Skipping altivec abi tests."
-    verbose -log "Skipping altivec abi tests."
     return
 }
 
@@ -73,6 +73,7 @@ proc altivec_abi_tests { extra_flags force_abi } {
 	return -1
     }
 
+    gdb_test "set print frame-arguments all"
     gdb_test "set powerpc vector-abi $force_abi"
 
     gdb_test "b marker" "Breakpoint 2 at.*file.*altivec-abi.c, line \[0-9\]+." "break marker"

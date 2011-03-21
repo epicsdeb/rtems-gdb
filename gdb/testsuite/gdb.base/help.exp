@@ -1,5 +1,6 @@
 #   Copyright 1988, 1990, 1991, 1992, 1994, 1995, 1996, 1997, 1998, 1999,
-#   2000, 2002, 2003, 2005, 2006, 2007, 2008 Free Software Foundation, Inc.
+#   2000, 2002, 2003, 2005, 2006, 2007, 2008, 2009, 2010
+#   Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -13,9 +14,6 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
-
-# Please email any bugs, comments, and/or additions to this file to:
-# bug-gdb@prep.ai.mit.edu
 
 # This file was written by Rob Savoye. (rob@cygnus.com)
 
@@ -71,7 +69,7 @@ gdb_test "help continue" "Continue program being debugged.*" "help continue"
 # test help call
 gdb_test "help call" "Call a function.*" "help call"
 # test help catch
-gdb_test "help catch" "Set catchpoints to catch events.*Raised signals may be caught:.*catch signal.*all signals.*catch signal.*signame.*a particular signal.*Raised exceptions may be caught:.*catch throw.*all exceptions, when thrown.*catch throw.*exceptname.*a particular exception, when thrown.*catch catch.*all exceptions, when caught.*catch catch.*exceptname.*a particular exception, when caught.*Thread or process events may be caught:.*catch thread_start.*any threads, just after creation.*catch thread_exit.*any threads, just before expiration.*catch thread_join.*any threads, just after joins.*catch start.*any processes, just after creation.*catch exit.*any processes, just before expiration.*catch fork.*calls to fork.*catch vfork.*calls to vfork.*catch exec.*calls to exec.*Dynamically.linked library events may be caught:.*catch load.*loads of any library.*catch load.*libname.*loads of a particular library.*catch unload.*unloads of any library.*catch unload.*libname.*unloads of a particular library.*The act of your program's execution stopping may also be caught:.*catch stop.*Do.*help set follow-fork-mode.*for info on debugging your program.*after a fork or vfork is caught.*Do.*help breakpoints.*for info on other commands dealing with breakpoints." "help catch"
+gdb_test "help catch" "Set catchpoints to catch events.*List of catch subcommands:.*catch assert -- Catch failed Ada assertions.*catch catch -- Catch an exception.*catch exception -- Catch Ada exceptions.*catch exec -- Catch calls to exec.*catch fork -- Catch calls to fork.*catch vfork -- Catch calls to vfork.*Type .help catch. followed by catch subcommand name for full documentation.*Type .apropos word. to search for commands related to .word..*Command name abbreviations are allowed if unambiguous.*" "help catch"
 # test help cd
 gdb_test "help cd" "Set working directory to DIR for debugger and program being debugged\.\[\r\n\]+The change does not take effect for the program being debugged\[\r\n\]+until the next time it is started\." "help cd"
 # test help clear
@@ -126,7 +124,7 @@ gdb_test "help disable breakpoints" "Disable some breakpoints\.\[\r\n\]+Argument
 # test help disable display
 gdb_test "help disable display" "Disable some expressions to be displayed when program stops\.\[\r\n\]+Arguments are the code numbers of the expressions to stop displaying\.\[\r\n\]+No argument means disable all automatic-display expressions\.\[\r\n\]+Do \"info display\" to see current list of code numbers\." "help disable display"
 # test help disassemble
-gdb_test "help disassemble" "Disassemble a specified section of memory\.\[\r\n\]+Default is the function surrounding the pc of the selected frame\.\[\r\n\]+With a single argument, the function surrounding that address is dumped\.\[\r\n\]+Two arguments are taken as a range of memory to dump\." "help disassemble"
+gdb_test "help disassemble" "Disassemble a specified section of memory\.\[\r\n\]+Default is the function surrounding the pc of the selected frame\.\[\r\n\]+With a /m modifier, source lines are included \\(if available\\)\.\[\r\n\]+With a /r modifier, raw instructions in hex are included\.\[\r\n\]+With a single argument, the function surrounding that address is dumped\.\[\r\n\]+Two arguments \\(separated by a comma\\) are taken as a range of memory to dump\." "help disassemble"
 # test help display
 gdb_test "help display" "Print value of expression EXP each time the program stops\.\[\r\n\]+/FMT may be used before EXP as in the \"print\" command\.\[\r\n\]+/FMT \"i\" or \"s\" or including a size-letter is allowed,\[\r\n\]+as in the \"x\" command, and then EXP is used to get the address to examine\[\r\n\]+and examining is done as in the \"x\" command\.\[\r\n\]+With no argument, display all currently requested auto-display expressions\.\[\r\n\]+Use \"undisplay\" to cancel display requests previously made\." "help display"
 # test help do
@@ -302,7 +300,9 @@ gdb_test "help inspect" "Same as \"print\" command, except that if you are runni
 # test help jump
 gdb_test "help jump" "Continue program being debugged at specified line or address\.\[\r\n\]+Give as argument either LINENUM or \[*\]+ADDR, where ADDR is an expression\[\r\n\]+for an address to start at\." "help jump"
 # test help kill
-gdb_test "help kill" "Kill execution of program being debugged\." "help kill"
+test_prefix_command_help "kill" {
+    "Kill execution of program being debugged\.\[\r\n\]+"
+}
 # test help list "l" abbreviation
 gdb_test "help l" "List specified function or line\.\[\r\n\]+With no argument, lists ten more lines after or around previous listing\.\[\r\n\]+\"list -\" lists the ten lines before a previous ten-line listing\.\[\r\n\]+One argument specifies a line, and ten lines are listed around that line\.\[\r\n\]+Two arguments with comma between specify starting and ending lines to list\.\[\r\n\]+Lines can be specified in these ways:\[\r\n\]+  LINENUM, to list around that line in current file,\[\r\n\]+  FILE:LINENUM, to list around that line in that file,\[\r\n\]+  FUNCTION, to list around beginning of that function,\[\r\n\]+  FILE:FUNCTION, to distinguish among like-named static functions\.\[\r\n\]+  \[*\]ADDRESS, to list around the line containing that address\.\[\r\n\]+With two args if one is empty it stands for ten lines away from the other arg\." "help list \"l\" abbreviation"
 # test help list
@@ -418,7 +418,8 @@ test_prefix_command_help {"set history"} {
     "Generic command for setting command history parameters\.\[\r\n\]+"
 }
 # test help set language
-gdb_test "help set language" "Set the current source language\." "help set language"
+gdb_test "help set language" "Set the current source language\.\[\r\n\]+The currently understood settings are:(\[^\r\n\]*\[\r\n\])+local or auto  *Automatic setting based on source file(\[^\r\n\]*\[\r\n\])+c  *Use the C language(\[^\r\n\]*\[\r\n\])+c\[+\]+  *Use the C\[+\]+ language(\[^\r\n\]*\[\r\n\])+modula-2  *Use the Modula-2 language.*" "help set language"
+
 # test help set listsize
 gdb_test "help set listsize" "Set number of source lines gdb will list by default\." "help set listsize"
 # test help set print "p" abbreviation

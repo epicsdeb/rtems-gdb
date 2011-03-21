@@ -1,7 +1,7 @@
 /* Header file for command-reading library command.c.
 
    Copyright (C) 1986, 1989, 1990, 1991, 1992, 1993, 1994, 1995, 1999, 2000,
-   2002, 2004, 2007, 2008 Free Software Foundation, Inc.
+   2002, 2004, 2007, 2008, 2009, 2010 Free Software Foundation, Inc.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -32,8 +32,8 @@ enum command_class
   /* Classes of commands */
   no_class = -1, class_run = 0, class_vars, class_stack,
   class_files, class_support, class_info, class_breakpoint, class_trace,
-  class_alias, class_obscure, class_user, class_maintenance,
-  class_pseudo, class_tui, class_xdb
+  class_alias, class_bookmark, class_obscure, class_maintenance,
+  class_pseudo, class_tui, class_user, class_xdb
 };
 
 /* FIXME: cagney/2002-03-17: Once cmd_type() has been removed, ``enum
@@ -87,6 +87,9 @@ typedef enum var_types
     /* ZeroableInteger.  *VAR is an int.  Like Unsigned Integer except
        that zero really means zero.  */
     var_zinteger,
+    /* ZeroableUnsignedInteger.  *VAR is an unsigned int.  Zero really
+       means zero.  */
+    var_zuinteger,
     /* Enumerated type.  Can only have one of the specified values.  *VAR is a
        char pointer to the name of the element that we find.  */
     var_enum
@@ -135,7 +138,8 @@ extern void set_cmd_sfunc (struct cmd_list_element *cmd,
 			   cmd_sfunc_ftype *sfunc);
 
 extern void set_cmd_completer (struct cmd_list_element *cmd,
-			       char **(*completer) (char *text, char *word));
+			       char **(*completer) (struct cmd_list_element *cmd,
+						    char *text, char *word));
 
 /* HACK: cagney/2002-02-23: Code, mostly in tracepoints.c, grubs
    around in cmd objects to test the value of the commands sfunc().  */
@@ -193,8 +197,6 @@ extern char **complete_on_cmdlist (struct cmd_list_element *, char *, char *);
 
 extern char **complete_on_enum (const char *enumlist[], char *, char *);
 
-extern void delete_cmd (char *, struct cmd_list_element **);
-
 extern void help_cmd (char *, struct ui_file *);
 
 extern void help_list (struct cmd_list_element *, char *,
@@ -202,16 +204,6 @@ extern void help_list (struct cmd_list_element *, char *,
 
 extern void help_cmd_list (struct cmd_list_element *, enum command_class,
 			   char *, int, struct ui_file *);
-
-/* NOTE: cagney/2005-02-21: Since every set command should be paired
-   with a corresponding show command (i.e., add_setshow_*) this call
-   should not be needed.  Unfortunatly some are not (e.g.,
-   "maintenance <variable> <value>") and those need to be fixed.  */
-extern struct cmd_list_element *deprecated_add_set_cmd (char *name, enum
-							command_class class,
-							var_types var_type, void *var,
-							char *doc,
-							struct cmd_list_element **list);
 
 /* Method for show a set/show variable's VALUE on FILE.  If this
    method isn't supplied deprecated_show_value_hack() is called (which
@@ -333,6 +325,17 @@ extern void add_setshow_zinteger_cmd (char *name,
 				      show_value_ftype *show_func,
 				      struct cmd_list_element **set_list,
 				      struct cmd_list_element **show_list);
+
+extern void add_setshow_zuinteger_cmd (char *name,
+				       enum command_class class,
+				       unsigned int *var,
+				       const char *set_doc,
+				       const char *show_doc,
+				       const char *help_doc,
+				       cmd_sfunc_ftype *set_func,
+				       show_value_ftype *show_func,
+				       struct cmd_list_element **set_list,
+				       struct cmd_list_element **show_list);
 
 /* Do a "show" command for each thing on a command list.  */
 

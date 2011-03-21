@@ -1,4 +1,4 @@
-# Copyright 1997, 1998, 2000, 2001, 2002, 2003, 2004, 2007, 2008
+# Copyright 1997, 1998, 2000, 2001, 2002, 2003, 2004, 2007, 2008, 2009, 2010
 # Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
@@ -163,14 +163,8 @@ gdb_expect {
        
 # Break on a function in a namespace
 
-send_gdb "break AAA::xyzq\n"
-gdb_expect {
-    -re "Breakpoint.*at $hex: file.*namespace.cc, line 42\\.\r\n$gdb_prompt $" {
-         pass "break AAA::xyzq"
-    }    
-   -re ".*$gdb_prompt $" { fail "break AAA::xyzq" }
-   timeout { fail "(timeout) break AAA::xyzq" }
-}
+gdb_test "break AAA::xyzq" \
+    "Breakpoint.*at $hex: file.*namespace.cc, line 47\\."
 
 # Call a function in a nested namespace
 
@@ -194,14 +188,8 @@ gdb_expect {
        
 # Break on a function in a nested namespace
 
-send_gdb "break BBB::CCC::xyzq\n"
-gdb_expect {
-    -re "Breakpoint.*at $hex: file.*namespace.cc, line 58\\.\r\n$gdb_prompt $" {
-         pass "break BBB::CCC::xyzq"
-    }    
-   -re ".*$gdb_prompt $" { fail "break BBB::CCC::xyzq" }
-   timeout { fail "(timeout) break BBB::CCC::xyzq" }
-}
+gdb_test "break BBB::CCC::xyzq" \
+    "Breakpoint.*at $hex: file.*namespace.cc, line 63\\."
 
 # Print address of a function in a class in a namespace
 
@@ -225,14 +213,8 @@ gdb_expect {
 
 # Break on a function in a class in a namespace
 
-send_gdb "break BBB::Class::xyzq\n"
-gdb_expect {
-    -re "Breakpoint.*at $hex: file.*namespace.cc, line 63\\.\r\n$gdb_prompt $" {
-         pass "break BBB::Class::xyzq"
-    }    
-   -re ".*$gdb_prompt $" { fail "break BBB::Class::xyzq" }
-   timeout { fail "(timeout) break BBB::Class::xyzq" }
-}
+gdb_test "break BBB::Class::xyzq" \
+    "Breakpoint.*at $hex: file.*namespace.cc, line 68\\."
 
 # Test to see if the appropriate namespaces are in scope when trying
 # to print out stuff from within a function defined within a
@@ -289,3 +271,6 @@ gdb_test "print G::Xg" "\\$\[0-9\].* = 10"
 gdb_test "print G::XgX" "\\$\[0-9\].* = 11"
 gdb_test "print cXOtherFile" "No symbol \"cXOtherFile\" in current context."
 gdb_test "print XOtherFile" "No symbol \"XOtherFile\" in current context."
+
+# Enum tests.
+gdb_test "print AAA::ALPHA" "\\$\[0-9\].* = AAA::ALPHA"

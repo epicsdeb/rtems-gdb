@@ -1,5 +1,5 @@
 /* BFD back-end for PDP-11 a.out binaries.
-   Copyright 2001, 2002, 2003, 2004, 2005, 2006, 2007
+   Copyright 2001, 2002, 2003, 2004, 2005, 2006, 2007, 2009
    Free Software Foundation, Inc.
 
    This file is part of BFD, the Binary File Descriptor library.
@@ -58,19 +58,13 @@
 /* The header is not included in the text segment.  */
 #define N_HEADER_IN_TEXT(x)	0
 
-/* There are no shared libraries.  */
-#define N_SHARED_LIB(x) 	0
-
 /* There is no flags field.  */
 #define N_FLAGS(exec)		0
 
 #define N_SET_FLAGS(exec, flags) do { } while (0)
-#define N_BADMAG(x) (((x).a_info != OMAGIC)   \
-		  && ((x).a_info != NMAGIC)   \
-		  && ((x).a_info != A_MAGIC3) \
-		  && ((x).a_info != A_MAGIC4) \
-		  && ((x).a_info != A_MAGIC5) \
-		  && ((x).a_info != A_MAGIC6))
+#define N_BADMAG(x) (N_MAGIC(x) != OMAGIC	\
+		     && N_MAGIC(x) != NMAGIC	\
+		     && N_MAGIC(x) != ZMAGIC)
 
 #include "sysdep.h"
 #include "bfd.h"
@@ -507,19 +501,12 @@ NAME (aout, some_aout_object_p) (bfd *abfd,
       abfd->flags |= D_PAGED | WP_TEXT;
       adata (abfd).magic = z_magic;
     }
-  else if (N_MAGIC (*execp) == QMAGIC)
-    {
-      abfd->flags |= D_PAGED | WP_TEXT;
-      adata (abfd).magic = z_magic;
-      adata (abfd).subformat = q_magic_format;
-    }
   else if (N_MAGIC (*execp) == NMAGIC)
     {
       abfd->flags |= WP_TEXT;
       adata (abfd).magic = n_magic;
     }
-  else if (N_MAGIC (*execp) == OMAGIC
-	   || N_MAGIC (*execp) == BMAGIC)
+  else if (N_MAGIC (*execp) == OMAGIC)
     adata (abfd).magic = o_magic;
   else
     {
@@ -958,10 +945,7 @@ adjust_z_magic (bfd *abfd, struct internal_exec *execp)
   execp->a_text = obj_textsec(abfd)->size;
   if (ztih && (!abdp || (abdp && !abdp->exec_header_not_counted)))
     execp->a_text += adata(abfd).exec_bytes_size;
-  if (obj_aout_subformat (abfd) == q_magic_format)
-    N_SET_MAGIC (*execp, QMAGIC);
-  else
-    N_SET_MAGIC (*execp, ZMAGIC);
+  N_SET_MAGIC (*execp, ZMAGIC);
 
   /* Spec says data section should be rounded up to page boundary.  */
   obj_datasec(abfd)->size
@@ -1446,13 +1430,13 @@ asymbol *
 NAME (aout, make_empty_symbol) (bfd *abfd)
 {
   bfd_size_type amt = sizeof (aout_symbol_type);
-  aout_symbol_type *new = bfd_zalloc (abfd, amt);
+  aout_symbol_type *new_symbol_type = bfd_zalloc (abfd, amt);
 
-  if (!new)
+  if (!new_symbol_type)
     return NULL;
-  new->symbol.the_bfd = abfd;
+  new_symbol_type->symbol.the_bfd = abfd;
 
-  return &new->symbol;
+  return &new_symbol_type->symbol;
 }
 
 /* Translate a set of internal symbols into external symbols.  */
@@ -1585,7 +1569,7 @@ add_to_stringtab (bfd *abfd,
 		  bfd_boolean copy)
 {
   bfd_boolean hash;
-  bfd_size_type index;
+  bfd_size_type str_index;
 
   /* An index of 0 always means the empty string.  */
   if (str == 0 || *str == '\0')
@@ -1597,14 +1581,14 @@ add_to_stringtab (bfd *abfd,
   if ((abfd->flags & BFD_TRADITIONAL_FORMAT) != 0)
     hash = FALSE;
 
-  index = _bfd_stringtab_add (tab, str, hash, copy);
+  str_index = _bfd_stringtab_add (tab, str, hash, copy);
 
-  if (index != (bfd_size_type) -1)
+  if (str_index != (bfd_size_type) -1)
     /* Add BYTES_IN_LONG to the return value to account for the
        space taken up by the string table size.  */
-    index += BYTES_IN_LONG;
+    str_index += BYTES_IN_LONG;
 
-  return index;
+  return str_index;
 }
 
 /* Write out a strtab.  ABFD is already at the right location in the

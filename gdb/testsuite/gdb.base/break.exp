@@ -1,5 +1,5 @@
 #   Copyright 1988, 1990, 1991, 1992, 1994, 1995, 1996, 1997, 1998, 1999,
-#   2000, 2002, 2003, 2007, 2008 Free Software Foundation, Inc.
+#   2000, 2002, 2003, 2007, 2008, 2009, 2010 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -14,54 +14,13 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-# Please email any bugs, comments, and/or additions to this file to:
-# bug-gdb@prep.ai.mit.edu
-
 # This file was written by Rob Savoye. (rob@cygnus.com)
 
-if $tracelevel then {
-    strace $tracelevel
-}
-
-
-#
-# test running programs
-#
-set prms_id 0
-set bug_id 0
-
-set testfile "break"
-set srcfile ${testfile}.c
-set srcfile1 ${testfile}1.c
-set binfile ${objdir}/${subdir}/${testfile}
-
-if  { [gdb_compile "${srcdir}/${subdir}/${srcfile}" "${binfile}0.o" object {debug nowarnings}] != "" } {
-     untested break.exp
-     return -1
-}
-
-if  { [gdb_compile "${srcdir}/${subdir}/${srcfile1}" "${binfile}1.o" object {debug nowarnings}] != "" } {
-     untested break.exp
-     return -1
-}
-
-if  { [gdb_compile "${binfile}0.o ${binfile}1.o" "${binfile}" executable {debug nowarnings}] != "" } {
-     untested break.exp
-     return -1
-}
-
-if [get_compiler_info ${binfile}] {
+if { [prepare_for_testing break.exp "break" {break.c break1.c} {debug nowarnings}] } {
     return -1
 }
-
-gdb_exit
-gdb_start
-gdb_reinitialize_dir $srcdir/$subdir
-gdb_load ${binfile}
-
-if [target_info exists gdb_stub] {
-    gdb_step_for_stub;
-}
+set srcfile break.c
+set srcfile1 break1.c
 #
 # test simple breakpoint setting commands
 #
@@ -272,13 +231,13 @@ delete_breakpoints
 # test temporary breakpoint at function
 #
 
-gdb_test "tbreak main" "Breakpoint.*at.* file .*$srcfile, line.*" "Temporary breakpoint function"
+gdb_test "tbreak main" "Temporary breakpoint.*at.* file .*$srcfile, line.*" "Temporary breakpoint function"
 
 #
 # test break at function in file
 #
 
-gdb_test "tbreak $srcfile:factorial" "Breakpoint.*at.* file .*$srcfile, line.*" \
+gdb_test "tbreak $srcfile:factorial" "Temporary breakpoint.*at.* file .*$srcfile, line.*" \
 	"Temporary breakpoint function in file"
 
 #
@@ -286,25 +245,37 @@ gdb_test "tbreak $srcfile:factorial" "Breakpoint.*at.* file .*$srcfile, line.*" 
 #
 send_gdb "tbreak $bp_location1\n"
 gdb_expect {
-    -re "Breakpoint.*at.* file .*$srcfile, line $bp_location1.*$gdb_prompt $" { pass "Temporary breakpoint line number #1" }
-	-re ".*$gdb_prompt $"   { pass "Temporary breakpoint line number #1" }
-	timeout	    { fail "breakpoint line number #1 (timeout)" }
+    -re "Temporary breakpoint.*at.* file .*$srcfile, line $bp_location1.*$gdb_prompt $" {
+	pass "Temporary breakpoint line number #1"
+    }
+    -re ".*$gdb_prompt $" {
+	fail "Temporary breakpoint line number #1"
+    }
+    timeout {
+	fail "Temporary breakpoint line number #1 (timeout)"
+    }
 }
 
-gdb_test "tbreak $bp_location6" "Breakpoint.*at.* file .*$srcfile, line $bp_location6.*" "Temporary breakpoint line number #2"
+gdb_test "tbreak $bp_location6" "Temporary breakpoint.*at.* file .*$srcfile, line $bp_location6.*" "Temporary breakpoint line number #2"
 
 #
 # test break at line number in file
 #
 send_gdb "tbreak $srcfile:$bp_location2\n"
 gdb_expect {
-    -re "Breakpoint.*at.* file .*$srcfile, line $bp_location2.*$gdb_prompt $" { pass "Temporary breakpoint line number in file #1" }
-	-re ".*$gdb_prompt $"   { pass "Temporary breakpoint line number in file #1" }
-	timeout	    { fail "Temporary breakpoint line number in file #1 (timeout)" }
+    -re "Temporary breakpoint.*at.* file .*$srcfile, line $bp_location2.*$gdb_prompt $" {
+	pass "Temporary breakpoint line number in file #1"
+    }
+    -re ".*$gdb_prompt $" {
+	fail "Temporary breakpoint line number in file #1"
+    }
+    timeout {
+	fail "Temporary breakpoint line number in file #1 (timeout)"
+    }
 }
 
 set bp_location11 [gdb_get_line_number "set breakpoint 11 here"]
-gdb_test  "tbreak $srcfile:$bp_location11" "Breakpoint.*at.* file .*$srcfile, line $bp_location11.*" "Temporary breakpoint line number in file #2"
+gdb_test  "tbreak $srcfile:$bp_location11" "Temporary breakpoint.*at.* file .*$srcfile, line $bp_location11.*" "Temporary breakpoint line number in file #2"
 
 #
 # check to see what breakpoints are set (temporary this time)
@@ -613,7 +584,7 @@ gdb_expect {
 }
 send_gdb "print marker2(99)\n"
 gdb_expect {
-  -re "The program being debugged stopped while in a function called from GDB.\r\nWhen the function .marker2$proto. is done executing, GDB will silently\r\nstop .instead of continuing to evaluate the expression containing\r\nthe function call...*$gdb_prompt $"\
+  -re "The program being debugged stopped while in a function called from GDB.\r\nEvaluation of the expression containing the function\r\n.marker2$proto. will be abandoned.\r\nWhen the function is done executing, GDB will silently stop..*$gdb_prompt $"\
           {pass "hit breakpoint on called function"}
   -re "$gdb_prompt $"\
           {fail "hit breakpoint on called function"}
@@ -845,34 +816,8 @@ test_next_with_recursion
 # build a new file with optimization enabled so that we can try breakpoints
 # on targets with optimized prologues
 
-set binfileo2 ${objdir}/${subdir}/${testfile}o2
-
-if  { [gdb_compile "${srcdir}/${subdir}/${srcfile}" "${binfile}O0.o" object {debug nowarnings optimize=-O2}] != "" } {
-     untested break.exp
-     return -1
-}
-
-if  { [gdb_compile "${srcdir}/${subdir}/${srcfile1}" "${binfile}O1.o" object {debug nowarnings optimize=-O2}] != "" } {
-     untested break.exp
-     return -1
-}
-
-if  { [gdb_compile "${binfile}O0.o ${binfile}O1.o" "${binfileo2}" executable {debug nowarnings}] != "" } {
-     untested break.exp
-     return -1
-}
-
-if [get_compiler_info ${binfileo2}] {
+if { [prepare_for_testing break.exp "breako2" {break.c break1.c} {debug nowarnings optimize=-O2}] } {
     return -1
-}
-
-gdb_exit
-gdb_start
-gdb_reinitialize_dir $srcdir/$subdir
-gdb_load ${binfileo2}
-
-if [target_info exists gdb_stub] {
-    gdb_step_for_stub;
 }
 
 #
@@ -935,11 +880,52 @@ gdb_expect {
         # marker4() is defined at line 46 when compiled with -DPROTOTYPES
 	pass "run until breakpoint set at small function, optimized file (line bp_location14)"
     }
+    -re "Breakpoint $decimal, factorial \\(.*\\) .*\{\r\n$gdb_prompt" {
+	# GCC 4.3 emits bad line number information - see gcc/36748.
+	if { [test_compiler_info "gcc-4-3-*"] } {
+	    setup_xfail *-*-*
+	}
+	fail "run until breakpoint set at small function, optimized file"
+    }
     -re ".*$gdb_prompt " {
 	fail "run until breakpoint set at small function, optimized file"
     }
     timeout {
 	fail "run until breakpoint set at small function, optimized file (timeout)"
+    }
+}
+
+clean_restart breako2
+
+#
+# test that 'rbreak' on a symbol that may be from a shared library doesn't
+# cause a "Junk at end of arguments." error.
+#
+# On x86 GNU/Linux, this test will choke on e.g. __libc_start_main@plt.
+#
+# Note that this test won't necessarily choke on all targets even if
+# all the rbreak issue is present.  rbreak needs to match and set a
+# breakpoint on a symbol causes 'break' to choke.
+#
+
+gdb_test "set breakpoint pending on" "" "rbreak junk pending setup"
+
+# We expect at least one breakpoint to be set when we "rbreak main".
+gdb_test "rbreak main" \
+    ".*Breakpoint.*at.* file .*$srcfile, line.*" \
+    "rbreak junk set breakpoint"
+
+# Run to a breakpoint.  Fail if we see "Junk at end of arguments".
+gdb_run_cmd
+gdb_expect {
+    -re "Junk at end of arguments" {
+	fail "rbreak junk"
+    }
+    -re ".*Breakpoint \[0-9\]+,.*$gdb_prompt $" {
+	pass "rbreak junk"
+    }
+    timeout {
+	fail "rbreak junk (timeout)"
     }
 }
 

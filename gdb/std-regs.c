@@ -1,6 +1,7 @@
 /* Builtin frame register, for GDB, the GNU debugger.
 
-   Copyright (C) 2002, 2005, 2007, 2008 Free Software Foundation, Inc.
+   Copyright (C) 2002, 2005, 2007, 2008, 2009, 2010
+   Free Software Foundation, Inc.
 
    Contributed by Red Hat.
 
@@ -42,12 +43,13 @@ value_of_builtin_frame_fp_reg (struct frame_info *frame, const void *baton)
 			      frame);
   else
     {
-      struct value *val = allocate_value (builtin_type_void_data_ptr);
+      struct type *data_ptr_type = builtin_type (gdbarch)->builtin_data_ptr;
+      struct value *val = allocate_value (data_ptr_type);
       gdb_byte *buf = value_contents_raw (val);
       if (frame == NULL)
 	memset (buf, 0, TYPE_LENGTH (value_type (val)));
       else
-	gdbarch_address_to_pointer (gdbarch, builtin_type_void_data_ptr,
+	gdbarch_address_to_pointer (gdbarch, data_ptr_type,
 				    buf, get_frame_base_address (frame));
       return val;
     }
@@ -61,12 +63,13 @@ value_of_builtin_frame_pc_reg (struct frame_info *frame, const void *baton)
     return value_of_register (gdbarch_pc_regnum (gdbarch), frame);
   else
     {
-      struct value *val = allocate_value (builtin_type_void_func_ptr);
+      struct type *func_ptr_type = builtin_type (gdbarch)->builtin_func_ptr;
+      struct value *val = allocate_value (func_ptr_type);
       gdb_byte *buf = value_contents_raw (val);
       if (frame == NULL)
 	memset (buf, 0, TYPE_LENGTH (value_type (val)));
       else
-	gdbarch_address_to_pointer (gdbarch, builtin_type_void_func_ptr,
+	gdbarch_address_to_pointer (gdbarch, func_ptr_type,
 				    buf, get_frame_pc (frame));
       return val;
     }

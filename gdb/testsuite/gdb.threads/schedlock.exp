@@ -1,4 +1,4 @@
-# Copyright (C) 1996, 1997, 2002, 2003, 2007, 2008
+# Copyright (C) 1996, 1997, 2002, 2003, 2007, 2008, 2009, 2010
 # Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
@@ -13,9 +13,6 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
-
-# Please email any bugs, comments, and/or additions to this file to:
-# bug-gdb@prep.ai.mit.edu
 
 # This file was written by Daniel Jacobowitz <drow@mvista.com>
 # (parts based on pthreads.exp by Fred Fish (fnf@cygnus.com).
@@ -45,14 +42,25 @@ if {[gdb_compile_pthreads "${srcdir}/${subdir}/${srcfile}" "${binfile}" executab
 proc get_args { } {
   global list_count
   global gdb_prompt
+  global NUM
+
+  set pattern "(\[0-9\]+)"
+  for {set i 1} {[expr $i < $NUM]} {incr i} {
+    append pattern ", (\[0-9\]+)"
+  }
 
   send_gdb "print args\n"
   gdb_expect {
-    -re "\\\$\[0-9\]+ = {(\[0-9\]+), (\[0-9\]+)}.*$gdb_prompt"
+    -re "\\\$\[0-9\]+ = {$pattern}.*$gdb_prompt"
       {
 	set list_count [expr $list_count + 1]
 	pass "listed args ($list_count)"
-	return [list $expect_out(1,string) $expect_out(2,string)]
+
+	set result ""
+	for {set i 1} {[expr $i <= $NUM]} {incr i} {
+	  lappend result $expect_out($i,string)
+	}
+	return $result
       }
     -re "$gdb_prompt"
       {
@@ -202,16 +210,16 @@ my_continue "initial"
 
 set cont_args [get_args]
 
-set ok 1
+set bad 0
 for {set i 0} {[expr $i < $NUM]} {set i [expr $i + 1]} {
   if {[lindex $start_args $i] == [lindex $cont_args $i]} {
-    set ok 0
+    incr bad
   }
 }
-if { $ok } {
+if { $bad == 0 } {
   pass "all threads alive"
 } else {
-  fail "all threads alive"
+  fail "all threads alive ($bad/$NUM did not run)"
 }
 
 # We can't change threads, unfortunately, in current GDB.  Use

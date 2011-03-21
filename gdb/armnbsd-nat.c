@@ -1,7 +1,7 @@
 /* Native-dependent code for BSD Unix running on ARM's, for GDB.
 
    Copyright (C) 1988, 1989, 1991, 1992, 1994, 1996, 1999, 2002, 2004, 2007,
-   2008 Free Software Foundation, Inc.
+   2008, 2009, 2010 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -194,7 +194,8 @@ fetch_fp_regs (struct regcache *regcache)
 }
 
 static void
-armnbsd_fetch_registers (struct regcache *regcache, int regno)
+armnbsd_fetch_registers (struct target_ops *ops,
+			 struct regcache *regcache, int regno)
 {
   if (regno >= 0)
     {
@@ -394,7 +395,8 @@ store_fp_regs (const struct regcache *regcache)
 }
 
 static void
-armnbsd_store_registers (struct regcache *regcache, int regno)
+armnbsd_store_registers (struct target_ops *ops,
+			 struct regcache *regcache, int regno)
 {
   if (regno >= 0)
     {

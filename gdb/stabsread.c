@@ -2,7 +2,7 @@
 
    Copyright (C) 1986, 1987, 1988, 1989, 1990, 1991, 1992, 1993, 1994, 1995,
    1996, 1997, 1998, 1999, 2000, 2001, 2002, 2003, 2004, 2005, 2006, 2007,
-   2008 Free Software Foundation, Inc.
+   2008, 2009, 2010 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -114,7 +114,7 @@ static struct type *read_sun_floating_type (char **, int[2],
 
 static struct type *read_enum_type (char **, struct type *, struct objfile *);
 
-static struct type *rs6000_builtin_type (int);
+static struct type *rs6000_builtin_type (int, struct objfile *);
 
 static int
 read_member_functions (struct field_info *, char **, struct type *,
@@ -218,7 +218,7 @@ static int noname_undefs_length;
    or for associating a new type with the pair.  */
 
 static struct type **
-dbx_lookup_type (int typenums[2])
+dbx_lookup_type (int typenums[2], struct objfile *objfile)
 {
   int filenum = typenums[0];
   int index = typenums[1];
@@ -249,7 +249,7 @@ dbx_lookup_type (int typenums[2])
 	     this will do the right thing.  */
 	  static struct type *temp_type;
 
-	  temp_type = rs6000_builtin_type (index);
+	  temp_type = rs6000_builtin_type (index, objfile);
 	  return &temp_type;
 	}
 
@@ -280,18 +280,18 @@ dbx_lookup_type (int typenums[2])
     {
       real_filenum = this_object_header_files[filenum];
 
-      if (real_filenum >= N_HEADER_FILES (current_objfile))
+      if (real_filenum >= N_HEADER_FILES (objfile))
 	{
-	  static struct type **temp_type_p;
+	  static struct type *temp_type;
 
 	  warning (_("GDB internal error: bad real_filenum"));
 
 	error_return:
-	  temp_type_p = &builtin_type_error;
-	  return temp_type_p;
+	  temp_type = objfile_type (objfile)->builtin_error;
+	  return &temp_type;
 	}
 
-      f = HEADER_FILES (current_objfile) + real_filenum;
+      f = HEADER_FILES (objfile) + real_filenum;
 
       f_orig_length = f->length;
       if (index >= f_orig_length)
@@ -325,7 +325,7 @@ dbx_alloc_type (int typenums[2], struct objfile *objfile)
       return (alloc_type (objfile));
     }
 
-  type_addr = dbx_lookup_type (typenums);
+  type_addr = dbx_lookup_type (typenums, objfile);
 
   /* If we are referring to a type not known at all yet,
      allocate an empty type for it.
@@ -387,8 +387,9 @@ patch_block_stabs (struct pending *symbols, struct pending_stabs *stabs,
 	      memset (sym, 0, sizeof (struct symbol));
 	      SYMBOL_DOMAIN (sym) = VAR_DOMAIN;
 	      SYMBOL_CLASS (sym) = LOC_OPTIMIZED_OUT;
-	      DEPRECATED_SYMBOL_NAME (sym) =
-		obsavestring (name, pp - name, &objfile->objfile_obstack);
+	      SYMBOL_SET_LINKAGE_NAME
+		(sym, obsavestring (name, pp - name,
+				    &objfile->objfile_obstack));
 	      pp += 2;
 	      if (*(pp - 1) == 'F' || *(pp - 1) == 'f')
 		{
@@ -578,15 +579,40 @@ symbol_reference_defined (char **string)
     }
 }
 
+static int
+stab_reg_to_regnum (struct symbol *sym, struct gdbarch *gdbarch)
+{
+  int regno = gdbarch_stab_reg_to_regnum (gdbarch, SYMBOL_VALUE (sym));
+
+  if (regno >= gdbarch_num_regs (gdbarch)
+		+ gdbarch_num_pseudo_regs (gdbarch))
+    {
+      reg_value_complaint (regno,
+			   gdbarch_num_regs (gdbarch)
+			     + gdbarch_num_pseudo_regs (gdbarch),
+			   SYMBOL_PRINT_NAME (sym));
+
+      regno = gdbarch_sp_regnum (gdbarch); /* Known safe, though useless */
+    }
+
+  return regno;
+}
+
+static const struct symbol_register_ops stab_register_funcs = {
+  stab_reg_to_regnum
+};
+
 struct symbol *
 define_symbol (CORE_ADDR valu, char *string, int desc, int type,
 	       struct objfile *objfile)
 {
+  struct gdbarch *gdbarch = get_objfile_arch (objfile);
   struct symbol *sym;
   char *p = (char *) find_name_end (string);
   int deftype;
   int synonym = 0;
   int i;
+  char *new_name = NULL;
 
   /* We would like to eliminate nameless symbols, but keep their types.
      E.g. stab entry ":t10=*2" should produce a type 10, which is a pointer
@@ -647,17 +673,14 @@ define_symbol (CORE_ADDR valu, char *string, int desc, int type,
       switch (string[1])
 	{
 	case 't':
-	  DEPRECATED_SYMBOL_NAME (sym) = obsavestring ("this", strlen ("this"),
-					    &objfile->objfile_obstack);
+	  SYMBOL_SET_LINKAGE_NAME (sym, "this");
 	  break;
 
 	case 'v':		/* $vtbl_ptr_type */
-	  /* Was: DEPRECATED_SYMBOL_NAME (sym) = "vptr"; */
 	  goto normal;
 
 	case 'e':
-	  DEPRECATED_SYMBOL_NAME (sym) = obsavestring ("eh_throw", strlen ("eh_throw"),
-					    &objfile->objfile_obstack);
+	  SYMBOL_SET_LINKAGE_NAME (sym, "eh_throw");
 	  break;
 
 	case '_':
@@ -666,7 +689,7 @@ define_symbol (CORE_ADDR valu, char *string, int desc, int type,
 
 	case 'X':
 	  /* SunPRO (3.0 at least) static variable encoding.  */
-	  if (gdbarch_static_transform_name_p (current_gdbarch))
+	  if (gdbarch_static_transform_name_p (gdbarch))
 	    goto normal;
 	  /* ... fall through ... */
 
@@ -680,7 +703,21 @@ define_symbol (CORE_ADDR valu, char *string, int desc, int type,
     {
     normal:
       SYMBOL_LANGUAGE (sym) = current_subfile->language;
-      SYMBOL_SET_NAMES (sym, string, p - string, objfile);
+      if (SYMBOL_LANGUAGE (sym) == language_cplus)
+	{
+	  char *name = alloca (p - string + 1);
+	  memcpy (name, string, p - string);
+	  name[p - string] = '\0';
+	  new_name = cp_canonicalize_string (name);
+	  cp_scan_for_anonymous_namespaces (sym);
+	}
+      if (new_name != NULL)
+	{
+	  SYMBOL_SET_NAMES (sym, new_name, strlen (new_name), 1, objfile);
+	  xfree (new_name);
+	}
+      else
+	SYMBOL_SET_NAMES (sym, string, p - string, 1, objfile);
     }
   p++;
 
@@ -731,7 +768,7 @@ define_symbol (CORE_ADDR valu, char *string, int desc, int type,
 	       target arithmetic to get the value.  real.c in GCC
 	       probably has the necessary code.  */
 
-	    dbl_type = builtin_type (current_gdbarch)->builtin_double;
+	    dbl_type = objfile_type (objfile)->builtin_double;
 	    dbl_valu =
 	      obstack_alloc (&objfile->objfile_obstack,
 			     TYPE_LENGTH (dbl_type));
@@ -751,7 +788,7 @@ define_symbol (CORE_ADDR valu, char *string, int desc, int type,
 	       types; other languages probably should have at least
 	       unsigned as well as signed constants.  */
 
-	    SYMBOL_TYPE (sym) = builtin_type (current_gdbarch)->builtin_long;
+	    SYMBOL_TYPE (sym) = objfile_type (objfile)->builtin_long;
 	    SYMBOL_VALUE (sym) = atoi (p);
 	    SYMBOL_CLASS (sym) = LOC_CONST;
 	  }
@@ -821,7 +858,7 @@ define_symbol (CORE_ADDR valu, char *string, int desc, int type,
          than the "declared-as" type for unprototyped functions, so
          we treat all functions as if they were prototyped.  This is used
          primarily for promotion when calling the function from GDB.  */
-      TYPE_FLAGS (SYMBOL_TYPE (sym)) |= TYPE_FLAG_PROTOTYPED;
+      TYPE_PROTOTYPED (SYMBOL_TYPE (sym)) = 1;
 
       /* fall into process_prototype_types */
 
@@ -859,15 +896,15 @@ define_symbol (CORE_ADDR valu, char *string, int desc, int type,
 	         be promoted to the width of the calling conventions, with
 	         a type which references itself. This type is turned into
 	         a TYPE_CODE_VOID type by read_type, and we have to turn
-	         it back into builtin_type_int here.
-	         FIXME: Do we need a new builtin_type_promoted_int_arg ?  */
+	         it back into builtin_int here.
+	         FIXME: Do we need a new builtin_promoted_int_arg ?  */
 	      if (TYPE_CODE (ptype) == TYPE_CODE_VOID)
-		ptype = builtin_type_int;
+		ptype = objfile_type (objfile)->builtin_int;
 	      TYPE_FIELD_TYPE (ftype, nparams) = ptype;
 	      TYPE_FIELD_ARTIFICIAL (ftype, nparams++) = 0;
 	    }
 	  TYPE_NFIELDS (ftype) = nparams;
-	  TYPE_FLAGS (ftype) |= TYPE_FLAG_PROTOTYPED;
+	  TYPE_PROTOTYPED (ftype) = 1;
 	}
       break;
 
@@ -891,9 +928,9 @@ define_symbol (CORE_ADDR valu, char *string, int desc, int type,
          Symbol references don't have valid names and wont't match up with
          minimal symbols when the global_sym_chain is relocated.
          We'll fixup symbol references when we fixup the defining symbol.  */
-      if (DEPRECATED_SYMBOL_NAME (sym) && DEPRECATED_SYMBOL_NAME (sym)[0] != '#')
+      if (SYMBOL_LINKAGE_NAME (sym) && SYMBOL_LINKAGE_NAME (sym)[0] != '#')
 	{
-	  i = hashname (DEPRECATED_SYMBOL_NAME (sym));
+	  i = hashname (SYMBOL_LINKAGE_NAME (sym));
 	  SYMBOL_VALUE_CHAIN (sym) = global_sym_chain[i];
 	  global_sym_chain[i] = sym;
 	}
@@ -929,9 +966,10 @@ define_symbol (CORE_ADDR valu, char *string, int desc, int type,
       SYMBOL_CLASS (sym) = LOC_ARG;
       SYMBOL_VALUE (sym) = valu;
       SYMBOL_DOMAIN (sym) = VAR_DOMAIN;
+      SYMBOL_IS_ARGUMENT (sym) = 1;
       add_symbol_to_list (sym, &local_symbols);
 
-      if (gdbarch_byte_order (current_gdbarch) != BFD_ENDIAN_BIG)
+      if (gdbarch_byte_order (gdbarch) != BFD_ENDIAN_BIG)
 	{
 	  /* On little-endian machines, this crud is never necessary,
 	     and, if the extra bytes contain garbage, is harmful.  */
@@ -940,38 +978,21 @@ define_symbol (CORE_ADDR valu, char *string, int desc, int type,
 
       /* If it's gcc-compiled, if it says `short', believe it.  */
       if (processing_gcc_compilation
-	  || gdbarch_believe_pcc_promotion (current_gdbarch))
+	  || gdbarch_believe_pcc_promotion (gdbarch))
 	break;
 
-      if (!gdbarch_believe_pcc_promotion (current_gdbarch))
+      if (!gdbarch_believe_pcc_promotion (gdbarch))
 	{
-	  /* This is the signed type which arguments get promoted to.  */
-	  static struct type *pcc_promotion_type;
-	  /* This is the unsigned type which arguments get promoted to.  */
-	  static struct type *pcc_unsigned_promotion_type;
-
-	  /* Call it "int" because this is mainly C lossage.  */
-	  if (pcc_promotion_type == NULL)
-	    pcc_promotion_type =
-	      init_type (TYPE_CODE_INT, 
-			 gdbarch_int_bit (current_gdbarch) / TARGET_CHAR_BIT,
-			 0, "int", NULL);
-
-	  if (pcc_unsigned_promotion_type == NULL)
-	    pcc_unsigned_promotion_type =
-	      init_type (TYPE_CODE_INT, 
-			 gdbarch_int_bit (current_gdbarch) / TARGET_CHAR_BIT,
-			 TYPE_FLAG_UNSIGNED, "unsigned int", NULL);
-
 	  /* If PCC says a parameter is a short or a char, it is
 	     really an int.  */
-	  if (TYPE_LENGTH (SYMBOL_TYPE (sym)) < TYPE_LENGTH (pcc_promotion_type)
+	  if (TYPE_LENGTH (SYMBOL_TYPE (sym))
+	      < gdbarch_int_bit (gdbarch) / TARGET_CHAR_BIT
 	      && TYPE_CODE (SYMBOL_TYPE (sym)) == TYPE_CODE_INT)
 	    {
 	      SYMBOL_TYPE (sym) =
 		TYPE_UNSIGNED (SYMBOL_TYPE (sym))
-		? pcc_unsigned_promotion_type
-		: pcc_promotion_type;
+		? objfile_type (objfile)->builtin_unsigned_int
+		: objfile_type (objfile)->builtin_int;
 	    }
 	  break;
 	}
@@ -990,18 +1011,10 @@ define_symbol (CORE_ADDR valu, char *string, int desc, int type,
     case 'R':
       /* Parameter which is in a register.  */
       SYMBOL_TYPE (sym) = read_type (&p, objfile);
-      SYMBOL_CLASS (sym) = LOC_REGPARM;
-      SYMBOL_VALUE (sym) = gdbarch_stab_reg_to_regnum (current_gdbarch, valu);
-      if (SYMBOL_VALUE (sym) >= gdbarch_num_regs (current_gdbarch)
-				  + gdbarch_num_pseudo_regs (current_gdbarch))
-	{
-	  reg_value_complaint (SYMBOL_VALUE (sym),
-			       gdbarch_num_regs (current_gdbarch)
-				 + gdbarch_num_pseudo_regs (current_gdbarch),
-			       SYMBOL_PRINT_NAME (sym));
-	  SYMBOL_VALUE (sym) = gdbarch_sp_regnum (current_gdbarch);
-	  /* Known safe, though useless */
-	}
+      SYMBOL_CLASS (sym) = LOC_REGISTER;
+      SYMBOL_REGISTER_OPS (sym) = &stab_register_funcs;
+      SYMBOL_IS_ARGUMENT (sym) = 1;
+      SYMBOL_VALUE (sym) = valu;
       SYMBOL_DOMAIN (sym) = VAR_DOMAIN;
       add_symbol_to_list (sym, &local_symbols);
       break;
@@ -1010,17 +1023,8 @@ define_symbol (CORE_ADDR valu, char *string, int desc, int type,
       /* Register variable (either global or local).  */
       SYMBOL_TYPE (sym) = read_type (&p, objfile);
       SYMBOL_CLASS (sym) = LOC_REGISTER;
-      SYMBOL_VALUE (sym) = gdbarch_stab_reg_to_regnum (current_gdbarch, valu);
-      if (SYMBOL_VALUE (sym) >= gdbarch_num_regs (current_gdbarch)
-				+ gdbarch_num_pseudo_regs (current_gdbarch))
-	{
-	  reg_value_complaint (SYMBOL_VALUE (sym),
-			       gdbarch_num_regs (current_gdbarch)
-				 + gdbarch_num_pseudo_regs (current_gdbarch),
-			       SYMBOL_PRINT_NAME (sym));
-	  SYMBOL_VALUE (sym) = gdbarch_sp_regnum (current_gdbarch);
-	  /* Known safe, though useless */
-	}
+      SYMBOL_REGISTER_OPS (sym) = &stab_register_funcs;
+      SYMBOL_VALUE (sym) = valu;
       SYMBOL_DOMAIN (sym) = VAR_DOMAIN;
       if (within_function)
 	{
@@ -1046,17 +1050,17 @@ define_symbol (CORE_ADDR valu, char *string, int desc, int type,
 
 	  if (local_symbols
 	      && local_symbols->nsyms > 0
-	      && gdbarch_stabs_argument_has_addr (current_gdbarch,
-						  SYMBOL_TYPE (sym)))
+	      && gdbarch_stabs_argument_has_addr (gdbarch, SYMBOL_TYPE (sym)))
 	    {
 	      struct symbol *prev_sym;
 	      prev_sym = local_symbols->symbol[local_symbols->nsyms - 1];
 	      if ((SYMBOL_CLASS (prev_sym) == LOC_REF_ARG
 		   || SYMBOL_CLASS (prev_sym) == LOC_ARG)
-		  && strcmp (DEPRECATED_SYMBOL_NAME (prev_sym),
-			     DEPRECATED_SYMBOL_NAME (sym)) == 0)
+		  && strcmp (SYMBOL_LINKAGE_NAME (prev_sym),
+			     SYMBOL_LINKAGE_NAME (sym)) == 0)
 		{
-		  SYMBOL_CLASS (prev_sym) = LOC_REGPARM;
+		  SYMBOL_CLASS (prev_sym) = LOC_REGISTER;
+		  SYMBOL_REGISTER_OPS (prev_sym) = &stab_register_funcs;
 		  /* Use the type from the LOC_REGISTER; that is the type
 		     that is actually in that register.  */
 		  SYMBOL_TYPE (prev_sym) = SYMBOL_TYPE (sym);
@@ -1076,18 +1080,18 @@ define_symbol (CORE_ADDR valu, char *string, int desc, int type,
       SYMBOL_TYPE (sym) = read_type (&p, objfile);
       SYMBOL_CLASS (sym) = LOC_STATIC;
       SYMBOL_VALUE_ADDRESS (sym) = valu;
-      if (gdbarch_static_transform_name_p (current_gdbarch)
-	  && gdbarch_static_transform_name (current_gdbarch,
-					    DEPRECATED_SYMBOL_NAME (sym))
-	     != DEPRECATED_SYMBOL_NAME (sym))
+      if (gdbarch_static_transform_name_p (gdbarch)
+	  && gdbarch_static_transform_name (gdbarch,
+					    SYMBOL_LINKAGE_NAME (sym))
+	     != SYMBOL_LINKAGE_NAME (sym))
 	{
 	  struct minimal_symbol *msym;
-	  msym = lookup_minimal_symbol (DEPRECATED_SYMBOL_NAME (sym), NULL, objfile);
+	  msym = lookup_minimal_symbol (SYMBOL_LINKAGE_NAME (sym), NULL, objfile);
 	  if (msym != NULL)
 	    {
-	      DEPRECATED_SYMBOL_NAME (sym) = gdbarch_static_transform_name
-					       (current_gdbarch,	
-						DEPRECATED_SYMBOL_NAME (sym));
+	      char *new_name = gdbarch_static_transform_name
+		(gdbarch, SYMBOL_LINKAGE_NAME (sym));
+	      SYMBOL_SET_LINKAGE_NAME (sym, new_name);
 	      SYMBOL_VALUE_ADDRESS (sym) = SYMBOL_VALUE_ADDRESS (msym);
 	    }
 	}
@@ -1147,7 +1151,7 @@ define_symbol (CORE_ADDR valu, char *string, int desc, int type,
 	  extern const char vtbl_ptr_name[];
 
 	  if ((TYPE_CODE (SYMBOL_TYPE (sym)) == TYPE_CODE_PTR
-	       && strcmp (DEPRECATED_SYMBOL_NAME (sym), vtbl_ptr_name))
+	       && strcmp (SYMBOL_LINKAGE_NAME (sym), vtbl_ptr_name))
 	      || TYPE_CODE (SYMBOL_TYPE (sym)) == TYPE_CODE_FUNC)
 	    {
 	      /* If we are giving a name to a type such as "pointer to
@@ -1187,11 +1191,11 @@ define_symbol (CORE_ADDR valu, char *string, int desc, int type,
 	      /* Pascal accepts names for pointer types. */
 	      if (current_subfile->language == language_pascal)
 		{
-		  TYPE_NAME (SYMBOL_TYPE (sym)) = DEPRECATED_SYMBOL_NAME (sym);
+		  TYPE_NAME (SYMBOL_TYPE (sym)) = SYMBOL_LINKAGE_NAME (sym);
           	}
 	    }
 	  else
-	    TYPE_NAME (SYMBOL_TYPE (sym)) = DEPRECATED_SYMBOL_NAME (sym);
+	    TYPE_NAME (SYMBOL_TYPE (sym)) = SYMBOL_LINKAGE_NAME (sym);
 	}
 
       add_symbol_to_list (sym, &file_symbols);
@@ -1209,7 +1213,7 @@ define_symbol (CORE_ADDR valu, char *string, int desc, int type,
           if (TYPE_NAME (SYMBOL_TYPE (sym)) == 0)
             TYPE_NAME (SYMBOL_TYPE (sym))
               = obconcat (&objfile->objfile_obstack, "", "",
-                          DEPRECATED_SYMBOL_NAME (sym));
+                          SYMBOL_LINKAGE_NAME (sym));
           add_symbol_to_list (struct_sym, &file_symbols);
         }
       
@@ -1235,7 +1239,8 @@ define_symbol (CORE_ADDR valu, char *string, int desc, int type,
       SYMBOL_DOMAIN (sym) = STRUCT_DOMAIN;
       if (TYPE_TAG_NAME (SYMBOL_TYPE (sym)) == 0)
 	TYPE_TAG_NAME (SYMBOL_TYPE (sym))
-	  = obconcat (&objfile->objfile_obstack, "", "", DEPRECATED_SYMBOL_NAME (sym));
+	  = obconcat (&objfile->objfile_obstack, "", "",
+		      SYMBOL_LINKAGE_NAME (sym));
       add_symbol_to_list (sym, &file_symbols);
 
       if (synonym)
@@ -1249,7 +1254,8 @@ define_symbol (CORE_ADDR valu, char *string, int desc, int type,
 	  SYMBOL_DOMAIN (typedef_sym) = VAR_DOMAIN;
 	  if (TYPE_NAME (SYMBOL_TYPE (sym)) == 0)
 	    TYPE_NAME (SYMBOL_TYPE (sym))
-	      = obconcat (&objfile->objfile_obstack, "", "", DEPRECATED_SYMBOL_NAME (sym));
+	      = obconcat (&objfile->objfile_obstack, "", "",
+			  SYMBOL_LINKAGE_NAME (sym));
 	  add_symbol_to_list (typedef_sym, &file_symbols);
 	}
       break;
@@ -1259,18 +1265,18 @@ define_symbol (CORE_ADDR valu, char *string, int desc, int type,
       SYMBOL_TYPE (sym) = read_type (&p, objfile);
       SYMBOL_CLASS (sym) = LOC_STATIC;
       SYMBOL_VALUE_ADDRESS (sym) = valu;
-      if (gdbarch_static_transform_name_p (current_gdbarch)
-	  && gdbarch_static_transform_name (current_gdbarch,
-					    DEPRECATED_SYMBOL_NAME (sym))
-	     != DEPRECATED_SYMBOL_NAME (sym))
+      if (gdbarch_static_transform_name_p (gdbarch)
+	  && gdbarch_static_transform_name (gdbarch,
+					    SYMBOL_LINKAGE_NAME (sym))
+	     != SYMBOL_LINKAGE_NAME (sym))
 	{
 	  struct minimal_symbol *msym;
-	  msym = lookup_minimal_symbol (DEPRECATED_SYMBOL_NAME (sym), NULL, objfile);
+	  msym = lookup_minimal_symbol (SYMBOL_LINKAGE_NAME (sym), NULL, objfile);
 	  if (msym != NULL)
 	    {
-	      DEPRECATED_SYMBOL_NAME (sym) = gdbarch_static_transform_name
-					       (current_gdbarch,	
-						DEPRECATED_SYMBOL_NAME (sym));
+	      char *new_name = gdbarch_static_transform_name
+		(gdbarch, SYMBOL_LINKAGE_NAME (sym));
+	      SYMBOL_SET_LINKAGE_NAME (sym, new_name);
 	      SYMBOL_VALUE_ADDRESS (sym) = SYMBOL_VALUE_ADDRESS (msym);
 	    }
 	}
@@ -1282,6 +1288,7 @@ define_symbol (CORE_ADDR valu, char *string, int desc, int type,
       /* Reference parameter */
       SYMBOL_TYPE (sym) = read_type (&p, objfile);
       SYMBOL_CLASS (sym) = LOC_REF_ARG;
+      SYMBOL_IS_ARGUMENT (sym) = 1;
       SYMBOL_VALUE (sym) = valu;
       SYMBOL_DOMAIN (sym) = VAR_DOMAIN;
       add_symbol_to_list (sym, &local_symbols);
@@ -1291,17 +1298,9 @@ define_symbol (CORE_ADDR valu, char *string, int desc, int type,
       /* Reference parameter which is in a register.  */
       SYMBOL_TYPE (sym) = read_type (&p, objfile);
       SYMBOL_CLASS (sym) = LOC_REGPARM_ADDR;
-      SYMBOL_VALUE (sym) = gdbarch_stab_reg_to_regnum (current_gdbarch, valu);
-      if (SYMBOL_VALUE (sym) >= gdbarch_num_regs (current_gdbarch)
-				+ gdbarch_num_pseudo_regs (current_gdbarch))
-	{
-	  reg_value_complaint (SYMBOL_VALUE (sym),
-			       gdbarch_num_regs (current_gdbarch)
-				 + gdbarch_num_pseudo_regs (current_gdbarch),
-			       SYMBOL_PRINT_NAME (sym));
-	  SYMBOL_VALUE (sym) = gdbarch_sp_regnum (current_gdbarch);
-	  /* Known safe, though useless */
-	}
+      SYMBOL_REGISTER_OPS (sym) = &stab_register_funcs;
+      SYMBOL_IS_ARGUMENT (sym) = 1;
+      SYMBOL_VALUE (sym) = valu;
       SYMBOL_DOMAIN (sym) = VAR_DOMAIN;
       add_symbol_to_list (sym, &local_symbols);
       break;
@@ -1331,12 +1330,12 @@ define_symbol (CORE_ADDR valu, char *string, int desc, int type,
      of by value, i.e. they will pass the address of a structure (in a
      register or on the stack) instead of the structure itself.  */
 
-  if (gdbarch_stabs_argument_has_addr (current_gdbarch, SYMBOL_TYPE (sym))
-      && (SYMBOL_CLASS (sym) == LOC_REGPARM || SYMBOL_CLASS (sym) == LOC_ARG))
+  if (gdbarch_stabs_argument_has_addr (gdbarch, SYMBOL_TYPE (sym))
+      && SYMBOL_IS_ARGUMENT (sym))
     {
-      /* We have to convert LOC_REGPARM to LOC_REGPARM_ADDR (for
+      /* We have to convert LOC_REGISTER to LOC_REGPARM_ADDR (for
          variables passed in a register).  */
-      if (SYMBOL_CLASS (sym) == LOC_REGPARM)
+      if (SYMBOL_CLASS (sym) == LOC_REGISTER)
 	SYMBOL_CLASS (sym) = LOC_REGPARM_ADDR;
       /* Likewise for converting LOC_ARG to LOC_REF_ARG (for the 7th
 	 and subsequent arguments on SPARC, for example).  */
@@ -1398,7 +1397,7 @@ error_type (char **pp, struct objfile *objfile)
 	  break;
 	}
     }
-  return (builtin_type_error);
+  return objfile_type (objfile)->builtin_error;
 }
 
 
@@ -1526,18 +1525,35 @@ again:
 	      if (*p != ':')
 		return error_type (pp, objfile);
 	    }
-	  to = type_name =
-	    (char *) obstack_alloc (&objfile->objfile_obstack, p - *pp + 1);
+	  type_name = NULL;
+	  if (current_subfile->language == language_cplus)
+	    {
+	      char *new_name, *name = alloca (p - *pp + 1);
+	      memcpy (name, *pp, p - *pp);
+	      name[p - *pp] = '\0';
+	      new_name = cp_canonicalize_string (name);
+	      if (new_name != NULL)
+		{
+		  type_name = obsavestring (new_name, strlen (new_name),
+					    &objfile->objfile_obstack);
+		  xfree (new_name);
+		}
+	    }
+	  if (type_name == NULL)
+	    {
+	      to = type_name =
+		(char *) obstack_alloc (&objfile->objfile_obstack, p - *pp + 1);
 
-	  /* Copy the name.  */
-	  from = *pp + 1;
-	  while (from < p)
-	    *to++ = *from++;
-	  *to = '\0';
+	      /* Copy the name.  */
+	      from = *pp + 1;
+	      while (from < p)
+		*to++ = *from++;
+	      *to = '\0';
+	    }
 
 	  /* Set the pointer ahead of the name which we just read, and
 	     the colon.  */
-	  *pp = from + 1;
+	  *pp = p + 1;
 	}
 
         /* If this type has already been declared, then reuse the same
@@ -1552,12 +1568,12 @@ again:
 	      if (SYMBOL_CLASS (sym) == LOC_TYPEDEF
 		  && SYMBOL_DOMAIN (sym) == STRUCT_DOMAIN
 		  && (TYPE_CODE (SYMBOL_TYPE (sym)) == code)
-		  && strcmp (DEPRECATED_SYMBOL_NAME (sym), type_name) == 0)
+		  && strcmp (SYMBOL_LINKAGE_NAME (sym), type_name) == 0)
 		{
 		  obstack_free (&objfile->objfile_obstack, type_name);
 		  type = SYMBOL_TYPE (sym);
 	          if (typenums[0] != -1)
-	            *dbx_lookup_type (typenums) = type;
+	            *dbx_lookup_type (typenums, objfile) = type;
 		  return type;
 		}
 	    }
@@ -1571,7 +1587,7 @@ again:
 	TYPE_CODE (type) = code;
 	TYPE_TAG_NAME (type) = type_name;
 	INIT_CPLUS_SPECIFIC (type);
-	TYPE_FLAGS (type) |= TYPE_FLAG_STUB;
+	TYPE_STUB (type) = 1;
 
 	add_undefined_type (type, typenums);
 	return type;
@@ -1637,7 +1653,7 @@ again:
 	  }
 	else
 	  {
-	    TYPE_FLAGS (type) |= TYPE_FLAG_TARGET_STUB;
+	    TYPE_TARGET_STUB (type) = 1;
 	    TYPE_TARGET_TYPE (type) = xtype;
 	  }
       }
@@ -1652,17 +1668,17 @@ again:
 
     case '*':			/* Pointer to another type */
       type1 = read_type (pp, objfile);
-      type = make_pointer_type (type1, dbx_lookup_type (typenums));
+      type = make_pointer_type (type1, dbx_lookup_type (typenums, objfile));
       break;
 
     case '&':			/* Reference to another type */
       type1 = read_type (pp, objfile);
-      type = make_reference_type (type1, dbx_lookup_type (typenums));
+      type = make_reference_type (type1, dbx_lookup_type (typenums, objfile));
       break;
 
     case 'f':			/* Function returning another type */
       type1 = read_type (pp, objfile);
-      type = make_function_type (type1, dbx_lookup_type (typenums));
+      type = make_function_type (type1, dbx_lookup_type (typenums, objfile));
       break;
 
     case 'g':                   /* Prototyped function.  (Sun)  */
@@ -1685,7 +1701,8 @@ again:
         const char *type_start = (*pp) - 1;
         struct type *return_type = read_type (pp, objfile);
         struct type *func_type
-          = make_function_type (return_type, dbx_lookup_type (typenums));
+          = make_function_type (return_type,
+				dbx_lookup_type (typenums, objfile));
         struct type_list {
           struct type *type;
           struct type_list *next;
@@ -1732,7 +1749,7 @@ again:
             TYPE_FIELD_TYPE (func_type, i) = t->type;
         }
         TYPE_NFIELDS (func_type) = num_args;
-        TYPE_FLAGS (func_type) |= TYPE_FLAG_PROTOTYPED;
+        TYPE_PROTOTYPED (func_type) = 1;
 
         type = func_type;
         break;
@@ -1741,13 +1758,13 @@ again:
     case 'k':			/* Const qualifier on some type (Sun) */
       type = read_type (pp, objfile);
       type = make_cv_type (1, TYPE_VOLATILE (type), type,
-			   dbx_lookup_type (typenums));
+			   dbx_lookup_type (typenums, objfile));
       break;
 
     case 'B':			/* Volatile qual on some type (Sun) */
       type = read_type (pp, objfile);
       type = make_cv_type (TYPE_CONST (type), 1, type,
-			   dbx_lookup_type (typenums));
+			   dbx_lookup_type (typenums, objfile));
       break;
 
     case '@':
@@ -1821,7 +1838,7 @@ again:
 		       symnum);
 	  type = allocate_stub_method (return_type);
 	  if (typenums[0] != -1)
-	    *dbx_lookup_type (typenums) = type;
+	    *dbx_lookup_type (typenums, objfile) = type;
 	}
       else
 	{
@@ -1849,7 +1866,7 @@ again:
     case 'r':			/* Range type */
       type = read_range_type (pp, typenums, type_size, objfile);
       if (typenums[0] != -1)
-	*dbx_lookup_type (typenums) = type;
+	*dbx_lookup_type (typenums, objfile) = type;
       break;
 
     case 'b':
@@ -1857,21 +1874,21 @@ again:
 	  /* Sun ACC builtin int type */
 	  type = read_sun_builtin_type (pp, typenums, objfile);
 	  if (typenums[0] != -1)
-	    *dbx_lookup_type (typenums) = type;
+	    *dbx_lookup_type (typenums, objfile) = type;
 	}
       break;
 
     case 'R':			/* Sun ACC builtin float type */
       type = read_sun_floating_type (pp, typenums, objfile);
       if (typenums[0] != -1)
-	*dbx_lookup_type (typenums) = type;
+	*dbx_lookup_type (typenums, objfile) = type;
       break;
 
     case 'e':			/* Enumeration type */
       type = dbx_alloc_type (typenums, objfile);
       type = read_enum_type (pp, type, objfile);
       if (typenums[0] != -1)
-	*dbx_lookup_type (typenums) = type;
+	*dbx_lookup_type (typenums, objfile) = type;
       break;
 
     case 's':			/* Struct type */
@@ -1911,7 +1928,7 @@ again:
       if (is_string)
 	TYPE_CODE (type) = TYPE_CODE_BITSTRING;
       if (typenums[0] != -1)
-	*dbx_lookup_type (typenums) = type;
+	*dbx_lookup_type (typenums, objfile) = type;
       break;
 
     default:
@@ -1936,20 +1953,31 @@ again:
 /* RS/6000 xlc/dbx combination uses a set of builtin types, starting from -1.
    Return the proper type node for a given builtin type number. */
 
+static const struct objfile_data *rs6000_builtin_type_data;
+
 static struct type *
-rs6000_builtin_type (int typenum)
+rs6000_builtin_type (int typenum, struct objfile *objfile)
 {
+  struct type **negative_types = objfile_data (objfile, rs6000_builtin_type_data);
+
   /* We recognize types numbered from -NUMBER_RECOGNIZED to -1.  */
 #define NUMBER_RECOGNIZED 34
-  /* This includes an empty slot for type number -0.  */
-  static struct type *negative_types[NUMBER_RECOGNIZED + 1];
   struct type *rettype = NULL;
 
   if (typenum >= 0 || typenum < -NUMBER_RECOGNIZED)
     {
       complaint (&symfile_complaints, _("Unknown builtin type %d"), typenum);
-      return builtin_type_error;
+      return objfile_type (objfile)->builtin_error;
     }
+
+  if (!negative_types)
+    {
+      /* This includes an empty slot for type number -0.  */
+      negative_types = OBSTACK_CALLOC (&objfile->objfile_obstack,
+				       NUMBER_RECOGNIZED + 1, struct type *);
+      set_objfile_data (objfile, rs6000_builtin_type_data, negative_types);
+    }
+
   if (negative_types[-typenum] != NULL)
     return negative_types[-typenum];
 
@@ -1969,129 +1997,129 @@ rs6000_builtin_type (int typenum)
          is other than 32 bits, then it should use a new negative type
          number (or avoid negative type numbers for that case).
          See stabs.texinfo.  */
-      rettype = init_type (TYPE_CODE_INT, 4, 0, "int", NULL);
+      rettype = init_type (TYPE_CODE_INT, 4, 0, "int", objfile);
       break;
     case 2:
-      rettype = init_type (TYPE_CODE_INT, 1, 0, "char", NULL);
+      rettype = init_type (TYPE_CODE_INT, 1, 0, "char", objfile);
       break;
     case 3:
-      rettype = init_type (TYPE_CODE_INT, 2, 0, "short", NULL);
+      rettype = init_type (TYPE_CODE_INT, 2, 0, "short", objfile);
       break;
     case 4:
-      rettype = init_type (TYPE_CODE_INT, 4, 0, "long", NULL);
+      rettype = init_type (TYPE_CODE_INT, 4, 0, "long", objfile);
       break;
     case 5:
       rettype = init_type (TYPE_CODE_INT, 1, TYPE_FLAG_UNSIGNED,
-			   "unsigned char", NULL);
+			   "unsigned char", objfile);
       break;
     case 6:
-      rettype = init_type (TYPE_CODE_INT, 1, 0, "signed char", NULL);
+      rettype = init_type (TYPE_CODE_INT, 1, 0, "signed char", objfile);
       break;
     case 7:
       rettype = init_type (TYPE_CODE_INT, 2, TYPE_FLAG_UNSIGNED,
-			   "unsigned short", NULL);
+			   "unsigned short", objfile);
       break;
     case 8:
       rettype = init_type (TYPE_CODE_INT, 4, TYPE_FLAG_UNSIGNED,
-			   "unsigned int", NULL);
+			   "unsigned int", objfile);
       break;
     case 9:
       rettype = init_type (TYPE_CODE_INT, 4, TYPE_FLAG_UNSIGNED,
-			   "unsigned", NULL);
+			   "unsigned", objfile);
     case 10:
       rettype = init_type (TYPE_CODE_INT, 4, TYPE_FLAG_UNSIGNED,
-			   "unsigned long", NULL);
+			   "unsigned long", objfile);
       break;
     case 11:
-      rettype = init_type (TYPE_CODE_VOID, 1, 0, "void", NULL);
+      rettype = init_type (TYPE_CODE_VOID, 1, 0, "void", objfile);
       break;
     case 12:
       /* IEEE single precision (32 bit).  */
-      rettype = init_type (TYPE_CODE_FLT, 4, 0, "float", NULL);
+      rettype = init_type (TYPE_CODE_FLT, 4, 0, "float", objfile);
       break;
     case 13:
       /* IEEE double precision (64 bit).  */
-      rettype = init_type (TYPE_CODE_FLT, 8, 0, "double", NULL);
+      rettype = init_type (TYPE_CODE_FLT, 8, 0, "double", objfile);
       break;
     case 14:
       /* This is an IEEE double on the RS/6000, and different machines with
          different sizes for "long double" should use different negative
          type numbers.  See stabs.texinfo.  */
-      rettype = init_type (TYPE_CODE_FLT, 8, 0, "long double", NULL);
+      rettype = init_type (TYPE_CODE_FLT, 8, 0, "long double", objfile);
       break;
     case 15:
-      rettype = init_type (TYPE_CODE_INT, 4, 0, "integer", NULL);
+      rettype = init_type (TYPE_CODE_INT, 4, 0, "integer", objfile);
       break;
     case 16:
       rettype = init_type (TYPE_CODE_BOOL, 4, TYPE_FLAG_UNSIGNED,
-			   "boolean", NULL);
+			   "boolean", objfile);
       break;
     case 17:
-      rettype = init_type (TYPE_CODE_FLT, 4, 0, "short real", NULL);
+      rettype = init_type (TYPE_CODE_FLT, 4, 0, "short real", objfile);
       break;
     case 18:
-      rettype = init_type (TYPE_CODE_FLT, 8, 0, "real", NULL);
+      rettype = init_type (TYPE_CODE_FLT, 8, 0, "real", objfile);
       break;
     case 19:
-      rettype = init_type (TYPE_CODE_ERROR, 0, 0, "stringptr", NULL);
+      rettype = init_type (TYPE_CODE_ERROR, 0, 0, "stringptr", objfile);
       break;
     case 20:
       rettype = init_type (TYPE_CODE_CHAR, 1, TYPE_FLAG_UNSIGNED,
-			   "character", NULL);
+			   "character", objfile);
       break;
     case 21:
       rettype = init_type (TYPE_CODE_BOOL, 1, TYPE_FLAG_UNSIGNED,
-			   "logical*1", NULL);
+			   "logical*1", objfile);
       break;
     case 22:
       rettype = init_type (TYPE_CODE_BOOL, 2, TYPE_FLAG_UNSIGNED,
-			   "logical*2", NULL);
+			   "logical*2", objfile);
       break;
     case 23:
       rettype = init_type (TYPE_CODE_BOOL, 4, TYPE_FLAG_UNSIGNED,
-			   "logical*4", NULL);
+			   "logical*4", objfile);
       break;
     case 24:
       rettype = init_type (TYPE_CODE_BOOL, 4, TYPE_FLAG_UNSIGNED,
-			   "logical", NULL);
+			   "logical", objfile);
       break;
     case 25:
       /* Complex type consisting of two IEEE single precision values.  */
-      rettype = init_type (TYPE_CODE_COMPLEX, 8, 0, "complex", NULL);
+      rettype = init_type (TYPE_CODE_COMPLEX, 8, 0, "complex", objfile);
       TYPE_TARGET_TYPE (rettype) = init_type (TYPE_CODE_FLT, 4, 0, "float",
-					      NULL);
+					      objfile);
       break;
     case 26:
       /* Complex type consisting of two IEEE double precision values.  */
       rettype = init_type (TYPE_CODE_COMPLEX, 16, 0, "double complex", NULL);
       TYPE_TARGET_TYPE (rettype) = init_type (TYPE_CODE_FLT, 8, 0, "double",
-					      NULL);
+					      objfile);
       break;
     case 27:
-      rettype = init_type (TYPE_CODE_INT, 1, 0, "integer*1", NULL);
+      rettype = init_type (TYPE_CODE_INT, 1, 0, "integer*1", objfile);
       break;
     case 28:
-      rettype = init_type (TYPE_CODE_INT, 2, 0, "integer*2", NULL);
+      rettype = init_type (TYPE_CODE_INT, 2, 0, "integer*2", objfile);
       break;
     case 29:
-      rettype = init_type (TYPE_CODE_INT, 4, 0, "integer*4", NULL);
+      rettype = init_type (TYPE_CODE_INT, 4, 0, "integer*4", objfile);
       break;
     case 30:
-      rettype = init_type (TYPE_CODE_CHAR, 2, 0, "wchar", NULL);
+      rettype = init_type (TYPE_CODE_CHAR, 2, 0, "wchar", objfile);
       break;
     case 31:
-      rettype = init_type (TYPE_CODE_INT, 8, 0, "long long", NULL);
+      rettype = init_type (TYPE_CODE_INT, 8, 0, "long long", objfile);
       break;
     case 32:
       rettype = init_type (TYPE_CODE_INT, 8, TYPE_FLAG_UNSIGNED,
-			   "unsigned long long", NULL);
+			   "unsigned long long", objfile);
       break;
     case 33:
       rettype = init_type (TYPE_CODE_INT, 8, TYPE_FLAG_UNSIGNED,
-			   "logical*8", NULL);
+			   "logical*8", objfile);
       break;
     case 34:
-      rettype = init_type (TYPE_CODE_INT, 8, 0, "integer*8", NULL);
+      rettype = init_type (TYPE_CODE_INT, 8, 0, "integer*8", objfile);
       break;
     }
   negative_types[-typenum] = rettype;
@@ -2415,8 +2443,8 @@ read_member_functions (struct field_info *fip, char **pp, struct type *type,
 
       /* Skip GCC 3.X member functions which are duplicates of the callable
 	 constructor/destructor.  */
-      if (strcmp (main_fn_name, "__base_ctor") == 0
-	  || strcmp (main_fn_name, "__base_dtor") == 0
+      if (strcmp_iw (main_fn_name, "__base_ctor ") == 0
+	  || strcmp_iw (main_fn_name, "__base_dtor ") == 0
 	  || strcmp (main_fn_name, "__deleting_dtor") == 0)
 	{
 	  xfree (main_fn_name);
@@ -2717,6 +2745,8 @@ static void
 read_one_struct_field (struct field_info *fip, char **pp, char *p,
 		       struct type *type, struct objfile *objfile)
 {
+  struct gdbarch *gdbarch = get_objfile_arch (objfile);
+
   fip->list->field.name =
     obsavestring (*pp, p - *pp, &objfile->objfile_obstack);
   *pp = p + 1;
@@ -2821,7 +2851,7 @@ read_one_struct_field (struct field_info *fip, char **pp, char *p,
 	   == TARGET_CHAR_BIT * TYPE_LENGTH (field_type)
 	   || (TYPE_CODE (field_type) == TYPE_CODE_ENUM
 	       && FIELD_BITSIZE (fip->list->field)
-		  == gdbarch_int_bit (current_gdbarch))
+		  == gdbarch_int_bit (gdbarch))
 	  )
 	  &&
 	  FIELD_BITPOS (fip->list->field) % 8 == 0)
@@ -3343,7 +3373,7 @@ read_struct_type (char **pp, struct type *type, enum type_code type_code,
 
   INIT_CPLUS_SPECIFIC (type);
   TYPE_CODE (type) = type_code;
-  TYPE_FLAGS (type) &= ~TYPE_FLAG_STUB;
+  TYPE_STUB (type) = 0;
 
   /* First comes the total size in bytes.  */
 
@@ -3445,6 +3475,7 @@ static struct type *
 read_enum_type (char **pp, struct type *type,
 		struct objfile *objfile)
 {
+  struct gdbarch *gdbarch = get_objfile_arch (objfile);
   char *p;
   char *name;
   long n;
@@ -3498,7 +3529,7 @@ read_enum_type (char **pp, struct type *type,
       sym = (struct symbol *)
 	obstack_alloc (&objfile->objfile_obstack, sizeof (struct symbol));
       memset (sym, 0, sizeof (struct symbol));
-      DEPRECATED_SYMBOL_NAME (sym) = name;
+      SYMBOL_SET_LINKAGE_NAME (sym, name);
       SYMBOL_LANGUAGE (sym) = current_subfile->language;
       SYMBOL_CLASS (sym) = LOC_CONST;
       SYMBOL_DOMAIN (sym) = VAR_DOMAIN;
@@ -3514,11 +3545,11 @@ read_enum_type (char **pp, struct type *type,
 
   /* Now fill in the fields of the type-structure.  */
 
-  TYPE_LENGTH (type) = gdbarch_int_bit (current_gdbarch) / HOST_CHAR_BIT;
+  TYPE_LENGTH (type) = gdbarch_int_bit (gdbarch) / HOST_CHAR_BIT;
   TYPE_CODE (type) = TYPE_CODE_ENUM;
-  TYPE_FLAGS (type) &= ~TYPE_FLAG_STUB;
+  TYPE_STUB (type) = 0;
   if (unsigned_enum)
-    TYPE_FLAGS (type) |= TYPE_FLAG_UNSIGNED;
+    TYPE_UNSIGNED (type) = 1;
   TYPE_NFIELDS (type) = nsyms;
   TYPE_FIELDS (type) = (struct field *)
     TYPE_ALLOC (type, sizeof (struct field) * nsyms);
@@ -3540,7 +3571,7 @@ read_enum_type (char **pp, struct type *type,
 	{
 	  struct symbol *xsym = syms->symbol[j];
 	  SYMBOL_TYPE (xsym) = type;
-	  TYPE_FIELD_NAME (type, n) = DEPRECATED_SYMBOL_NAME (xsym);
+	  TYPE_FIELD_NAME (type, n) = SYMBOL_LINKAGE_NAME (xsym);
 	  TYPE_FIELD_BITPOS (type, n) = SYMBOL_VALUE (xsym);
 	  TYPE_FIELD_BITSIZE (type, n) = 0;
 	}
@@ -3849,6 +3880,7 @@ static struct type *
 read_range_type (char **pp, int typenums[2], int type_size,
                  struct objfile *objfile)
 {
+  struct gdbarch *gdbarch = get_objfile_arch (objfile);
   char *orig_pp = *pp;
   int rangenums[2];
   long n2, n3;
@@ -3974,7 +4006,7 @@ read_range_type (char **pp, int typenums[2], int type_size,
 	  /* We don't know its size.  It is unsigned int or unsigned
 	     long.  GCC 2.3.3 uses this for long long too, but that is
 	     just a GDB 3.5 compatibility hack.  */
-	  bits = gdbarch_int_bit (current_gdbarch);
+	  bits = gdbarch_int_bit (gdbarch);
 	}
 
       return init_type (TYPE_CODE_INT, bits / TARGET_CHAR_BIT,
@@ -4020,7 +4052,7 @@ read_range_type (char **pp, int typenums[2], int type_size,
   else if (n3 == 0 && n2 < 0
 	   && (self_subrange
 	       || n2 == -gdbarch_long_long_bit
-			  (current_gdbarch) / TARGET_CHAR_BIT))
+			  (gdbarch) / TARGET_CHAR_BIT))
     return init_type (TYPE_CODE_INT, -n2, 0, NULL, objfile);
   else if (n2 == -n3 - 1)
     {
@@ -4037,24 +4069,18 @@ read_range_type (char **pp, int typenums[2], int type_size,
 handle_true_range:
 
   if (self_subrange)
-    index_type = builtin_type_int;
+    index_type = objfile_type (objfile)->builtin_int;
   else
-    index_type = *dbx_lookup_type (rangenums);
+    index_type = *dbx_lookup_type (rangenums, objfile);
   if (index_type == NULL)
     {
       /* Does this actually ever happen?  Is that why we are worrying
          about dealing with it rather than just calling error_type?  */
 
-      static struct type *range_type_index;
-
       complaint (&symfile_complaints,
 		 _("base type %d of range type is not defined"), rangenums[1]);
-      if (range_type_index == NULL)
-	range_type_index =
-	  init_type (TYPE_CODE_INT, 
-		     gdbarch_int_bit (current_gdbarch) / TARGET_CHAR_BIT,
-		     0, "range type index type", NULL);
-      index_type = range_type_index;
+
+      index_type = objfile_type (objfile)->builtin_int;
     }
 
   result_type = create_range_type ((struct type *) NULL, index_type, n2, n3);
@@ -4085,7 +4111,17 @@ read_args (char **pp, int end, struct objfile *objfile, int *nargsp,
     }
   (*pp)++;			/* get past `end' (the ':' character) */
 
-  if (TYPE_CODE (types[n - 1]) != TYPE_CODE_VOID)
+  if (n == 0)
+    {
+      /* We should read at least the THIS parameter here.  Some broken stabs
+	 output contained `(0,41),(0,42)=@s8;-16;,(0,43),(0,1);' where should
+	 have been present ";-16,(0,43)" reference instead.  This way the
+	 excessive ";" marker prematurely stops the parameters parsing.  */
+
+      complaint (&symfile_complaints, _("Invalid (empty) method arguments"));
+      *varargsp = 0;
+    }
+  else if (TYPE_CODE (types[n - 1]) != TYPE_CODE_VOID)
     *varargsp = 1;
   else
     {
@@ -4160,7 +4196,7 @@ common_block_end (struct objfile *objfile)
     obstack_alloc (&objfile->objfile_obstack, sizeof (struct symbol));
   memset (sym, 0, sizeof (struct symbol));
   /* Note: common_block_name already saved on objfile_obstack */
-  DEPRECATED_SYMBOL_NAME (sym) = common_block_name;
+  SYMBOL_SET_LINKAGE_NAME (sym, common_block_name);
   SYMBOL_CLASS (sym) = LOC_BLOCK;
 
   /* Now we copy all the symbols which have been defined since the BCOMM.  */
@@ -4187,7 +4223,7 @@ common_block_end (struct objfile *objfile)
   /* Should we be putting local_symbols back to what it was?
      Does it matter?  */
 
-  i = hashname (DEPRECATED_SYMBOL_NAME (sym));
+  i = hashname (SYMBOL_LINKAGE_NAME (sym));
   SYMBOL_VALUE_CHAIN (sym) = global_sym_chain[i];
   global_sym_chain[i] = sym;
   common_block_name = NULL;
@@ -4273,8 +4309,8 @@ add_undefined_type (struct type *type, int typenums[2])
 
 /* Try to fix all undefined types pushed on the UNDEF_TYPES vector.  */
 
-void
-cleanup_undefined_types_noname (void)
+static void
+cleanup_undefined_types_noname (struct objfile *objfile)
 {
   int i;
 
@@ -4283,9 +4319,16 @@ cleanup_undefined_types_noname (void)
       struct nat nat = noname_undefs[i];
       struct type **type;
 
-      type = dbx_lookup_type (nat.typenums);
+      type = dbx_lookup_type (nat.typenums, objfile);
       if (nat.type != *type && TYPE_CODE (*type) != TYPE_CODE_UNDEF)
-        replace_type (nat.type, *type);
+        {
+          /* The instance flags of the undefined type are still unset,
+             and needs to be copied over from the reference type.
+             Since replace_type expects them to be identical, we need
+             to set these flags manually before hand.  */
+          TYPE_INSTANCE_FLAGS (nat.type) = TYPE_INSTANCE_FLAGS (*type);
+          replace_type (nat.type, *type);
+        }
     }
 
   noname_undefs_length = 0;
@@ -4301,10 +4344,29 @@ cleanup_undefined_types_noname (void)
    yet defined at the time a pointer to it was made.
    Fix:  Do a full lookup on the struct/union tag.  */
 
-void
+static void
 cleanup_undefined_types_1 (void)
 {
   struct type **type;
+
+  /* Iterate over every undefined type, and look for a symbol whose type
+     matches our undefined type.  The symbol matches if:
+       1. It is a typedef in the STRUCT domain;
+       2. It has the same name, and same type code;
+       3. The instance flags are identical.
+     
+     It is important to check the instance flags, because we have seen
+     examples where the debug info contained definitions such as:
+
+         "foo_t:t30=B31=xefoo_t:"
+
+     In this case, we have created an undefined type named "foo_t" whose
+     instance flags is null (when processing "xefoo_t"), and then created
+     another type with the same name, but with different instance flags
+     ('B' means volatile).  I think that the definition above is wrong,
+     since the same type cannot be volatile and non-volatile at the same
+     time, but we need to be able to cope with it when it happens.  The
+     approach taken here is to treat these two types as different.  */
 
   for (type = undef_types; type < undef_types + undef_types_length; type++)
     {
@@ -4341,7 +4403,10 @@ cleanup_undefined_types_1 (void)
 			    && SYMBOL_DOMAIN (sym) == STRUCT_DOMAIN
 			    && (TYPE_CODE (SYMBOL_TYPE (sym)) ==
 				TYPE_CODE (*type))
-			    && strcmp (DEPRECATED_SYMBOL_NAME (sym), typename) == 0)
+			    && (TYPE_INSTANCE_FLAGS (*type) ==
+				TYPE_INSTANCE_FLAGS (SYMBOL_TYPE (sym)))
+			    && strcmp (SYMBOL_LINKAGE_NAME (sym),
+				       typename) == 0)
                           replace_type (*type, SYMBOL_TYPE (sym));
 		      }
 		  }
@@ -4367,10 +4432,10 @@ cleanup_undefined_types_1 (void)
    this unit.  */
 
 void
-cleanup_undefined_types (void)
+cleanup_undefined_types (struct objfile *objfile)
 {
   cleanup_undefined_types_1 ();
-  cleanup_undefined_types_noname ();
+  cleanup_undefined_types_noname (objfile);
 }
 
 /* Scan through all of the global symbols defined in the object file,
@@ -4407,9 +4472,7 @@ scan_file_globals (struct objfile *objfile)
       if (hash >= HASHSIZE)
 	return;
 
-      for (msymbol = resolve_objfile->msymbols;
-	   msymbol && DEPRECATED_SYMBOL_NAME (msymbol) != NULL;
-	   msymbol++)
+      ALL_OBJFILE_MSYMBOLS (resolve_objfile, msymbol)
 	{
 	  QUIT;
 
@@ -4429,12 +4492,12 @@ scan_file_globals (struct objfile *objfile)
 	  /* Get the hash index and check all the symbols
 	     under that hash index. */
 
-	  hash = hashname (DEPRECATED_SYMBOL_NAME (msymbol));
+	  hash = hashname (SYMBOL_LINKAGE_NAME (msymbol));
 
 	  for (sym = global_sym_chain[hash]; sym;)
 	    {
-	      if (DEPRECATED_SYMBOL_NAME (msymbol)[0] == DEPRECATED_SYMBOL_NAME (sym)[0] &&
-		  strcmp (DEPRECATED_SYMBOL_NAME (msymbol) + 1, DEPRECATED_SYMBOL_NAME (sym) + 1) == 0)
+	      if (strcmp (SYMBOL_LINKAGE_NAME (msymbol),
+			  SYMBOL_LINKAGE_NAME (sym)) == 0)
 		{
 		  /* Splice this symbol out of the hash chain and
 		     assign the value we have to it. */
@@ -4506,7 +4569,7 @@ scan_file_globals (struct objfile *objfile)
 	  else
 	    complaint (&symfile_complaints,
 		       _("%s: common block `%s' from global_sym_chain unresolved"),
-		       objfile->name, DEPRECATED_SYMBOL_NAME (prev));
+		       objfile->name, SYMBOL_PRINT_NAME (prev));
 	}
     }
   memset (global_sym_chain, 0, sizeof (global_sym_chain));
@@ -4604,6 +4667,8 @@ find_name_end (char *name)
 void
 _initialize_stabsread (void)
 {
+  rs6000_builtin_type_data = register_objfile_data ();
+
   undef_types_allocated = 20;
   undef_types_length = 0;
   undef_types = (struct type **)

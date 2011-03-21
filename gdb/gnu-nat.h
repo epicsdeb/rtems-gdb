@@ -1,5 +1,5 @@
 /* Common things used by the various *gnu-nat.c files
-   Copyright (C) 1995, 1996, 1997, 1999, 2000, 2007, 2008
+   Copyright (C) 1995, 1996, 1997, 1999, 2000, 2007, 2008, 2009, 2010
    Free Software Foundation, Inc.
 
    Written by Miles Bader <miles@gnu.ai.mit.edu>
@@ -25,7 +25,7 @@
 
 struct inf;
 
-extern struct inf *current_inferior;
+extern struct inf *gnu_current_inf;
 
 /* Converts a GDB pid to a struct proc.  */
 struct proc *inf_tid_to_thread (struct inf *inf, int tid);
@@ -88,13 +88,18 @@ extern char *proc_string (struct proc *proc);
 
 #define proc_debug(_proc, msg, args...) \
   do { struct proc *__proc = (_proc); \
-       debug ("{proc %d/%d %p}: " msg, \
-	      __proc_pid (__proc), __proc->tid, __proc , ##args); } while (0)
+       debug ("{proc %d/%d %s}: " msg, \
+	      __proc_pid (__proc), __proc->tid, \
+	      host_address_to_string (__proc) , ##args); } while (0)
 
 extern int gnu_debug_flag;
 
 #define debug(msg, args...) \
  do { if (gnu_debug_flag) \
         fprintf_unfiltered (gdb_stdlog, "%s:%d: " msg "\r\n", __FILE__ , __LINE__ , ##args); } while (0)
+
+/* Create a prototype generic GNU/Hurd target.  The client can
+   override it with local methods.  */
+struct target_ops *gnu_target (void);
 
 #endif /* __GNU_NAT_H__ */

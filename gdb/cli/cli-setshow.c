@@ -1,6 +1,6 @@
 /* Handle set and show GDB commands.
 
-   Copyright (c) 2000, 2001, 2002, 2003, 2007, 2008
+   Copyright (c) 2000, 2001, 2002, 2003, 2007, 2008, 2009, 2010
    Free Software Foundation, Inc.
 
    This program is free software; you can redistribute it and/or modify
@@ -177,14 +177,14 @@ do_setshow_command (char *arg, int from_tty, struct cmd_list_element *c)
 	    arg = "";
 	  if (*(char **) c->var != NULL)
 	    xfree (*(char **) c->var);
-	  *(char **) c->var = savestring (arg, strlen (arg));
+	  *(char **) c->var = xstrdup (arg);
 	  break;
 	case var_optional_filename:
 	  if (arg == NULL)
 	    arg = "";
 	  if (*(char **) c->var != NULL)
 	    xfree (*(char **) c->var);
-	  *(char **) c->var = savestring (arg, strlen (arg));
+	  *(char **) c->var = xstrdup (arg);
 	  break;
 	case var_filename:
 	  if (arg == NULL)
@@ -231,6 +231,11 @@ do_setshow_command (char *arg, int from_tty, struct cmd_list_element *c)
 	  if (arg == NULL)
 	    error_no_arg (_("integer to set it to."));
 	  *(int *) c->var = parse_and_eval_long (arg);
+	  break;
+	case var_zuinteger:
+	  if (arg == NULL)
+	    error_no_arg (_("integer to set it to."));
+	  *(unsigned int *) c->var = parse_and_eval_long (arg);
 	  break;
 	case var_enum:
 	  {
@@ -351,6 +356,7 @@ do_setshow_command (char *arg, int from_tty, struct cmd_list_element *c)
 	      break;
 	    }
 	  /* else fall through */
+	case var_zuinteger:
 	case var_zinteger:
 	  fprintf_filtered (stb->stream, "%u", *(unsigned int *) c->var);
 	  break;
@@ -377,8 +383,7 @@ do_setshow_command (char *arg, int from_tty, struct cmd_list_element *c)
 	ui_out_field_stream (uiout, "value", stb);
       else
 	{
-	  long length;
-	  char *value = ui_file_xstrdup (stb->stream, &length);
+	  char *value = ui_file_xstrdup (stb->stream, NULL);
 	  make_cleanup (xfree, value);
 	  if (c->show_value_func != NULL)
 	    c->show_value_func (gdb_stdout, from_tty, c, value);

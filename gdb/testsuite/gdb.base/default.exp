@@ -1,5 +1,5 @@
 #   Copyright 1988, 1990, 1991, 1992, 1994, 1995, 1996, 1997, 1998, 1999,
-#   2000, 2001, 2002, 2003, 2005, 2006, 2007, 2008
+#   2000, 2001, 2002, 2003, 2005, 2006, 2007, 2008, 2009, 2010
 #   Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
@@ -15,14 +15,12 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-# Please email any bugs, comments, and/or additions to this file to:
-# bug-gdb@prep.ai.mit.edu
-
 # Start with a fresh gdb
 
 gdb_exit
 gdb_start
 
+set prev_timeout $timeout
 set timeout 60
 
 #
@@ -533,7 +531,7 @@ gdb_test "set history size" "Argument required .integer to set it to.*" "set his
 #test set history
 gdb_test "set history" "\"set history\" must be followed by the name of a history subcommand.(\[^\r\n\]*\[\r\n\])+List of set history subcommands:(\[^\r\n\]*\[\r\n\])+set history expansion -- Set history expansion on command input(\[^\r\n\]*\[\r\n\])+set history filename -- Set the filename in which to record the command history(\[^\r\n\]*\[\r\n\])+set history save -- Set saving of the history record on exit(\[^\r\n\]*\[\r\n\])+set history size -- Set the size of the command history(\[^\r\n\]*\[\r\n\])+Type \"help set history\" followed by set history subcommand name for full documentation.(\[^\r\n\]*\[\r\n\])+Command name abbreviations are allowed if unambiguous." "set history"
 #test set language
-gdb_test "set language" "The currently understood settings are:(\[^\r\n\]*\[\r\n\])+local or auto  *Automatic setting based on source file(\[^\r\n\]*\[\r\n\])+c  *Use the C language(\[^\r\n\]*\[\r\n\])+c\[+\]+  *Use the C\[+\]+ language(\[^\r\n\]*\[\r\n\])+modula-2  *Use the Modula-2 language.*" "set language"
+gdb_test "set language" "Requires an argument. Valid arguments are auto, local, unknown, ada, c, c.., asm, minimal, fortran, objective-c, java, modula-2, pascal, scheme." "set language"
 #test set listsize
 gdb_test "set listsize" "Argument required .integer to set it to.*" "set listsize"
 #test set print "p" abbreviation
@@ -601,7 +599,7 @@ gdb_test "show complaints" "Max number of complaints about incorrect symbols is 
 #test show confirm
 gdb_test "show confirm" "Whether to confirm potentially dangerous operations is o\[a-z\]*." "show confirm"
 #test show convenience
-gdb_test "show convenience" "No debugger convenience variables now defined.(\[^\r\n\]*\[\r\n\])+Convenience variables have names starting with \".\";(\[^\r\n\]*\[\r\n\])+use \"set\" as in \"set .foo = 5\" to define them." "show convenience"
+gdb_test "show convenience" "\\\$_siginfo = void" "show convenience"
 #test show directories
 gdb_test "show directories" "Source directories searched: .cdir\[:;\].cwd" "show directories"
 #test show editing
@@ -801,17 +799,8 @@ gdb_test "whatis" "The history is empty." "whatis"
 #test where
 gdb_test "where" "No stack." "where"
 #test x
-#The case in which it prints a number is for vxgdb.
-send_gdb "x\n"
-gdb_expect {
-    -re "0x0:.*Cannot access memory at address 0x0..*$gdb_prompt $" {
-        pass "x"
-    }
-    -re "0x0:.*Error accessing memory address 0x0:.*$gdb_prompt $" {
-        pass "x"
-    }
-    -re ".*$gdb_prompt $" { fail "x" }
-    timeout { fail "(timeout) x" }
-}
+gdb_test "x" "Argument required .starting display address.*" "x"
 
 gdb_exit
+
+set timeout $prev_timeout

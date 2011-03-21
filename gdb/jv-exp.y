@@ -1,23 +1,21 @@
 /* YACC parser for Java expressions, for GDB.
-   Copyright (C) 1997, 1998, 1999, 2000, 2006, 2007, 2008
+   Copyright (C) 1997, 1998, 1999, 2000, 2006, 2007, 2008, 2009, 2010
    Free Software Foundation, Inc.
 
-This file is part of GDB.
+   This file is part of GDB.
 
-This program is free software; you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation; either version 2 of the License, or
-(at your option) any later version.
+   This program is free software; you can redistribute it and/or modify
+   it under the terms of the GNU General Public License as published by
+   the Free Software Foundation; either version 3 of the License, or
+   (at your option) any later version.
 
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
+   This program is distributed in the hope that it will be useful,
+   but WITHOUT ANY WARRANTY; without even the implied warranty of
+   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+   GNU General Public License for more details.
 
-You should have received a copy of the GNU General Public License
-along with this program; if not, write to the Free Software
-Foundation, Inc., 51 Franklin Street, Fifth Floor,
-Boston, MA 02110-1301, USA.  */
+   You should have received a copy of the GNU General Public License
+   along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
 /* Parse a Java expression from text in a string,
    and return the result as a  struct expression  pointer.
@@ -50,6 +48,9 @@ Boston, MA 02110-1301, USA.  */
 #include "symfile.h" /* Required by objfiles.h.  */
 #include "objfiles.h" /* For have_full_symbols and have_partial_symbols */
 #include "block.h"
+
+#define parse_type builtin_type (parse_gdbarch)
+#define parse_java_type builtin_java_type (parse_gdbarch)
 
 /* Remap normal yacc parser interface names (yyparse, yylex, yyerror, etc),
    as well as gratuitiously global symbol names, so we can have multiple
@@ -249,7 +250,7 @@ Literal:
 		  write_exp_elt_opcode (OP_DOUBLE); }
 |	BOOLEAN_LITERAL
 		{ write_exp_elt_opcode (OP_LONG);
-		  write_exp_elt_type (java_boolean_type);
+		  write_exp_elt_type (parse_java_type->builtin_boolean);
 		  write_exp_elt_longcst ((LONGEST)$1);
 		  write_exp_elt_opcode (OP_LONG); }
 |	StringLiteral
@@ -265,7 +266,7 @@ Type:
 PrimitiveType:
 	NumericType
 |	BOOLEAN
-		{ $$ = java_boolean_type; }
+		{ $$ = parse_java_type->builtin_boolean; }
 ;
 
 NumericType:
@@ -275,22 +276,22 @@ NumericType:
 
 IntegralType:
 	BYTE
-		{ $$ = java_byte_type; }
+		{ $$ = parse_java_type->builtin_byte; }
 |	SHORT
-		{ $$ = java_short_type; }
+		{ $$ = parse_java_type->builtin_short; }
 |	INT
-		{ $$ = java_int_type; }
+		{ $$ = parse_java_type->builtin_int; }
 |	LONG
-		{ $$ = java_long_type; }
+		{ $$ = parse_java_type->builtin_long; }
 |	CHAR
-		{ $$ = java_char_type; }
+		{ $$ = parse_java_type->builtin_char; }
 ;
 
 FloatingPointType:
 	FLOAT
-		{ $$ = java_float_type; }
+		{ $$ = parse_java_type->builtin_float; }
 |	DOUBLE
-		{ $$ = java_double_type; }
+		{ $$ = parse_java_type->builtin_double; }
 ;
 
 /* UNUSED:
@@ -691,11 +692,7 @@ Expression:
 /*** Needs some error checking for the float case ***/
 
 static int
-parse_number (p, len, parsed_float, putithere)
-     char *p;
-     int len;
-     int parsed_float;
-     YYSTYPE *putithere;
+parse_number (char *p, int len, int parsed_float, YYSTYPE *putithere)
 {
   ULONGEST n = 0;
   ULONGEST limit, limit_div_base;
@@ -723,9 +720,9 @@ parse_number (p, len, parsed_float, putithere)
       c = tolower (p[len - 1]);
 
       if (c == 'f' || c == 'F')
-	putithere->typed_val_float.type = builtin_type_float;
+	putithere->typed_val_float.type = parse_type->builtin_float;
       else if (isdigit (c) || c == '.' || c == 'd' || c == 'D')
-	putithere->typed_val_float.type = builtin_type_double;
+	putithere->typed_val_float.type = parse_type->builtin_double;
       else
 	return ERROR;
 
@@ -769,12 +766,12 @@ parse_number (p, len, parsed_float, putithere)
   limit = ((limit << 16) << 16) | limit;
   if (c == 'l' || c == 'L')
     {
-      type = java_long_type;
+      type = parse_java_type->builtin_long;
       len--;
     }
   else
     {
-      type = java_int_type;
+      type = parse_java_type->builtin_int;
     }
   limit_div_base = limit / (ULONGEST) base;
 
@@ -798,12 +795,12 @@ parse_number (p, len, parsed_float, putithere)
 	}
 
   /* If the type is bigger than a 32-bit signed integer can be, implicitly
-     promote to long.  Java does not do this, so mark it as builtin_type_uint64
-     rather than java_long_type.  0x80000000 will become -0x80000000 instead
-     of 0x80000000L, because we don't know the sign at this point.
-  */
-  if (type == java_int_type && n > (ULONGEST)0x80000000)
-    type = builtin_type_uint64;
+     promote to long.  Java does not do this, so mark it as
+     parse_type->builtin_uint64 rather than parse_java_type->builtin_long.
+     0x80000000 will become -0x80000000 instead of 0x80000000L, because we
+     don't know the sign at this point.  */
+  if (type == parse_java_type->builtin_int && n > (ULONGEST)0x80000000)
+    type = parse_type->builtin_uint64;
 
   putithere->typed_val_int.val = n;
   putithere->typed_val_int.type = type;
@@ -849,7 +846,7 @@ static const struct token tokentab2[] =
 /* Read one token, getting characters through lexptr.  */
 
 static int
-yylex ()
+yylex (void)
 {
   int c;
   int namelen;
@@ -906,7 +903,7 @@ yylex ()
 	error (_("Empty character constant"));
 
       yylval.typed_val_int.val = c;
-      yylval.typed_val_int.type = java_char_type;
+      yylval.typed_val_int.type = parse_java_type->builtin_char;
 
       c = *lexptr++;
       if (c != '\'')
@@ -1195,8 +1192,7 @@ yylex ()
 }
 
 void
-yyerror (msg)
-     char *msg;
+yyerror (char *msg)
 {
   if (prev_lexptr)
     lexptr = prev_lexptr;
@@ -1208,9 +1204,7 @@ yyerror (msg)
 }
 
 static struct type *
-java_type_from_name (name)
-     struct stoken name;
- 
+java_type_from_name (struct stoken name)
 {
   char *tmp = copy_name (name);
   struct type *typ = java_lookup_class (tmp);
@@ -1229,7 +1223,7 @@ push_variable (struct stoken name)
   int is_a_field_of_this = 0;
   struct symbol *sym;
   sym = lookup_symbol (tmp, expression_context_block, VAR_DOMAIN,
-		       &is_a_field_of_this, (struct symtab **) NULL);
+		       &is_a_field_of_this);
   if (sym && SYMBOL_CLASS (sym) != LOC_TYPEDEF)
     {
       if (symbol_read_needs_frame (sym))
@@ -1269,8 +1263,7 @@ push_variable (struct stoken name)
    qualified name (has '.'), generate a field access for each part. */
 
 static void
-push_fieldnames (name)
-     struct stoken name;
+push_fieldnames (struct stoken name)
 {
   int i;
   struct stoken token;
@@ -1361,8 +1354,7 @@ push_qualified_expression_name (struct stoken name, int dot_index)
    Handle VAR, TYPE, TYPE.FIELD1....FIELDN and VAR.FIELD1....FIELDN. */
 
 static void
-push_expression_name (name)
-     struct stoken name;
+push_expression_name (struct stoken name)
 {
   char *tmp;
   struct type *typ;
@@ -1397,11 +1389,7 @@ push_expression_name (name)
 
       msymbol = lookup_minimal_symbol (tmp, NULL, NULL);
       if (msymbol != NULL)
-	{
-	  write_exp_msymbol (msymbol,
-			     lookup_function_type (builtin_type_int),
-			     builtin_type_int);
-	}
+	write_exp_msymbol (msymbol);
       else if (!have_full_symbols () && !have_partial_symbols ())
 	error (_("No symbol table is loaded.  Use the \"file\" command"));
       else
@@ -1420,9 +1408,7 @@ push_expression_name (name)
    into a freshly malloc'ed struct expression.  Its language_defn is set
    to null.  */
 static struct expression *
-copy_exp (expr, endpos)
-     struct expression *expr;
-     int endpos;
+copy_exp (struct expression *expr, int endpos)
 {
   int len = length_of_subexp (expr, endpos);
   struct expression *new
@@ -1436,9 +1422,7 @@ copy_exp (expr, endpos)
 
 /* Insert the expression NEW into the current expression (expout) at POS.  */
 static void
-insert_exp (pos, new)
-     int pos;
-     struct expression *new;
+insert_exp (int pos, struct expression *new)
 {
   int newlen = new->nelts;
 

@@ -1,6 +1,6 @@
 /* Support for printing C and C++ types for GDB, the GNU debugger.
    Copyright (C) 1986, 1988, 1989, 1991, 1992, 1993, 1994, 1995, 1996, 1998,
-   1999, 2000, 2001, 2002, 2003, 2006, 2007, 2008
+   1999, 2000, 2001, 2002, 2003, 2006, 2007, 2008, 2009, 2010
    Free Software Foundation, Inc.
 
    This file is part of GDB.
@@ -70,17 +70,15 @@ c_print_type (struct type *type, char *varstring, struct ui_file *stream,
   c_type_print_base (type, stream, show, level);
   code = TYPE_CODE (type);
   if ((varstring != NULL && *varstring != '\0')
-      ||
   /* Need a space if going to print stars or brackets;
      but not if we will print just a type name.  */
-      ((show > 0 || TYPE_NAME (type) == 0)
-       &&
-       (code == TYPE_CODE_PTR || code == TYPE_CODE_FUNC
-	|| code == TYPE_CODE_METHOD
-	|| code == TYPE_CODE_ARRAY
-	|| code == TYPE_CODE_MEMBERPTR
-	|| code == TYPE_CODE_METHODPTR
-	|| code == TYPE_CODE_REF)))
+      || ((show > 0 || TYPE_NAME (type) == 0)
+	  && (code == TYPE_CODE_PTR || code == TYPE_CODE_FUNC
+	      || code == TYPE_CODE_METHOD
+	      || code == TYPE_CODE_ARRAY
+	      || code == TYPE_CODE_MEMBERPTR
+	      || code == TYPE_CODE_METHODPTR
+	      || code == TYPE_CODE_REF)))
     fputs_filtered (" ", stream);
   need_post_space = (varstring != NULL && strcmp (varstring, "") != 0);
   c_type_print_varspec_prefix (type, stream, show, 0, need_post_space);
@@ -95,6 +93,24 @@ c_print_type (struct type *type, char *varstring, struct ui_file *stream,
       demangled_args = strchr (varstring, '(') != NULL;
       c_type_print_varspec_suffix (type, stream, show, 0, demangled_args);
     }
+}
+
+/* Print a typedef using C syntax.  TYPE is the underlying type.
+   NEW_SYMBOL is the symbol naming the type.  STREAM is the stream on
+   which to print.  */
+
+void
+c_print_typedef (struct type *type, struct symbol *new_symbol,
+		 struct ui_file *stream)
+{
+  CHECK_TYPEDEF (type);
+  fprintf_filtered (stream, "typedef ");
+  type_print (type, "", stream, 0);
+  if (TYPE_NAME ((SYMBOL_TYPE (new_symbol))) == 0
+      || strcmp (TYPE_NAME ((SYMBOL_TYPE (new_symbol))),
+		 SYMBOL_LINKAGE_NAME (new_symbol)) != 0)
+    fprintf_filtered (stream, " %s", SYMBOL_PRINT_NAME (new_symbol));
+  fprintf_filtered (stream, ";\n");
 }
 
 /* If TYPE is a derived type, then print out derivation information.
@@ -320,7 +336,8 @@ c_type_print_modifier (struct type *type, struct ui_file *stream,
       did_print_modifier = 1;
     }
 
-  address_space_id = address_space_int_to_name (TYPE_INSTANCE_FLAGS (type));
+  address_space_id = address_space_int_to_name (get_type_arch (type),
+						TYPE_INSTANCE_FLAGS (type));
   if (address_space_id)
     {
       if (did_print_modifier || need_pre_space)
@@ -542,7 +559,7 @@ c_type_print_varspec_suffix (struct type *type, struct ui_file *stream,
 
       fprintf_filtered (stream, "[");
       if (TYPE_LENGTH (TYPE_TARGET_TYPE (type)) > 0
-	&& TYPE_ARRAY_UPPER_BOUND_TYPE (type) != BOUND_CANNOT_BE_DETERMINED)
+	&& !TYPE_ARRAY_UPPER_BOUND_IS_UNDEFINED (type))
 	fprintf_filtered (stream, "%d",
 			  (TYPE_LENGTH (type)
 			   / TYPE_LENGTH (TYPE_TARGET_TYPE (type))));
@@ -685,35 +702,10 @@ c_type_print_base (struct type *type, struct ui_file *stream, int show,
 
     case TYPE_CODE_STRUCT:
       c_type_print_modifier (type, stream, 0, 1);
-      /* Note TYPE_CODE_STRUCT and TYPE_CODE_CLASS have the same value,
-       * so we use another means for distinguishing them.
-       */
-      if (HAVE_CPLUS_STRUCT (type))
-	{
-	  switch (TYPE_DECLARED_TYPE (type))
-	    {
-	    case DECLARED_TYPE_CLASS:
-	      fprintf_filtered (stream, "class ");
-	      break;
-	    case DECLARED_TYPE_UNION:
-	      fprintf_filtered (stream, "union ");
-	      break;
-	    case DECLARED_TYPE_STRUCT:
-	      fprintf_filtered (stream, "struct ");
-	      break;
-	    default:
-	      /* If there is a CPLUS_STRUCT, assume class if not
-	       * otherwise specified in the declared_type field.
-	       */
-	      fprintf_filtered (stream, "class ");
-	      break;
-	    }			/* switch */
-	}
+      if (TYPE_DECLARED_CLASS (type))
+	fprintf_filtered (stream, "class ");
       else
-	{
-	  /* If not CPLUS_STRUCT, then assume it's a C struct */
-	  fprintf_filtered (stream, "struct ");
-	}
+	fprintf_filtered (stream, "struct ");
       goto struct_union;
 
     case TYPE_CODE_UNION:
@@ -728,8 +720,8 @@ c_type_print_base (struct type *type, struct ui_file *stream, int show,
        * tag  for unnamed struct/union/enum's, which we don't
        * want to print.
        */
-      if (TYPE_TAG_NAME (type) != NULL &&
-	  strncmp (TYPE_TAG_NAME (type), "{unnamed", 8))
+      if (TYPE_TAG_NAME (type) != NULL
+	  && strncmp (TYPE_TAG_NAME (type), "{unnamed", 8))
 	{
 	  fputs_filtered (TYPE_TAG_NAME (type), stream);
 	  if (show > 0)
@@ -744,6 +736,9 @@ c_type_print_base (struct type *type, struct ui_file *stream, int show,
 	}
       else if (show > 0 || TYPE_TAG_NAME (type) == NULL)
 	{
+	  struct type *basetype;
+	  int vptr_fieldno;
+
 	  cp_type_print_derivation_info (stream, type);
 
 	  fprintf_filtered (stream, "{\n");
@@ -766,8 +761,7 @@ c_type_print_base (struct type *type, struct ui_file *stream, int show,
 	     masquerading as a class, if all members are public, there's
 	     no need for a "public:" label. */
 
-	  if ((TYPE_DECLARED_TYPE (type) == DECLARED_TYPE_CLASS) ||
-	      (TYPE_DECLARED_TYPE (type) == DECLARED_TYPE_TEMPLATE))
+	  if (TYPE_DECLARED_CLASS (type))
 	    {
 	      QUIT;
 	      len = TYPE_NFIELDS (type);
@@ -795,8 +789,7 @@ c_type_print_base (struct type *type, struct ui_file *stream, int show,
 		    }
 		}
 	    }
-	  else if ((TYPE_DECLARED_TYPE (type) == DECLARED_TYPE_STRUCT) ||
-		   (TYPE_DECLARED_TYPE (type) == DECLARED_TYPE_UNION))
+	  else
 	    {
 	      QUIT;
 	      len = TYPE_NFIELDS (type);
@@ -815,8 +808,8 @@ c_type_print_base (struct type *type, struct ui_file *stream, int show,
 		      QUIT;
 		      len = TYPE_FN_FIELDLIST_LENGTH (type, j);
 		      for (i = 0; i < len; i++)
-			if (TYPE_FN_FIELD_PRIVATE (TYPE_FN_FIELDLIST1 (type, j), i) ||
-			    TYPE_FN_FIELD_PROTECTED (TYPE_FN_FIELDLIST1 (type, j), i))
+			if (TYPE_FN_FIELD_PRIVATE (TYPE_FN_FIELDLIST1 (type, j), i)
+			    || TYPE_FN_FIELD_PROTECTED (TYPE_FN_FIELDLIST1 (type, j), i))
 			  {
 			    need_access_label = 1;
 			    break;
@@ -831,18 +824,19 @@ c_type_print_base (struct type *type, struct ui_file *stream, int show,
 	     do not print the field that it occupies.  */
 
 	  len = TYPE_NFIELDS (type);
+	  vptr_fieldno = get_vptr_fieldno (type, &basetype);
 	  for (i = TYPE_N_BASECLASSES (type); i < len; i++)
 	    {
 	      QUIT;
-	      /* Don't print out virtual function table.  */
-	      if (strncmp (TYPE_FIELD_NAME (type, i), "_vptr", 5) == 0
-		  && is_cplus_marker ((TYPE_FIELD_NAME (type, i))[5]))
+
+	      /* If we have a virtual table pointer, omit it.  Even if
+		 virtual table pointers are not specifically marked in
+		 the debug info, they should be artificial.  */
+	      if ((i == vptr_fieldno && type == basetype)
+		  || TYPE_FIELD_ARTIFICIAL (type, i))
 		continue;
 
-	      /* If this is a C++ class we can print the various C++ section
-	         labels. */
-
-	      if (HAVE_CPLUS_STRUCT (type) && need_access_label)
+	      if (need_access_label)
 		{
 		  if (TYPE_FIELD_PROTECTED (type, i))
 		    {
@@ -872,14 +866,12 @@ c_type_print_base (struct type *type, struct ui_file *stream, int show,
 		}
 
 	      print_spaces_filtered (level + 4, stream);
-	      if (TYPE_FIELD_STATIC (type, i))
-		{
-		  fprintf_filtered (stream, "static ");
-		}
+	      if (field_is_static (&TYPE_FIELD (type, i)))
+		fprintf_filtered (stream, "static ");
 	      c_print_type (TYPE_FIELD_TYPE (type, i),
 			    TYPE_FIELD_NAME (type, i),
 			    stream, show - 1, level + 4);
-	      if (!TYPE_FIELD_STATIC (type, i)
+	      if (!field_is_static (&TYPE_FIELD (type, i))
 		  && TYPE_FIELD_PACKED (type, i))
 		{
 		  /* It is a bitfield.  This code does not attempt
@@ -969,9 +961,9 @@ c_type_print_base (struct type *type, struct ui_file *stream, int show,
 					TYPE_FN_FIELD_PHYSNAME (f, j));
 		      break;
 		    }
-		  else if (!is_constructor &&	/* constructors don't have declared types */
-			   !is_full_physname_constructor &&	/*    " "  */
-			   !is_type_conversion_operator (type, i, j))
+		  else if (!is_constructor	/* constructors don't have declared types */
+			   && !is_full_physname_constructor	/*    " "  */
+			   && !is_type_conversion_operator (type, i, j))
 		    {
 		      type_print (TYPE_TARGET_TYPE (TYPE_FN_FIELD_TYPE (f, j)),
 				  "", stream, -1);
@@ -1043,8 +1035,6 @@ c_type_print_base (struct type *type, struct ui_file *stream, int show,
 			       TYPE_LOCALTYPE_FILE (type),
 			       TYPE_LOCALTYPE_LINE (type));
 	}
-      if (TYPE_CODE (type) == TYPE_CODE_TEMPLATE)
-	goto go_back;
       break;
 
     case TYPE_CODE_ENUM:
@@ -1055,8 +1045,8 @@ c_type_print_base (struct type *type, struct ui_file *stream, int show,
          "{unnamed struct}"/"{unnamed union}"/"{unnamed enum}"
          tag for unnamed struct/union/enum's, which we don't
          want to print. */
-      if (TYPE_TAG_NAME (type) != NULL &&
-	  strncmp (TYPE_TAG_NAME (type), "{unnamed", 8))
+      if (TYPE_TAG_NAME (type) != NULL
+	  && strncmp (TYPE_TAG_NAME (type), "{unnamed", 8))
 	{
 	  fputs_filtered (TYPE_TAG_NAME (type), stream);
 	  if (show > 0)
@@ -1127,22 +1117,7 @@ c_type_print_base (struct type *type, struct ui_file *stream, int show,
 	    fprintf_filtered (stream, ", ");
 	}
       fprintf_filtered (stream, "> class ");
-      /* Yuck, factor this out to a subroutine so we can call
-         it and return to the point marked with the "goback:" label... - RT */
       goto struct_union;
-    go_back:
-      if (TYPE_NINSTANTIATIONS (type) > 0)
-	{
-	  fprintf_filtered (stream, _("\ntemplate instantiations:\n"));
-	  for (i = 0; i < TYPE_NINSTANTIATIONS (type); i++)
-	    {
-	      fprintf_filtered (stream, "  ");
-	      c_type_print_base (TYPE_INSTANTIATION (type, i), stream, 0, level);
-	      if (i < TYPE_NINSTANTIATIONS (type) - 1)
-		fprintf_filtered (stream, "\n");
-	    }
-	}
-      break;
 
     case TYPE_CODE_NAMESPACE:
       fputs_filtered ("namespace ", stream);

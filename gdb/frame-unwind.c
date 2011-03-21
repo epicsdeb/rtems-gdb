@@ -1,6 +1,7 @@
 /* Definitions for frame unwinder, for GDB, the GNU debugger.
 
-   Copyright (C) 2003, 2004, 2007, 2008 Free Software Foundation, Inc.
+   Copyright (C) 2003, 2004, 2007, 2008, 2009, 2010
+   Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -20,15 +21,18 @@
 #include "defs.h"
 #include "frame.h"
 #include "frame-unwind.h"
-#include "gdb_assert.h"
 #include "dummy-frame.h"
+#include "inline-frame.h"
+#include "value.h"
+#include "regcache.h"
+
+#include "gdb_assert.h"
 #include "gdb_obstack.h"
 
 static struct gdbarch_data *frame_unwind_data;
 
 struct frame_unwind_table_entry
 {
-  frame_unwind_sniffer_ftype *sniffer;
   const struct frame_unwind *unwinder;
   struct frame_unwind_table_entry *next;
 };
@@ -49,22 +53,11 @@ frame_unwind_init (struct obstack *obstack)
      can't override this.  */
   table->list = OBSTACK_ZALLOC (obstack, struct frame_unwind_table_entry);
   table->list->unwinder = dummy_frame_unwind;
+  table->list->next = OBSTACK_ZALLOC (obstack, struct frame_unwind_table_entry);
+  table->list->next->unwinder = inline_frame_unwind;
   /* The insertion point for OSABI sniffers.  */
-  table->osabi_head = &table->list->next;
+  table->osabi_head = &table->list->next->next;
   return table;
-}
-
-void
-frame_unwind_append_sniffer (struct gdbarch *gdbarch,
-			     frame_unwind_sniffer_ftype *sniffer)
-{
-  struct frame_unwind_table *table = gdbarch_data (gdbarch, frame_unwind_data);
-  struct frame_unwind_table_entry **ip;
-
-  /* Find the end of the list and insert the new entry there.  */
-  for (ip = table->osabi_head; (*ip) != NULL; ip = &(*ip)->next);
-  (*ip) = GDBARCH_OBSTACK_ZALLOC (gdbarch, struct frame_unwind_table_entry);
-  (*ip)->sniffer = sniffer;
 }
 
 void
@@ -81,30 +74,135 @@ frame_unwind_prepend_unwinder (struct gdbarch *gdbarch,
   (*table->osabi_head) = entry;
 }
 
+void
+frame_unwind_append_unwinder (struct gdbarch *gdbarch,
+			      const struct frame_unwind *unwinder)
+{
+  struct frame_unwind_table *table = gdbarch_data (gdbarch, frame_unwind_data);
+  struct frame_unwind_table_entry **ip;
+
+  /* Find the end of the list and insert the new entry there.  */
+  for (ip = table->osabi_head; (*ip) != NULL; ip = &(*ip)->next);
+  (*ip) = GDBARCH_OBSTACK_ZALLOC (gdbarch, struct frame_unwind_table_entry);
+  (*ip)->unwinder = unwinder;
+}
+
 const struct frame_unwind *
-frame_unwind_find_by_frame (struct frame_info *next_frame, void **this_cache)
+frame_unwind_find_by_frame (struct frame_info *this_frame, void **this_cache)
 {
   int i;
-  struct gdbarch *gdbarch = get_frame_arch (next_frame);
+  struct gdbarch *gdbarch = get_frame_arch (this_frame);
   struct frame_unwind_table *table = gdbarch_data (gdbarch, frame_unwind_data);
   struct frame_unwind_table_entry *entry;
+  struct cleanup *old_cleanup;
   for (entry = table->list; entry != NULL; entry = entry->next)
     {
-      if (entry->sniffer != NULL)
+      struct cleanup *old_cleanup;
+
+      old_cleanup = frame_prepare_for_sniffer (this_frame, entry->unwinder);
+      if (entry->unwinder->sniffer (entry->unwinder, this_frame,
+				    this_cache))
 	{
-	  const struct frame_unwind *desc = NULL;
-	  desc = entry->sniffer (next_frame);
-	  if (desc != NULL)
-	    return desc;
+	  discard_cleanups (old_cleanup);
+	  return entry->unwinder;
 	}
-      if (entry->unwinder != NULL)
-	{
-	  if (entry->unwinder->sniffer (entry->unwinder, next_frame,
-					this_cache))
-	    return entry->unwinder;
-	}
+      do_cleanups (old_cleanup);
     }
   internal_error (__FILE__, __LINE__, _("frame_unwind_find_by_frame failed"));
+}
+
+/* A default frame sniffer which always accepts the frame.  Used by
+   fallback prologue unwinders.  */
+
+int
+default_frame_sniffer (const struct frame_unwind *self,
+		       struct frame_info *this_frame,
+		       void **this_prologue_cache)
+{
+  return 1;
+}
+
+/* Helper functions for value-based register unwinding.  These return
+   a (possibly lazy) value of the appropriate type.  */
+
+/* Return a value which indicates that FRAME did not save REGNUM.  */
+
+struct value *
+frame_unwind_got_optimized (struct frame_info *frame, int regnum)
+{
+  struct gdbarch *gdbarch = frame_unwind_arch (frame);
+  struct value *reg_val;
+
+  reg_val = value_zero (register_type (gdbarch, regnum), not_lval);
+  set_value_optimized_out (reg_val, 1);
+  return reg_val;
+}
+
+/* Return a value which indicates that FRAME copied REGNUM into
+   register NEW_REGNUM.  */
+
+struct value *
+frame_unwind_got_register (struct frame_info *frame, int regnum, int new_regnum)
+{
+  return value_of_register_lazy (frame, new_regnum);
+}
+
+/* Return a value which indicates that FRAME saved REGNUM in memory at
+   ADDR.  */
+
+struct value *
+frame_unwind_got_memory (struct frame_info *frame, int regnum, CORE_ADDR addr)
+{
+  struct gdbarch *gdbarch = frame_unwind_arch (frame);
+  struct value *v = value_at_lazy (register_type (gdbarch, regnum), addr);
+
+  set_value_stack (v, 1);
+  return v;
+}
+
+/* Return a value which indicates that FRAME's saved version of
+   REGNUM has a known constant (computed) value of VAL.  */
+
+struct value *
+frame_unwind_got_constant (struct frame_info *frame, int regnum,
+			   ULONGEST val)
+{
+  struct gdbarch *gdbarch = frame_unwind_arch (frame);
+  enum bfd_endian byte_order = gdbarch_byte_order (gdbarch);
+  struct value *reg_val;
+
+  reg_val = value_zero (register_type (gdbarch, regnum), not_lval);
+  store_unsigned_integer (value_contents_writeable (reg_val),
+			  register_size (gdbarch, regnum), byte_order, val);
+  return reg_val;
+}
+
+struct value *
+frame_unwind_got_bytes (struct frame_info *frame, int regnum, gdb_byte *buf)
+{
+  struct gdbarch *gdbarch = frame_unwind_arch (frame);
+  struct value *reg_val;
+
+  reg_val = value_zero (register_type (gdbarch, regnum), not_lval);
+  memcpy (value_contents_raw (reg_val), buf, register_size (gdbarch, regnum));
+  return reg_val;
+}
+
+/* Return a value which indicates that FRAME's saved version of REGNUM
+   has a known constant (computed) value of ADDR.  Convert the
+   CORE_ADDR to a target address if necessary.  */
+
+struct value *
+frame_unwind_got_address (struct frame_info *frame, int regnum,
+			  CORE_ADDR addr)
+{
+  struct gdbarch *gdbarch = frame_unwind_arch (frame);
+  struct value *reg_val;
+
+  reg_val = value_zero (register_type (gdbarch, regnum), not_lval);
+  pack_long (value_contents_writeable (reg_val),
+	     register_type (gdbarch, regnum), addr);
+  return reg_val;
 }
 
 extern initialize_file_ftype _initialize_frame_unwind; /* -Wmissing-prototypes */

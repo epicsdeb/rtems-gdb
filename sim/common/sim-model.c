@@ -1,5 +1,6 @@
 /* Model support.
-   Copyright (C) 1996, 1997, 1998, 2007, 2008 Free Software Foundation, Inc.
+   Copyright (C) 1996, 1997, 1998, 2007, 2008, 2009, 2010
+   Free Software Foundation, Inc.
    Contributed by Cygnus Support.
 
 This file is part of GDB, the GNU debugger.
@@ -18,6 +19,7 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
 #include "sim-main.h"
+#include "sim-model.h"
 #include "libiberty.h"
 #include "sim-options.h"
 #include "sim-io.h"

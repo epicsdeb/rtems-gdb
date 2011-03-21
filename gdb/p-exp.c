@@ -128,7 +128,7 @@
 
 
 /* Copy the first part of user declarations.  */
-#line 46 "p-exp.y"
+#line 45 "p-exp.y"
 
 
 #include "defs.h"
@@ -143,6 +143,8 @@
 #include "symfile.h" /* Required by objfiles.h.  */
 #include "objfiles.h" /* For have_full_symbols and have_partial_symbols */
 #include "block.h"
+
+#define parse_type builtin_type (parse_gdbarch)
 
 /* Remap normal yacc parser interface names (yyparse, yylex, yyerror, etc),
    as well as gratuitiously global symbol names, so we can have multiple
@@ -222,7 +224,7 @@ static char * uptok (char *, int);
 #endif
 
 #if ! defined (YYSTYPE) && ! defined (YYSTYPE_IS_DECLARED)
-#line 130 "p-exp.y"
+#line 131 "p-exp.y"
 typedef union YYSTYPE {
     LONGEST lval;
     struct {
@@ -247,7 +249,7 @@ typedef union YYSTYPE {
     int *ivec;
   } YYSTYPE;
 /* Line 191 of yacc.c.  */
-#line 251 "p-exp.c.tmp"
+#line 253 "p-exp.c.tmp"
 # define yystype YYSTYPE /* obsolescent; will be withdrawn */
 # define YYSTYPE_IS_DECLARED 1
 # define YYSTYPE_IS_TRIVIAL 1
@@ -256,7 +258,7 @@ typedef union YYSTYPE {
 
 
 /* Copy the second part of user declarations.  */
-#line 154 "p-exp.y"
+#line 155 "p-exp.y"
 
 /* YYSTYPE gets defined by %union */
 static int
@@ -270,12 +272,12 @@ static int search_field;
 
 
 /* Line 214 of yacc.c.  */
-#line 274 "p-exp.c.tmp"
+#line 276 "p-exp.c.tmp"
 
 #if ! defined (yyoverflow) || YYERROR_VERBOSE
 
 # ifndef YYFREE
-#  define YYFREE free
+#  define YYFREE xfree
 # endif
 # ifndef YYMALLOC
 #  define YYMALLOC xmalloc
@@ -475,14 +477,14 @@ static const yysigned_char yyrhs[] =
 /* YYRLINE[YYN] -- source line where rule number YYN was defined.  */
 static const unsigned short yyrline[] =
 {
-       0,   234,   234,   234,   242,   243,   246,   253,   254,   259,
-     265,   271,   275,   279,   283,   287,   287,   302,   300,   330,
-     327,   342,   343,   345,   349,   364,   370,   374,   374,   394,
-     398,   402,   406,   410,   414,   418,   424,   430,   436,   442,
-     448,   454,   458,   462,   466,   470,   477,   484,   492,   504,
-     512,   515,   519,   527,   552,   579,   596,   607,   623,   638,
-     639,   673,   746,   757,   761,   763,   765,   768,   776,   777,
-     778,   779,   782,   783
+       0,   235,   235,   235,   243,   244,   247,   254,   255,   260,
+     266,   272,   276,   280,   284,   288,   288,   303,   301,   331,
+     328,   343,   344,   346,   350,   365,   371,   375,   375,   395,
+     399,   403,   407,   411,   415,   419,   425,   431,   437,   443,
+     449,   455,   459,   463,   467,   471,   478,   485,   493,   505,
+     513,   516,   520,   528,   553,   580,   597,   607,   622,   637,
+     638,   666,   735,   746,   750,   752,   754,   757,   765,   766,
+     767,   768,   771,   772
 };
 #endif
 
@@ -1310,7 +1312,7 @@ yyreduce:
   switch (yyn)
     {
         case 2:
-#line 234 "p-exp.y"
+#line 235 "p-exp.y"
     { current_type = NULL;
 		  search_field = 0;
 		  leftdiv_is_integer = 0;
@@ -1318,12 +1320,12 @@ yyreduce:
     break;
 
   case 3:
-#line 238 "p-exp.y"
+#line 239 "p-exp.y"
     {}
     break;
 
   case 6:
-#line 247 "p-exp.y"
+#line 248 "p-exp.y"
     { write_exp_elt_opcode(OP_TYPE);
 			  write_exp_elt_type(yyvsp[0].tval);
 			  write_exp_elt_opcode(OP_TYPE);
@@ -1331,51 +1333,51 @@ yyreduce:
     break;
 
   case 8:
-#line 255 "p-exp.y"
+#line 256 "p-exp.y"
     { write_exp_elt_opcode (BINOP_COMMA); }
     break;
 
   case 9:
-#line 260 "p-exp.y"
+#line 261 "p-exp.y"
     { write_exp_elt_opcode (UNOP_IND);
 			  if (current_type) 
 			    current_type = TYPE_TARGET_TYPE (current_type); }
     break;
 
   case 10:
-#line 266 "p-exp.y"
+#line 267 "p-exp.y"
     { write_exp_elt_opcode (UNOP_ADDR); 
 			  if (current_type)
 			    current_type = TYPE_POINTER_TYPE (current_type); }
     break;
 
   case 11:
-#line 272 "p-exp.y"
+#line 273 "p-exp.y"
     { write_exp_elt_opcode (UNOP_NEG); }
     break;
 
   case 12:
-#line 276 "p-exp.y"
+#line 277 "p-exp.y"
     { write_exp_elt_opcode (UNOP_LOGICAL_NOT); }
     break;
 
   case 13:
-#line 280 "p-exp.y"
+#line 281 "p-exp.y"
     { write_exp_elt_opcode (UNOP_PREINCREMENT); }
     break;
 
   case 14:
-#line 284 "p-exp.y"
+#line 285 "p-exp.y"
     { write_exp_elt_opcode (UNOP_PREDECREMENT); }
     break;
 
   case 15:
-#line 287 "p-exp.y"
+#line 288 "p-exp.y"
     { search_field = 1; }
     break;
 
   case 16:
-#line 290 "p-exp.y"
+#line 291 "p-exp.y"
     { write_exp_elt_opcode (STRUCTOP_STRUCT);
 			  write_exp_string (yyvsp[0].sval); 
 			  write_exp_elt_opcode (STRUCTOP_STRUCT);
@@ -1389,7 +1391,7 @@ yyreduce:
     break;
 
   case 17:
-#line 302 "p-exp.y"
+#line 303 "p-exp.y"
     { char *arrayname; 
 			  int arrayfieldindex;
 			  arrayfieldindex = is_pascal_string_type (
@@ -1411,7 +1413,7 @@ yyreduce:
     break;
 
   case 18:
-#line 321 "p-exp.y"
+#line 322 "p-exp.y"
     { pop_current_type ();
 			  write_exp_elt_opcode (BINOP_SUBSCRIPT);
 			  if (current_type)
@@ -1419,13 +1421,13 @@ yyreduce:
     break;
 
   case 19:
-#line 330 "p-exp.y"
+#line 331 "p-exp.y"
     { push_current_type ();
 			  start_arglist (); }
     break;
 
   case 20:
-#line 333 "p-exp.y"
+#line 334 "p-exp.y"
     { write_exp_elt_opcode (OP_FUNCALL);
 			  write_exp_elt_longcst ((LONGEST) end_arglist ());
 			  write_exp_elt_opcode (OP_FUNCALL); 
@@ -1436,17 +1438,17 @@ yyreduce:
     break;
 
   case 22:
-#line 344 "p-exp.y"
+#line 345 "p-exp.y"
     { arglist_len = 1; }
     break;
 
   case 23:
-#line 346 "p-exp.y"
+#line 347 "p-exp.y"
     { arglist_len++; }
     break;
 
   case 24:
-#line 350 "p-exp.y"
+#line 351 "p-exp.y"
     { if (current_type)
 			    {
 			      /* Allow automatic dereference of classes.  */
@@ -1462,17 +1464,17 @@ yyreduce:
     break;
 
   case 25:
-#line 365 "p-exp.y"
+#line 366 "p-exp.y"
     { }
     break;
 
   case 26:
-#line 371 "p-exp.y"
+#line 372 "p-exp.y"
     { write_exp_elt_opcode (BINOP_MUL); }
     break;
 
   case 27:
-#line 374 "p-exp.y"
+#line 375 "p-exp.y"
     {
 			  if (current_type && is_integral_type (current_type))
 			    leftdiv_is_integer = 1;
@@ -1480,14 +1482,14 @@ yyreduce:
     break;
 
   case 28:
-#line 379 "p-exp.y"
+#line 380 "p-exp.y"
     { 
 			  if (leftdiv_is_integer && current_type
 			      && is_integral_type (current_type))
 			    {
 			      write_exp_elt_opcode (UNOP_CAST);
-			      write_exp_elt_type (builtin_type_long_double);
-			      current_type = builtin_type_long_double;
+			      write_exp_elt_type (parse_type->builtin_long_double);
+			      current_type = parse_type->builtin_long_double;
 			      write_exp_elt_opcode (UNOP_CAST);
 			      leftdiv_is_integer = 0;
 			    }
@@ -1497,115 +1499,115 @@ yyreduce:
     break;
 
   case 29:
-#line 395 "p-exp.y"
+#line 396 "p-exp.y"
     { write_exp_elt_opcode (BINOP_INTDIV); }
     break;
 
   case 30:
-#line 399 "p-exp.y"
+#line 400 "p-exp.y"
     { write_exp_elt_opcode (BINOP_REM); }
     break;
 
   case 31:
-#line 403 "p-exp.y"
+#line 404 "p-exp.y"
     { write_exp_elt_opcode (BINOP_ADD); }
     break;
 
   case 32:
-#line 407 "p-exp.y"
+#line 408 "p-exp.y"
     { write_exp_elt_opcode (BINOP_SUB); }
     break;
 
   case 33:
-#line 411 "p-exp.y"
+#line 412 "p-exp.y"
     { write_exp_elt_opcode (BINOP_LSH); }
     break;
 
   case 34:
-#line 415 "p-exp.y"
+#line 416 "p-exp.y"
     { write_exp_elt_opcode (BINOP_RSH); }
     break;
 
   case 35:
-#line 419 "p-exp.y"
+#line 420 "p-exp.y"
     { write_exp_elt_opcode (BINOP_EQUAL); 
-			  current_type = builtin_type_bool;
+			  current_type = parse_type->builtin_bool;
 			}
     break;
 
   case 36:
-#line 425 "p-exp.y"
+#line 426 "p-exp.y"
     { write_exp_elt_opcode (BINOP_NOTEQUAL); 
-			  current_type = builtin_type_bool;
+			  current_type = parse_type->builtin_bool;
 			}
     break;
 
   case 37:
-#line 431 "p-exp.y"
+#line 432 "p-exp.y"
     { write_exp_elt_opcode (BINOP_LEQ); 
-			  current_type = builtin_type_bool;
+			  current_type = parse_type->builtin_bool;
 			}
     break;
 
   case 38:
-#line 437 "p-exp.y"
+#line 438 "p-exp.y"
     { write_exp_elt_opcode (BINOP_GEQ); 
-			  current_type = builtin_type_bool;
+			  current_type = parse_type->builtin_bool;
 			}
     break;
 
   case 39:
-#line 443 "p-exp.y"
+#line 444 "p-exp.y"
     { write_exp_elt_opcode (BINOP_LESS); 
-			  current_type = builtin_type_bool;
+			  current_type = parse_type->builtin_bool;
 			}
     break;
 
   case 40:
-#line 449 "p-exp.y"
+#line 450 "p-exp.y"
     { write_exp_elt_opcode (BINOP_GTR); 
-			  current_type = builtin_type_bool;
+			  current_type = parse_type->builtin_bool;
 			}
     break;
 
   case 41:
-#line 455 "p-exp.y"
+#line 456 "p-exp.y"
     { write_exp_elt_opcode (BINOP_BITWISE_AND); }
     break;
 
   case 42:
-#line 459 "p-exp.y"
+#line 460 "p-exp.y"
     { write_exp_elt_opcode (BINOP_BITWISE_XOR); }
     break;
 
   case 43:
-#line 463 "p-exp.y"
+#line 464 "p-exp.y"
     { write_exp_elt_opcode (BINOP_BITWISE_IOR); }
     break;
 
   case 44:
-#line 467 "p-exp.y"
+#line 468 "p-exp.y"
     { write_exp_elt_opcode (BINOP_ASSIGN); }
     break;
 
   case 45:
-#line 471 "p-exp.y"
+#line 472 "p-exp.y"
     { write_exp_elt_opcode (OP_BOOL);
 			  write_exp_elt_longcst ((LONGEST) yyvsp[0].lval);
-			  current_type = builtin_type_bool;
+			  current_type = parse_type->builtin_bool;
 			  write_exp_elt_opcode (OP_BOOL); }
     break;
 
   case 46:
-#line 478 "p-exp.y"
+#line 479 "p-exp.y"
     { write_exp_elt_opcode (OP_BOOL);
 			  write_exp_elt_longcst ((LONGEST) yyvsp[0].lval);
-			  current_type = builtin_type_bool;
+			  current_type = parse_type->builtin_bool;
 			  write_exp_elt_opcode (OP_BOOL); }
     break;
 
   case 47:
-#line 485 "p-exp.y"
+#line 486 "p-exp.y"
     { write_exp_elt_opcode (OP_LONG);
 			  write_exp_elt_type (yyvsp[0].typed_val_int.type);
 			  current_type = yyvsp[0].typed_val_int.type;
@@ -1614,7 +1616,7 @@ yyreduce:
     break;
 
   case 48:
-#line 493 "p-exp.y"
+#line 494 "p-exp.y"
     { YYSTYPE val;
 			  parse_number (yyvsp[0].ssym.stoken.ptr, yyvsp[0].ssym.stoken.length, 0, &val);
 			  write_exp_elt_opcode (OP_LONG);
@@ -1626,7 +1628,7 @@ yyreduce:
     break;
 
   case 49:
-#line 505 "p-exp.y"
+#line 506 "p-exp.y"
     { write_exp_elt_opcode (OP_DOUBLE);
 			  write_exp_elt_type (yyvsp[0].typed_val_float.type);
 			  current_type = yyvsp[0].typed_val_float.type;
@@ -1635,16 +1637,16 @@ yyreduce:
     break;
 
   case 52:
-#line 520 "p-exp.y"
+#line 521 "p-exp.y"
     { write_exp_elt_opcode (OP_LONG);
-			  write_exp_elt_type (builtin_type_int);
+			  write_exp_elt_type (parse_type->builtin_int);
 			  CHECK_TYPEDEF (yyvsp[-1].tval);
 			  write_exp_elt_longcst ((LONGEST) TYPE_LENGTH (yyvsp[-1].tval));
 			  write_exp_elt_opcode (OP_LONG); }
     break;
 
   case 53:
-#line 528 "p-exp.y"
+#line 529 "p-exp.y"
     { /* C strings are converted into array constants with
 			     an explicit null byte added at the end.  Thus
 			     the array upper bound is the string length.
@@ -1654,12 +1656,12 @@ yyreduce:
 			  while (count-- > 0)
 			    {
 			      write_exp_elt_opcode (OP_LONG);
-			      write_exp_elt_type (builtin_type_char);
+			      write_exp_elt_type (parse_type->builtin_char);
 			      write_exp_elt_longcst ((LONGEST)(*sp++));
 			      write_exp_elt_opcode (OP_LONG);
 			    }
 			  write_exp_elt_opcode (OP_LONG);
-			  write_exp_elt_type (builtin_type_char);
+			  write_exp_elt_type (parse_type->builtin_char);
 			  write_exp_elt_longcst ((LONGEST)'\0');
 			  write_exp_elt_opcode (OP_LONG);
 			  write_exp_elt_opcode (OP_ARRAY);
@@ -1669,7 +1671,7 @@ yyreduce:
     break;
 
   case 54:
-#line 553 "p-exp.y"
+#line 554 "p-exp.y"
     { 
 			  struct value * this_val;
 			  struct type * this_type;
@@ -1695,7 +1697,7 @@ yyreduce:
     break;
 
   case 55:
-#line 580 "p-exp.y"
+#line 581 "p-exp.y"
     {
 			  if (yyvsp[0].ssym.sym != 0)
 			      yyval.bval = SYMBOL_BLOCK_VALUE (yyvsp[0].ssym.sym);
@@ -1713,11 +1715,10 @@ yyreduce:
     break;
 
   case 56:
-#line 597 "p-exp.y"
+#line 598 "p-exp.y"
     { struct symbol *tem
 			    = lookup_symbol (copy_name (yyvsp[0].sval), yyvsp[-2].bval,
-					     VAR_DOMAIN, (int *) NULL,
-					     (struct symtab **) NULL);
+					     VAR_DOMAIN, (int *) NULL);
 			  if (!tem || SYMBOL_CLASS (tem) != LOC_BLOCK)
 			    error ("No function \"%s\" in specified context.",
 				   copy_name (yyvsp[0].sval));
@@ -1728,8 +1729,7 @@ yyreduce:
 #line 608 "p-exp.y"
     { struct symbol *sym;
 			  sym = lookup_symbol (copy_name (yyvsp[0].sval), yyvsp[-2].bval,
-					       VAR_DOMAIN, (int *) NULL,
-					       (struct symtab **) NULL);
+					       VAR_DOMAIN, (int *) NULL);
 			  if (sym == 0)
 			    error ("No symbol \"%s\" in specified context.",
 				   copy_name (yyvsp[0].sval));
@@ -1742,7 +1742,7 @@ yyreduce:
     break;
 
   case 58:
-#line 624 "p-exp.y"
+#line 623 "p-exp.y"
     {
 			  struct type *type = yyvsp[-2].tval;
 			  if (TYPE_CODE (type) != TYPE_CODE_STRUCT
@@ -1758,7 +1758,7 @@ yyreduce:
     break;
 
   case 60:
-#line 640 "p-exp.y"
+#line 639 "p-exp.y"
     {
 			  char *name = copy_name (yyvsp[0].sval);
 			  struct symbol *sym;
@@ -1766,8 +1766,7 @@ yyreduce:
 
 			  sym =
 			    lookup_symbol (name, (const struct block *) NULL,
-					   VAR_DOMAIN, (int *) NULL,
-					   (struct symtab **) NULL);
+					   VAR_DOMAIN, (int *) NULL);
 			  if (sym)
 			    {
 			      write_exp_elt_opcode (OP_VAR_VALUE);
@@ -1779,21 +1778,16 @@ yyreduce:
 
 			  msymbol = lookup_minimal_symbol (name, NULL, NULL);
 			  if (msymbol != NULL)
-			    {
-			      write_exp_msymbol (msymbol,
-						 lookup_function_type (builtin_type_int),
-						 builtin_type_int);
-			    }
+			    write_exp_msymbol (msymbol);
+			  else if (!have_full_symbols () && !have_partial_symbols ())
+			    error ("No symbol table is loaded.  Use the \"file\" command.");
 			  else
-			    if (!have_full_symbols () && !have_partial_symbols ())
-			      error ("No symbol table is loaded.  Use the \"file\" command.");
-			    else
-			      error ("No symbol \"%s\" in current context.", name);
+			    error ("No symbol \"%s\" in current context.", name);
 			}
     break;
 
   case 61:
-#line 674 "p-exp.y"
+#line 667 "p-exp.y"
     { struct symbol *sym = yyvsp[0].ssym.sym;
 
 			  if (sym)
@@ -1851,11 +1845,7 @@ yyreduce:
 			      msymbol =
 				lookup_minimal_symbol (arg, NULL, NULL);
 			      if (msymbol != NULL)
-				{
-				  write_exp_msymbol (msymbol,
-						     lookup_function_type (builtin_type_int),
-						     builtin_type_int);
-				}
+				write_exp_msymbol (msymbol);
 			      else if (!have_full_symbols () && !have_partial_symbols ())
 				error ("No symbol table is loaded.  Use the \"file\" command.");
 			      else
@@ -1866,44 +1856,44 @@ yyreduce:
     break;
 
   case 64:
-#line 762 "p-exp.y"
+#line 751 "p-exp.y"
     { yyval.tval = lookup_pointer_type (yyvsp[0].tval); }
     break;
 
   case 65:
-#line 764 "p-exp.y"
+#line 753 "p-exp.y"
     { yyval.tval = yyvsp[0].tsym.type; }
     break;
 
   case 66:
-#line 766 "p-exp.y"
+#line 755 "p-exp.y"
     { yyval.tval = lookup_struct (copy_name (yyvsp[0].sval),
 					      expression_context_block); }
     break;
 
   case 67:
-#line 769 "p-exp.y"
+#line 758 "p-exp.y"
     { yyval.tval = lookup_struct (copy_name (yyvsp[0].sval),
 					      expression_context_block); }
     break;
 
   case 68:
-#line 776 "p-exp.y"
+#line 765 "p-exp.y"
     { yyval.sval = yyvsp[0].ssym.stoken; }
     break;
 
   case 69:
-#line 777 "p-exp.y"
+#line 766 "p-exp.y"
     { yyval.sval = yyvsp[0].ssym.stoken; }
     break;
 
   case 70:
-#line 778 "p-exp.y"
+#line 767 "p-exp.y"
     { yyval.sval = yyvsp[0].tsym.stoken; }
     break;
 
   case 71:
-#line 779 "p-exp.y"
+#line 768 "p-exp.y"
     { yyval.sval = yyvsp[0].ssym.stoken; }
     break;
 
@@ -1911,7 +1901,7 @@ yyreduce:
     }
 
 /* Line 1000 of yacc.c.  */
-#line 1915 "p-exp.c.tmp"
+#line 1905 "p-exp.c.tmp"
 
   yyvsp -= yylen;
   yyssp -= yylen;
@@ -2136,7 +2126,7 @@ yyreturn:
 }
 
 
-#line 793 "p-exp.y"
+#line 782 "p-exp.y"
 
 
 /* Take care of parsing a number (anything that starts with a digit).
@@ -2191,11 +2181,11 @@ parse_number (p, len, parsed_float, putithere)
       c = tolower (p[len - 1]);
 
       if (c == 'f')
-	putithere->typed_val_float.type = builtin_type_float;
+	putithere->typed_val_float.type = parse_type->builtin_float;
       else if (c == 'l')
-	putithere->typed_val_float.type = builtin_type_long_double;
+	putithere->typed_val_float.type = parse_type->builtin_long_double;
       else if (isdigit (c) || c == '.')
-	putithere->typed_val_float.type = builtin_type_double;
+	putithere->typed_val_float.type = parse_type->builtin_double;
       else
 	return ERROR;
 
@@ -2301,9 +2291,9 @@ parse_number (p, len, parsed_float, putithere)
 
   un = (ULONGEST)n >> 2;
   if (long_p == 0
-      && (un >> (gdbarch_int_bit (current_gdbarch) - 2)) == 0)
+      && (un >> (gdbarch_int_bit (parse_gdbarch) - 2)) == 0)
     {
-      high_bit = ((ULONGEST)1) << (gdbarch_int_bit (current_gdbarch) - 1);
+      high_bit = ((ULONGEST)1) << (gdbarch_int_bit (parse_gdbarch) - 1);
 
       /* A large decimal (not hex or octal) constant (between INT_MAX
 	 and UINT_MAX) is a long or unsigned long, according to ANSI,
@@ -2311,28 +2301,28 @@ parse_number (p, len, parsed_float, putithere)
 	 int.  This probably should be fixed.  GCC gives a warning on
 	 such constants.  */
 
-      unsigned_type = builtin_type_unsigned_int;
-      signed_type = builtin_type_int;
+      unsigned_type = parse_type->builtin_unsigned_int;
+      signed_type = parse_type->builtin_int;
     }
   else if (long_p <= 1
-	   && (un >> (gdbarch_long_bit (current_gdbarch) - 2)) == 0)
+	   && (un >> (gdbarch_long_bit (parse_gdbarch) - 2)) == 0)
     {
-      high_bit = ((ULONGEST)1) << (gdbarch_long_bit (current_gdbarch) - 1);
-      unsigned_type = builtin_type_unsigned_long;
-      signed_type = builtin_type_long;
+      high_bit = ((ULONGEST)1) << (gdbarch_long_bit (parse_gdbarch) - 1);
+      unsigned_type = parse_type->builtin_unsigned_long;
+      signed_type = parse_type->builtin_long;
     }
   else
     {
       int shift;
       if (sizeof (ULONGEST) * HOST_CHAR_BIT
-	  < gdbarch_long_long_bit (current_gdbarch))
+	  < gdbarch_long_long_bit (parse_gdbarch))
 	/* A long long does not fit in a LONGEST.  */
 	shift = (sizeof (ULONGEST) * HOST_CHAR_BIT - 1);
       else
-	shift = (gdbarch_long_long_bit (current_gdbarch) - 1);
+	shift = (gdbarch_long_long_bit (parse_gdbarch) - 1);
       high_bit = (ULONGEST) 1 << shift;
-      unsigned_type = builtin_type_unsigned_long_long;
-      signed_type = builtin_type_long_long;
+      unsigned_type = parse_type->builtin_unsigned_long_long;
+      signed_type = parse_type->builtin_long_long;
     }
 
    putithere->typed_val_int.val = n;
@@ -2501,7 +2491,7 @@ yylex ()
 	error ("Empty character constant.");
 
       yylval.typed_val_int.val = c;
-      yylval.typed_val_int.type = builtin_type_char;
+      yylval.typed_val_int.type = parse_type->builtin_char;
 
       c = *lexptr++;
       if (c != '\'')
@@ -2727,7 +2717,7 @@ yylex ()
      removed from the input stream.  */
   if (namelen == 2 && uptokstart[0] == 'I' && uptokstart[1] == 'F')
     {
-      free (uptokstart);
+      xfree (uptokstart);
       return 0;
     }
 
@@ -2741,30 +2731,30 @@ yylex ()
     case 6:
       if (strcmp (uptokstart, "OBJECT") == 0)
 	{
-	  free (uptokstart);
+	  xfree (uptokstart);
 	  return CLASS;
 	}
       if (strcmp (uptokstart, "RECORD") == 0)
 	{
-	  free (uptokstart);
+	  xfree (uptokstart);
 	  return STRUCT;
 	}
       if (strcmp (uptokstart, "SIZEOF") == 0)
 	{
-	  free (uptokstart);
+	  xfree (uptokstart);
 	  return SIZEOF;
 	}
       break;
     case 5:
       if (strcmp (uptokstart, "CLASS") == 0)
 	{
-	  free (uptokstart);
+	  xfree (uptokstart);
 	  return CLASS;
 	}
       if (strcmp (uptokstart, "FALSE") == 0)
 	{
           yylval.lval = 0;
-	  free (uptokstart);
+	  xfree (uptokstart);
           return FALSEKEYWORD;
         }
       break;
@@ -2772,7 +2762,7 @@ yylex ()
       if (strcmp (uptokstart, "TRUE") == 0)
 	{
           yylval.lval = 1;
-	  free (uptokstart);
+	  xfree (uptokstart);
   	  return TRUEKEYWORD;
         }
       if (strcmp (uptokstart, "SELF") == 0)
@@ -2782,10 +2772,9 @@ yylex ()
 	  static const char this_name[] = "this";
 
 	  if (lookup_symbol (this_name, expression_context_block,
-			     VAR_DOMAIN, (int *) NULL,
-			     (struct symtab **) NULL))
+			     VAR_DOMAIN, (int *) NULL))
 	    {
-	      free (uptokstart);
+	      xfree (uptokstart);
 	      return THIS;
 	    }
 	}
@@ -2804,7 +2793,7 @@ yylex ()
         so in expression to enter hexadecimal values
         we still need to use C syntax with 0xff  */
       write_dollar_variable (yylval.sval);
-      free (uptokstart);
+      xfree (uptokstart);
       return VARIABLE;
     }
 
@@ -2827,9 +2816,7 @@ yylex ()
       sym = NULL;
     else
       sym = lookup_symbol (tmp, expression_context_block,
-			   VAR_DOMAIN,
-			   &is_a_field_of_this,
-			   (struct symtab **) NULL);
+			   VAR_DOMAIN, &is_a_field_of_this);
     /* second chance uppercased (as Free Pascal does).  */
     if (!sym && !is_a_field_of_this && !is_a_field)
       {
@@ -2844,9 +2831,7 @@ yylex ()
 	 sym = NULL;
        else
 	 sym = lookup_symbol (tmp, expression_context_block,
-                        VAR_DOMAIN,
-                        &is_a_field_of_this,
-                        (struct symtab **) NULL);
+			      VAR_DOMAIN, &is_a_field_of_this);
        if (sym || is_a_field_of_this || is_a_field)
          for (i = 0; i <= namelen; i++)
            {
@@ -2874,9 +2859,7 @@ yylex ()
 	 sym = NULL;
        else
 	 sym = lookup_symbol (tmp, expression_context_block,
-                         VAR_DOMAIN,
-                         &is_a_field_of_this,
-                         (struct symtab **) NULL);
+			      VAR_DOMAIN, &is_a_field_of_this);
        if (sym || is_a_field_of_this || is_a_field)
           for (i = 0; i <= namelen; i++)
             {
@@ -2897,7 +2880,7 @@ yylex ()
 	strncpy (tempbuf, tokstart, namelen); tempbuf [namelen] = 0;
 	yylval.sval.ptr = tempbuf;
 	yylval.sval.length = namelen; 
-	free (uptokstart);
+	xfree (uptokstart);
 	return FIELDNAME;
       } 
     /* Call lookup_symtab, not lookup_partial_symtab, in case there are
@@ -2908,7 +2891,7 @@ yylex ()
       {
 	yylval.ssym.sym = sym;
 	yylval.ssym.is_a_field_of_this = is_a_field_of_this;
-	free (uptokstart);
+	xfree (uptokstart);
 	return BLOCKNAME;
       }
     if (sym && SYMBOL_CLASS (sym) == LOC_TYPEDEF)
@@ -2973,8 +2956,7 @@ yylex ()
 		      memcpy (tmp1, namestart, p - namestart);
 		      tmp1[p - namestart] = '\0';
 		      cur_sym = lookup_symbol (ncopy, expression_context_block,
-					       VAR_DOMAIN, (int *) NULL,
-					       (struct symtab **) NULL);
+					       VAR_DOMAIN, (int *) NULL);
 		      if (cur_sym)
 			{
 			  if (SYMBOL_CLASS (cur_sym) == LOC_TYPEDEF)
@@ -2999,15 +2981,15 @@ yylex ()
 #else /* not 0 */
 	  yylval.tsym.type = SYMBOL_TYPE (sym);
 #endif /* not 0 */
-	  free (uptokstart);
+	  xfree (uptokstart);
 	  return TYPENAME;
         }
     yylval.tsym.type
-      = language_lookup_primitive_type_by_name (current_language,
-						current_gdbarch, tmp);
+      = language_lookup_primitive_type_by_name (parse_language,
+						parse_gdbarch, tmp);
     if (yylval.tsym.type != NULL)
       {
-	free (uptokstart);
+	xfree (uptokstart);
 	return TYPENAME;
       }
 
@@ -3024,12 +3006,12 @@ yylex ()
 	  {
 	    yylval.ssym.sym = sym;
 	    yylval.ssym.is_a_field_of_this = is_a_field_of_this;
-	    free (uptokstart);
+	    xfree (uptokstart);
 	    return NAME_OR_INT;
 	  }
       }
 
-    free(uptokstart);
+    xfree(uptokstart);
     /* Any other kind of symbol */
     yylval.ssym.sym = sym;
     yylval.ssym.is_a_field_of_this = is_a_field_of_this;

@@ -1,7 +1,7 @@
 # This testcase is part of GDB, the GNU debugger.
 
-# Copyright 1997, 1998, 1999, 2000, 2001, 2002, 2003, 2004, 2007, 2008
-# Free Software Foundation, Inc.
+# Copyright 1997, 1998, 1999, 2000, 2001, 2002, 2003, 2004, 2007, 2008, 2009,
+# 2010 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -22,29 +22,10 @@
 
 # ending-run.exp -- Expect script to test ending a test run in gdb
 
-if $tracelevel then {
-    strace $tracelevel
+if { [prepare_for_testing ending-run.exp ending-run] } {
+    return -1
 }
-
-set testfile ending-run
-set srcfile ${testfile}.c
-set binfile ${objdir}/${subdir}/${testfile}
-
-remote_exec build "rm -f ${binfile}"
 remote_exec build "rm -f core"
-
-
-if  { [gdb_compile "${srcdir}/${subdir}/${srcfile}" "${binfile}" executable {debug}] != "" } {
-     untested ending-run.exp
-     return -1
-}
-
-
-
-gdb_exit
-gdb_start
-gdb_reinitialize_dir $srcdir/$subdir
-gdb_load ${binfile}
 
 # CHFts23469: Test that you can "clear" a bp set at
 # a line _before_ the routine (which will default to the
@@ -55,9 +36,9 @@ gdb_load ${binfile}
 gdb_test "b ending-run.c:1" ".*Breakpoint.*ending-run.c, line 1.*" \
 	"bpt at line before routine"
 
-gdb_test "b ending-run.c:13" \
-	".*Note.*also.*Breakpoint 2.*ending-run.c, line 13.*" \
-	"b ending-run.c:13, one"
+gdb_test "b ending-run.c:14" \
+	".*Note.*also.*Breakpoint 2.*ending-run.c, line 14.*" \
+	"b ending-run.c:14, one"
 
 # Set up to go to the next-to-last line of the program
 #
@@ -67,7 +48,7 @@ gdb_test "b ending-run.c:31" ".*Breakpoint 3.*ending-run.c, line 31.*"
 # as line "13".  Then try to clear it--this should work.
 #
 gdb_run_cmd
-gdb_test "" ".*Breakpoint.*1.*callee.*13.*" "run"
+gdb_test "" ".*Breakpoint.*1.*callee.*14.*" "run"
 
 gdb_test "cle" ".*Deleted breakpoints 1 2.*" "clear worked"
 send_gdb "i b\n"
@@ -86,30 +67,17 @@ gdb_expect {
 # Test some other "clear" combinations
 #
 gdb_test "b ending-run.c:1" ".*Breakpoint.*4.*"
-gdb_test "b ending-run.c:13" ".*Note.*also.*Breakpoint.*5.*" "b ending-run.c:13, two"
-gdb_test "cle ending-run.c:13" \
-	".*Deleted breakpoint 5.*" "Only cleared 1 by line"
+gdb_test "b ending-run.c:14" ".*Note.*also.*Breakpoint.*5.*" "b ending-run.c:14, two"
+gdb_test "cle ending-run.c:14" \
+	".*Deleted breakpoint 5.*" "Cleared 2 by line"
 
-send_gdb "inf line ending-run.c:13\n"
-gdb_expect {
-    -re ".*address (0x\[0-9a-fA-F]*).*$gdb_prompt $" {
-        set line_eight $expect_out(1,string)
-        gdb_test "b 13" ".*Breakpoint.*6.*"
-        gdb_test "cle *$line_eight" ".*Deleted breakpoints 4 6.*" "Clear 2 by address"
-    }
-    -re ".*$gdb_prompt $" {
-        fail "need to fix test for new compile outcome"
-    }
-}
-
-send_gdb "inf line ending-run.c:14\n"
+send_gdb "info line ending-run.c:14\n"
 gdb_expect {
     -re ".*address (0x\[0-9a-fA-F]*).*$gdb_prompt $" {
         set line_nine $expect_out(1,string)
-        gdb_test "b ending-run.c:14" ".*Breakpoint 7.*ending-run.c, line 14.*"
-        gdb_test "b *$line_nine" ".*Note.*also.*Breakpoint 8.*" "Breakpoint 7 at *ending-run.c:14"
-        gdb_test "c" ".*Breakpoint.*7.*callee.*14.*"
-        gdb_test "cle" ".*Deleted breakpoints 7 8.*" "Clear 2 by default"
+        gdb_test "b ending-run.c:14" ".*Breakpoint 6.*ending-run.c, line 14.*"
+        gdb_test "b *$line_nine" ".*Note.*also.*Breakpoint 7.*" "Breakpoint 7 at *ending-run.c:14"
+        gdb_test "cle" ".*Deleted breakpoints 4 6 7.*" "Clear 2 by default"
     }
     -re ".*$gdb_prompt $" {
         fail "need to fix test for new compile outcome"
@@ -152,7 +120,7 @@ set program_exited 0
 send_gdb "next\n"
 set nexted 0
 gdb_expect {
-    -re "33.*$gdb_prompt $" {
+    -re "33\[ \t\]+\}.*$gdb_prompt $" {
 	# sometimes we stop at the closing brace, if so, do another next
 	if { $nexted } {
 	    fail "step out of main"
@@ -178,6 +146,10 @@ gdb_expect {
     }
     -re ".*in.*dll_crt0_1.*$gdb_prompt $" {
 	# This is what happens on Cygwin.
+	pass "step out of main"
+    }
+    -re ".*WinMain.*$gdb_prompt $" {
+	# This is what happens on mingw32ce.
 	pass "step out of main"
     }
     -re ".*Program exited normally.*$gdb_prompt $" {
@@ -289,8 +261,6 @@ if {! [target_info exists use_gdb_stub]
 	unsupported "continue after exit"
     }
 
-    set timeout $old_timeout
-
     if {$program_exited_normally} {
         gdb_test "n" ".*The program is not being run.*" "don't step after run"
     } elseif {$program_not_exited} {
@@ -312,6 +282,8 @@ if {! [target_info exists use_gdb_stub]
 	}
     }
 }
+
+set timeout $old_timeout
 
 #remote_exec build "rm -f ${binfile}"
 return 0

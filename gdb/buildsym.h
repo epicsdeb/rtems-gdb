@@ -1,6 +1,6 @@
 /* Build symbol tables in GDB's internal format.
    Copyright (C) 1986, 1987, 1988, 1989, 1990, 1991, 1992, 1993, 1995, 1996,
-   1997, 1998, 1999, 2000, 2002, 2003, 2007, 2008
+   1997, 1998, 1999, 2000, 2002, 2003, 2007, 2008, 2009, 2010
    Free Software Foundation, Inc.
 
    This file is part of GDB.
@@ -47,12 +47,14 @@ struct block;
 				   hashname() */
 
 /* Name of source file whose symbol data we are now processing.  This
-   comes from a symbol of type N_SO. */
+   comes from a symbol of type N_SO for stabs.  For Dwarf it comes from the
+   DW_AT_name attribute of a DW_TAG_compile_unit DIE.  */
 
 EXTERN char *last_source_file;
 
 /* Core address of start of text of current source file.  This too
-   comes from the N_SO symbol. */
+   comes from the N_SO symbol.  For Dwarf it typically comes from the
+   DW_AT_low_pc attribute of a DW_TAG_compile_unit DIE.  */
 
 EXTERN CORE_ADDR last_source_start_addr;
 
@@ -123,6 +125,10 @@ EXTERN struct pending *local_symbols;
 
 EXTERN struct pending *param_symbols;
 
+/* "using" directives local to lexical context.  */
+
+EXTERN struct using_direct *using_directives;
+
 /* Stack representing unclosed lexical contexts (that will become
    blocks, eventually).  */
 
@@ -135,6 +141,10 @@ struct context_stack
     /* Pending func params at the time we entered */
 
     struct pending *params;
+
+    /* Pending using directives at the time we entered.  */
+
+    struct using_direct *using_directives;
 
     /* Pointer into blocklist as of entry */
 

@@ -1,4 +1,4 @@
-# Copyright 2002, 2004, 2007, 2008 Free Software Foundation, Inc.
+# Copyright 2002, 2004, 2007, 2008, 2009, 2010 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -12,9 +12,6 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
-
-# Please email any bugs, comments, and/or additions to this file to:
-# bug-gdb@prep.ai.mit.edu
 
 # This file was written by Michael Snyder (msnyder@redhat.com)
 # This is a test for the gdb command "dump".
@@ -45,6 +42,12 @@ if {[istarget "ia64*-*-*"] || [istarget "hppa64-*-*"]} then {
     set is64bitonly "yes"
 }
 
+if {[istarget "spu*-*-*"]} then {
+    # The internal address format used for the combined Cell/B.E.
+    # debugger requires 64-bit.
+    set is64bitonly "yes"
+}
+
 if  { [gdb_compile "${srcdir}/${subdir}/${srcfile}" "${binfile}" executable ${options}] != "" } {
      untested dump.exp
      return -1
@@ -55,6 +58,10 @@ if  { [gdb_compile "${srcdir}/${subdir}/${srcfile}" "${binfile}" executable ${op
 gdb_exit
 gdb_start
 gdb_reinitialize_dir $srcdir/$subdir
+
+gdb_test "dump mem /dev/null 0x10 0x20" "Cannot access memory at address 0x10" \
+	 "inaccessible memory is reported"
+
 gdb_load ${binfile}
 
 # Clean up any stale output files from previous test runs
@@ -497,7 +504,7 @@ if ![string compare $is64bitonly "no"] then {
 
   # restore with expressions 
   test_restore_saved_value \
-	"intarr3.srec ${array2_start}-${array_start} &intarray\[3\] &intarray\[4\]" \
+	"intarr3.srec (char*)${array2_start}-(char*)${array_start} &intarray\[3\] &intarray\[4\]" \
 	"array partial with expressions" 4 "intarray2\[3\]"
 
   gdb_test "print intarray2\[2\] == 0" " = 1" "element 2 not changed, == 4"

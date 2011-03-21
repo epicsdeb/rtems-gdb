@@ -1,6 +1,6 @@
 /* Target-dependent code for the HP PA-RISC architecture.
 
-   Copyright (C) 2003, 2004, 2005, 2006, 2007, 2008
+   Copyright (C) 2003, 2004, 2005, 2006, 2007, 2008, 2009, 2010
    Free Software Foundation, Inc.
 
    This file is part of GDB.
@@ -93,14 +93,15 @@ struct gdbarch_tdep
      trampoline code in the ".plt", or equivalent, section.
      IN_SOLIB_CALL_TRAMPOLINE evaluates to nonzero if we are currently
      stopped in one of these.  */
-  int (*in_solib_call_trampoline) (CORE_ADDR pc, char *name);
+  int (*in_solib_call_trampoline) (struct gdbarch *gdbarch,
+				   CORE_ADDR pc, char *name);
 
   /* For targets that support multiple spaces, we may have additional stubs
      in the return path.  These stubs are internal to the ABI, and users are
      not interested in them.  If we detect that we are returning to a stub,
      adjust the pc to the real caller.  This improves the behavior of commands
      that traverse frames such as "up" and "finish".  */
-  void (*unwind_adjust_stub) (struct frame_info *next_frame, CORE_ADDR base,
+  void (*unwind_adjust_stub) (struct frame_info *this_frame, CORE_ADDR base,
   			      struct trad_frame_saved_reg *saved_regs);
 
   /* These are solib-dependent methods.  They are really HPUX only, but
@@ -222,16 +223,12 @@ unsigned hppa_extract_5r_store (unsigned int);
 int hppa_extract_17 (unsigned int);
 int hppa_extract_21 (unsigned);
 int hppa_extract_14 (unsigned);
-int hppa_low_sign_extend (unsigned int, unsigned int);
-int hppa_sign_extend (unsigned int, unsigned int);
 CORE_ADDR hppa_symbol_address(const char *sym);
 
-extern void
-  hppa_frame_prev_register_helper (struct frame_info *next_frame,
+extern struct value *
+  hppa_frame_prev_register_helper (struct frame_info *this_frame,
 				   struct trad_frame_saved_reg *saved_regs,
-				   int regnum, int *optimizedp,
-				   enum lval_type *lvalp, CORE_ADDR *addrp,
-				   int *realnump, gdb_byte *valuep);
+				   int regnum);
 
 extern CORE_ADDR hppa_read_pc (struct regcache *regcache);
 extern void hppa_write_pc (struct regcache *regcache, CORE_ADDR pc);
@@ -245,7 +242,8 @@ extern struct minimal_symbol *
 extern struct hppa_objfile_private *
 hppa_init_objfile_priv_data (struct objfile *objfile);
 
-extern int hppa_in_solib_call_trampoline (CORE_ADDR pc, char *name);
+extern int hppa_in_solib_call_trampoline (struct gdbarch *gdbarch,
+					  CORE_ADDR pc, char *name);
 extern CORE_ADDR hppa_skip_trampoline_code (struct frame_info *, CORE_ADDR pc);
 
 #endif  /* hppa-tdep.h */

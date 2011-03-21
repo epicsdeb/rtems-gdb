@@ -1,6 +1,7 @@
 /* Definitions used by event-top.c, for GDB, the GNU debugger.
 
-   Copyright (C) 1999, 2001, 2003, 2007, 2008 Free Software Foundation, Inc.
+   Copyright (C) 1999, 2001, 2003, 2007, 2008, 2009, 2010
+   Free Software Foundation, Inc.
 
    Written by Elena Zannoni <ezannoni@cygnus.com> of Cygnus Solutions.
 
@@ -103,7 +104,7 @@ extern void mark_async_signal_handler_wrapper (void *token);
 extern void async_request_quit (void *arg);
 extern void stdin_event_handler (int error, void *client_data);
 extern void async_disable_stdin (void);
-extern void async_enable_stdin (void *dummy);
+extern void async_enable_stdin (void);
 
 /* Exported variables from event-top.c.
    FIXME: these should really go into top.h.  */

@@ -1,6 +1,6 @@
 /* Read HP PA/Risc object files for GDB.
    Copyright (C) 1991, 1992, 1994, 1995, 1996, 1998, 1999, 2000, 2001, 2002,
-   2004, 2007, 2008 Free Software Foundation, Inc.
+   2004, 2007, 2008, 2009, 2010 Free Software Foundation, Inc.
    Written by Fred Fish at Cygnus Support.
 
    This file is part of GDB.
@@ -58,6 +58,7 @@ static void
 som_symtab_read (bfd *abfd, struct objfile *objfile,
 		 struct section_offsets *section_offsets)
 {
+  struct gdbarch *gdbarch = get_objfile_arch (objfile);
   unsigned int number_of_symbols;
   int val, dynamic;
   char *stringtab;
@@ -132,7 +133,7 @@ som_symtab_read (bfd *abfd, struct objfile *objfile,
 	      ms_type = mst_text;
 	      bufp->symbol_value += text_offset;
 	      bufp->symbol_value = gdbarch_smash_text_address
-				     (current_gdbarch, bufp->symbol_value);
+				     (gdbarch, bufp->symbol_value);
 	      break;
 
 	    case ST_ENTRY:
@@ -146,7 +147,7 @@ som_symtab_read (bfd *abfd, struct objfile *objfile,
 		ms_type = mst_text;
 	      bufp->symbol_value += text_offset;
 	      bufp->symbol_value = gdbarch_smash_text_address
-				     (current_gdbarch, bufp->symbol_value);
+				     (gdbarch, bufp->symbol_value);
 	      break;
 
 	    case ST_STUB:
@@ -154,7 +155,7 @@ som_symtab_read (bfd *abfd, struct objfile *objfile,
 	      ms_type = mst_solib_trampoline;
 	      bufp->symbol_value += text_offset;
 	      bufp->symbol_value = gdbarch_smash_text_address
-				     (current_gdbarch, bufp->symbol_value);
+				     (gdbarch, bufp->symbol_value);
 	      break;
 
 	    case ST_DATA:
@@ -183,7 +184,7 @@ som_symtab_read (bfd *abfd, struct objfile *objfile,
 	      ms_type = mst_file_text;
 	      bufp->symbol_value += text_offset;
 	      bufp->symbol_value = gdbarch_smash_text_address
-				     (current_gdbarch, bufp->symbol_value);
+				     (gdbarch, bufp->symbol_value);
 
 	    check_strange_names:
 	      /* Utah GCC 2.5, FSF GCC 2.6 and later generate correct local
@@ -215,7 +216,7 @@ som_symtab_read (bfd *abfd, struct objfile *objfile,
 	      ms_type = mst_file_text;
 	      bufp->symbol_value += text_offset;
 	      bufp->symbol_value = gdbarch_smash_text_address
-				     (current_gdbarch, bufp->symbol_value);
+				     (gdbarch, bufp->symbol_value);
 	      break;
 
 	    case ST_ENTRY:
@@ -227,7 +228,7 @@ som_symtab_read (bfd *abfd, struct objfile *objfile,
 	      ms_type = mst_file_text;
 	      bufp->symbol_value += text_offset;
 	      bufp->symbol_value = gdbarch_smash_text_address
-				     (current_gdbarch, bufp->symbol_value);
+				     (gdbarch, bufp->symbol_value);
 	      break;
 
 	    case ST_STUB:
@@ -235,7 +236,7 @@ som_symtab_read (bfd *abfd, struct objfile *objfile,
 	      ms_type = mst_solib_trampoline;
 	      bufp->symbol_value += text_offset;
 	      bufp->symbol_value = gdbarch_smash_text_address
-				     (current_gdbarch, bufp->symbol_value);
+				     (gdbarch, bufp->symbol_value);
 	      break;
 
 
@@ -291,9 +292,6 @@ som_symtab_read (bfd *abfd, struct objfile *objfile,
    SECTION_OFFSETS is a set of offsets to apply to relocate the symbols
    in each section.  This is ignored, as it isn't needed for SOM.
 
-   MAINLINE is true if we are reading the main symbol
-   table (as opposed to a shared lib or dynamically loaded file).
-
    This function only does the minimum work necessary for letting the
    user "name" things symbolically; it does not read the entire symtab.
    Instead, it reads the external and static symbols and puts them in partial
@@ -314,7 +312,7 @@ som_symtab_read (bfd *abfd, struct objfile *objfile,
    capability even for files compiled without -g.  */
 
 static void
-som_symfile_read (struct objfile *objfile, int mainline)
+som_symfile_read (struct objfile *objfile, int symfile_flags)
 {
   bfd *abfd = objfile->obfd;
   struct cleanup *back_to;
@@ -339,7 +337,7 @@ som_symfile_read (struct objfile *objfile, int mainline)
 
   /* Now read information from the stabs debug sections.
      This is emitted by gcc.  */
-  stabsect_build_psymtabs (objfile, mainline,
+  stabsect_build_psymtabs (objfile,
 			   "$GDB_SYMBOLS$", "$GDB_STRINGS$", "$TEXT$");
 }
 
@@ -439,6 +437,7 @@ static struct sym_fns som_sym_fns =
   default_symfile_segments,	/* sym_segments: Get segment information from
 				   a file.  */
   NULL,                         /* sym_read_linetable */
+  default_symfile_relocate,	/* sym_relocate: Relocate a debug section.  */
   NULL				/* next: pointer to next struct sym_fns */
 };
 

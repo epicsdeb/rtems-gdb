@@ -1,6 +1,7 @@
 /* Command-line output logging for GDB, the GNU debugger.
 
-   Copyright (c) 2003, 2004, 2007, 2008 Free Software Foundation, Inc.
+   Copyright (c) 2003, 2004, 2007, 2008, 2009, 2010
+   Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -85,6 +86,7 @@ pop_output_files (void)
 static void
 handle_redirections (int from_tty)
 {
+  struct cleanup *cleanups;
   struct ui_file *output;
 
   if (saved_filename != NULL)
@@ -97,6 +99,7 @@ handle_redirections (int from_tty)
   output = gdb_fopen (logging_filename, logging_overwrite ? "w" : "a");
   if (output == NULL)
     perror_with_name (_("set logging"));
+  cleanups = make_cleanup_ui_file_delete (output);
 
   /* Redirects everything to gdb_stdout while this is running.  */
   if (!logging_redirect)
@@ -104,6 +107,8 @@ handle_redirections (int from_tty)
       output = tee_file_new (gdb_stdout, 0, output, 1);
       if (output == NULL)
 	perror_with_name (_("set logging"));
+      discard_cleanups (cleanups);
+      cleanups = make_cleanup_ui_file_delete (output);
       if (from_tty)
 	fprintf_unfiltered (gdb_stdout, "Copying output to %s.\n",
 			    logging_filename);
@@ -111,6 +116,8 @@ handle_redirections (int from_tty)
   else if (from_tty)
     fprintf_unfiltered (gdb_stdout, "Redirecting output to %s.\n",
 			logging_filename);
+
+  discard_cleanups (cleanups);
 
   saved_filename = xstrdup (logging_filename);
   saved_output.out = gdb_stdout;
@@ -164,7 +171,7 @@ Usage: set logging on [FILENAME]\n\
        set logging redirect [on|off]\n"));
 }
 
-void
+static void
 show_logging_command (char *args, int from_tty)
 {
   if (saved_filename)
@@ -184,6 +191,9 @@ show_logging_command (char *args, int from_tty)
   else
     printf_unfiltered (_("Output will be logged and displayed.\n"));
 }
+
+/* Provide a prototype to silence -Wmissing-prototypes.  */
+extern initialize_file_ftype _initialize_cli_logging;
 
 void
 _initialize_cli_logging (void)

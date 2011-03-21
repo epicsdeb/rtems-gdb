@@ -1,5 +1,6 @@
 /* GDB-specific functions for operating on agent expressions
-   Copyright (C) 1998, 1999, 2000, 2007, 2008 Free Software Foundation, Inc.
+   Copyright (C) 1998, 1999, 2000, 2007, 2008, 2009, 2010
+   Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -97,5 +98,9 @@ struct axs_value
    no values on the stack.  The caller can then use the ax_reqs
    function to discover which registers the expression uses.  */
 extern struct agent_expr *gen_trace_for_expr (CORE_ADDR, struct expression *);
+
+extern struct agent_expr *gen_trace_for_var (CORE_ADDR, struct symbol *);
+
+extern struct agent_expr *gen_eval_for_expr (CORE_ADDR, struct expression *);
 
 #endif /* AX_GDB_H */

@@ -1,6 +1,6 @@
 /* Memory attributes support, for GDB.
 
-   Copyright (C) 2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008
+   Copyright (C) 2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008, 2009, 2010
    Free Software Foundation, Inc.
 
    This file is part of GDB.
@@ -432,10 +432,10 @@ mem_info_command (char *args, int from_tty)
   printf_filtered ("Num ");
   printf_filtered ("Enb ");
   printf_filtered ("Low Addr   ");
-  if (gdbarch_addr_bit (current_gdbarch) > 32)
+  if (gdbarch_addr_bit (target_gdbarch) > 32)
     printf_filtered ("        ");
   printf_filtered ("High Addr  ");
-  if (gdbarch_addr_bit (current_gdbarch) > 32)
+  if (gdbarch_addr_bit (target_gdbarch) > 32)
     printf_filtered ("        ");
   printf_filtered ("Attrs ");
   printf_filtered ("\n");
@@ -446,14 +446,14 @@ mem_info_command (char *args, int from_tty)
       printf_filtered ("%-3d %-3c\t",
 		       m->number,
 		       m->enabled_p ? 'y' : 'n');
-      if (gdbarch_addr_bit (current_gdbarch) <= 32)
+      if (gdbarch_addr_bit (target_gdbarch) <= 32)
 	tmp = hex_string_custom ((unsigned long) m->lo, 8);
       else
 	tmp = hex_string_custom ((unsigned long) m->lo, 16);
       
       printf_filtered ("%s ", tmp);
 
-      if (gdbarch_addr_bit (current_gdbarch) <= 32)
+      if (gdbarch_addr_bit (target_gdbarch) <= 32)
 	{
 	if (m->hi == 0)
 	  tmp = "0x100000000";
@@ -571,7 +571,7 @@ mem_enable_command (char *args, int from_tty)
 
   require_user_regions (from_tty);
 
-  dcache_invalidate (target_dcache);
+  target_dcache_invalidate ();
 
   if (p == 0)
     {
@@ -625,7 +625,7 @@ mem_disable_command (char *args, int from_tty)
 
   require_user_regions (from_tty);
 
-  dcache_invalidate (target_dcache);
+  target_dcache_invalidate ();
 
   if (p == 0)
     {
@@ -686,11 +686,11 @@ mem_delete_command (char *args, int from_tty)
 
   require_user_regions (from_tty);
 
-  dcache_invalidate (target_dcache);
+  target_dcache_invalidate ();
 
   if (p == 0)
     {
-      if (query ("Delete all memory regions? "))
+      if (query (_("Delete all memory regions? ")))
 	mem_clear ();
       dont_repeat ();
       return;

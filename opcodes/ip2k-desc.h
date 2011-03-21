@@ -2,7 +2,7 @@
 
 THIS FILE IS MACHINE GENERATED WITH CGEN.
 
-Copyright 1996-2007 Free Software Foundation, Inc.
+Copyright 1996-2010 Free Software Foundation, Inc.
 
 This file is part of the GNU Binutils and/or GDB, the GNU debugger.
 
@@ -25,16 +25,10 @@ This file is part of the GNU Binutils and/or GDB, the GNU debugger.
 #ifndef IP2K_CPU_H
 #define IP2K_CPU_H
 
-#include "opcode/cgen-bitset.h"
-
 #define CGEN_ARCH ip2k
 
 /* Given symbol S, return ip2k_cgen_<S>.  */
-#if defined (__STDC__) || defined (ALMOST_STDC) || defined (HAVE_STRINGIZE)
 #define CGEN_SYM(s) ip2k##_cgen_##s
-#else
-#define CGEN_SYM(s) ip2k/**/_cgen_/**/s
-#endif
 
 
 /* Selected cpu families.  */

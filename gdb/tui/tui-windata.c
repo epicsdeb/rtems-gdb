@@ -1,7 +1,7 @@
 /* Data/register window display.
 
-   Copyright (C) 1998, 1999, 2000, 2001, 2002, 2003, 2004, 2007, 2008
-   Free Software Foundation, Inc.
+   Copyright (C) 1998, 1999, 2000, 2001, 2002, 2003, 2004, 2007, 2008, 2009,
+   2010 Free Software Foundation, Inc.
 
    Contributed by Hewlett-Packard Company.
 
@@ -25,6 +25,7 @@
 #include "tui/tui-data.h"
 #include "tui/tui-wingeneral.h"
 #include "tui/tui-regs.h"
+#include "tui/tui-windata.h"
 
 #include "gdb_string.h"
 #include "gdb_curses.h"

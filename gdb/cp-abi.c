@@ -1,6 +1,6 @@
 /* Generic code for supporting multiple C++ ABI's
 
-   Copyright (C) 2001, 2002, 2003, 2005, 2006, 2007, 2008
+   Copyright (C) 2001, 2002, 2003, 2005, 2006, 2007, 2008, 2009, 2010
    Free Software Foundation, Inc.
 
    This file is part of GDB.
@@ -22,6 +22,7 @@
 #include "value.h"
 #include "cp-abi.h"
 #include "command.h"
+#include "exceptions.h"
 #include "gdbcmd.h"
 #include "ui-out.h"
 
@@ -89,9 +90,17 @@ value_virtual_fn_field (struct value **arg1p, struct fn_field *f, int j,
 struct type *
 value_rtti_type (struct value *v, int *full, int *top, int *using_enc)
 {
+  struct type *ret = NULL;
+  struct gdb_exception e;
   if ((current_cp_abi.rtti_type) == NULL)
     return NULL;
-  return (*current_cp_abi.rtti_type) (v, full, top, using_enc);
+  TRY_CATCH (e, RETURN_MASK_ERROR)
+    {
+      ret = (*current_cp_abi.rtti_type) (v, full, top, using_enc);
+    }
+  if (e.reason < 0)
+    return NULL;
+  return ret;
 }
 
 void
@@ -104,19 +113,20 @@ cplus_print_method_ptr (const gdb_byte *contents, struct type *type,
 }
 
 int
-cplus_method_ptr_size (void)
+cplus_method_ptr_size (struct type *to_type)
 {
   if (current_cp_abi.method_ptr_size == NULL)
     error (_("GDB does not support pointers to methods on this target"));
-  return (*current_cp_abi.method_ptr_size) ();
+  return (*current_cp_abi.method_ptr_size) (to_type);
 }
 
 void
-cplus_make_method_ptr (gdb_byte *contents, CORE_ADDR value, int is_virtual)
+cplus_make_method_ptr (struct type *type, gdb_byte *contents,
+		       CORE_ADDR value, int is_virtual)
 {
   if (current_cp_abi.make_method_ptr == NULL)
     error (_("GDB does not support pointers to methods on this target"));
-  (*current_cp_abi.make_method_ptr) (contents, value, is_virtual);
+  (*current_cp_abi.make_method_ptr) (type, contents, value, is_virtual);
 }
 
 CORE_ADDR

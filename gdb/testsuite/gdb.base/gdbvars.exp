@@ -1,4 +1,5 @@
-# Copyright (C) 1992, 1997, 2007, 2008 Free Software Foundation, Inc.
+# Copyright (C) 1992, 1997, 2007, 2008, 2009, 2010
+# Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -13,9 +14,6 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-# Please email any bugs, comments, and/or additions to this file to:
-# bug-gdb@prep.ai.mit.edu
-
 # This file was written by Fred Fish. (fnf@cygnus.com)
 
 if $tracelevel then {
@@ -24,6 +22,15 @@ if $tracelevel then {
 
 set prms_id 0
 set bug_id 0
+
+set testfile "gdbvars"
+set srcfile  ${testfile}.c
+set binfile  ${objdir}/${subdir}/${testfile}
+
+if  { [gdb_compile "${srcdir}/${subdir}/${srcfile}" "${binfile}" executable {debug}] != "" } {
+    untested gdbvars.exp
+    return -1
+}
 
 proc test_convenience_variables {} {
     global gdb_prompt
@@ -104,13 +111,23 @@ proc test_value_history {} {
 	"Use value-history element in arithmetic expression"
 }
 
+proc test_with_program {} {
+    global hex
+    gdb_test "set \$prog_var = p" "" \
+	"Set a new convenience variable to a program variable"
+    gdb_test "print /x \$prog_var" " = $hex" \
+	"Print contents of new convenience variable of program variable"
+}
+
 # Start with a fresh gdb.
 
 gdb_exit
 gdb_start
 gdb_reinitialize_dir $srcdir/$subdir
+gdb_load ${binfile}
 
 send_gdb "set print sevenbit-strings\n" ; gdb_expect -re ".*$gdb_prompt $"
 
 test_value_history
 test_convenience_variables
+test_with_program

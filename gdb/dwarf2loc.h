@@ -1,6 +1,7 @@
 /* DWARF 2 location expression support for GDB.
 
-   Copyright (C) 2003, 2005, 2007, 2008 Free Software Foundation, Inc.
+   Copyright (C) 2003, 2005, 2007, 2008, 2009, 2010
+   Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -20,10 +21,18 @@
 #if !defined (DWARF2LOC_H)
 #define DWARF2LOC_H
 
-struct symbol_ops;
+struct symbol_computed_ops;
+struct objfile;
+struct dwarf2_per_cu_data;
 
 /* This header is private to the DWARF-2 reader.  It is shared between
    dwarf2read.c and dwarf2loc.c.  */
+
+/* Return the OBJFILE associated with the compilation unit CU.  */
+struct objfile *dwarf2_per_cu_objfile (struct dwarf2_per_cu_data *cu);
+
+/* Return the address size given in the compilation unit header for CU.  */
+CORE_ADDR dwarf2_per_cu_addr_size (struct dwarf2_per_cu_data *cu);
 
 /* The symbol location baton types used by the DWARF-2 reader (i.e.
    SYMBOL_LOCATION_BATON for a LOC_COMPUTED symbol).  "struct
@@ -39,8 +48,9 @@ struct dwarf2_locexpr_baton
   /* Length of the location expression.  */
   unsigned long size;
 
-  /* The objfile containing the symbol whose location we're computing.  */
-  struct objfile *objfile;
+  /* The compilation unit containing the symbol whose location
+     we're computing.  */
+  struct dwarf2_per_cu_data *per_cu;
 };
 
 struct dwarf2_loclist_baton
@@ -55,15 +65,12 @@ struct dwarf2_loclist_baton
   /* Length of the location list.  */
   unsigned long size;
 
-  /* The objfile containing the symbol whose location we're computing.  */
-  /* Used (only???) by thread local variables.  The objfile in which
-     this symbol is defined.  To find a thread-local variable (e.g., a
-     variable declared with the `__thread' storage class), we may need
-     to know which object file it's in.  */
-  struct objfile *objfile;
+  /* The compilation unit containing the symbol whose location
+     we're computing.  */
+  struct dwarf2_per_cu_data *per_cu;
 };
 
-extern const struct symbol_ops dwarf2_locexpr_funcs;
-extern const struct symbol_ops dwarf2_loclist_funcs;
+extern const struct symbol_computed_ops dwarf2_locexpr_funcs;
+extern const struct symbol_computed_ops dwarf2_loclist_funcs;
 
 #endif /* dwarf2loc.h */

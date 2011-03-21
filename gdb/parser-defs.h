@@ -1,7 +1,8 @@
 /* Parser definitions for GDB.
 
    Copyright (C) 1986, 1989, 1990, 1991, 1992, 1993, 1994, 1995, 1996, 1997,
-   1998, 1999, 2000, 2002, 2007, 2008 Free Software Foundation, Inc.
+   1998, 1999, 2000, 2002, 2007, 2008, 2009, 2010
+   Free Software Foundation, Inc.
 
    Modified from expread.y by the Department of Computer Science at the
    State University of New York at Buffalo.
@@ -28,9 +29,14 @@
 
 struct block;
 
+extern int parser_debug;
+
 extern struct expression *expout;
 extern int expout_size;
 extern int expout_ptr;
+
+#define parse_gdbarch (expout->gdbarch)
+#define parse_language (expout->language_defn)
 
 /* If this is nonzero, this block is used as the lexical context
    for symbol names.  */
@@ -64,6 +70,22 @@ struct stoken
     char *ptr;
     /* Length of string in bytes for char-string or bits for bit-string */
     int length;
+  };
+
+struct typed_stoken
+  {
+    /* A language-specific type field.  */
+    int type;
+    /* Pointer to first byte of char-string or first bit of bit-string */
+    char *ptr;
+    /* Length of string in bytes for char-string or bits for bit-string */
+    int length;
+  };
+
+struct stoken_vector
+  {
+    int len;
+    struct typed_stoken *tokens;
   };
 
 struct ttype
@@ -127,16 +149,19 @@ extern void write_exp_elt_intern (struct internalvar *);
 
 extern void write_exp_string (struct stoken);
 
+void write_exp_string_vector (int type, struct stoken_vector *vec);
+
 extern void write_exp_bitstring (struct stoken);
 
 extern void write_exp_elt_block (struct block *);
 
 extern void write_exp_elt_objfile (struct objfile *objfile);
 
-extern void write_exp_msymbol (struct minimal_symbol *,
-			       struct type *, struct type *);
+extern void write_exp_msymbol (struct minimal_symbol *);
 
 extern void write_dollar_variable (struct stoken str);
+
+extern void mark_struct_expression (void);
 
 extern char *find_template_name_end (char *);
 

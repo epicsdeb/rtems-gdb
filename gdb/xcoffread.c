@@ -1,7 +1,7 @@
 /* Read AIX xcoff symbol tables and convert to internal format, for GDB.
    Copyright (C) 1986, 1987, 1988, 1989, 1990, 1991, 1992, 1993, 1994, 1995,
-   1996, 1997, 1998, 1999, 2000, 2001, 2002, 2003, 2004, 2007, 2008
-   Free Software Foundation, Inc.
+   1996, 1997, 1998, 1999, 2000, 2001, 2002, 2003, 2004, 2007, 2008, 2009,
+   2010 Free Software Foundation, Inc.
    Derived from coffread.c, dbxread.c, and a lot of hacking.
    Contributed by IBM Corporation.
 
@@ -39,6 +39,7 @@
 #include "coff/xcoff.h"
 #include "libxcoff.h"
 #include "coff/rs6000.h"
+#include "xcoffread.h"
 
 #include "symtab.h"
 #include "gdbtypes.h"
@@ -599,17 +600,32 @@ process_linenos (CORE_ADDR start, CORE_ADDR end)
 		 start, 0, &main_source_baseline);
 	    }
 
-	  /* Have a new subfile for the include file.  */
+	  if (strcmp (inclTable[ii].name, last_source_file) == 0)
+	    {
+              /* The entry in the include table refers to the main source
+                 file. Add the lines to the main subfile.  */
 
-	  tmpSubfile = inclTable[ii].subfile =
-	    (struct subfile *) xmalloc (sizeof (struct subfile));
+	      main_source_baseline = inclTable[ii].funStartLine;
+	      enter_line_range
+		(&main_subfile, inclTable[ii].begin, inclTable[ii].end,
+		 start, 0, &main_source_baseline);
+	      inclTable[ii].subfile = &main_subfile;
+	    }
+	  else
+	    {
 
-	  memset (tmpSubfile, '\0', sizeof (struct subfile));
-	  firstLine = &(inclTable[ii].funStartLine);
+	      /* Have a new subfile for the include file.  */
 
-	  /* Enter include file's lines now.  */
-	  enter_line_range (tmpSubfile, inclTable[ii].begin,
-			    inclTable[ii].end, start, 0, firstLine);
+	      tmpSubfile = inclTable[ii].subfile =
+		(struct subfile *) xmalloc (sizeof (struct subfile));
+
+	      memset (tmpSubfile, '\0', sizeof (struct subfile));
+	      firstLine = &(inclTable[ii].funStartLine);
+
+	      /* Enter include file's lines now.  */
+	      enter_line_range (tmpSubfile, inclTable[ii].begin,
+				inclTable[ii].end, start, 0, firstLine);
+	    }
 
 	  if (offset <= inclTable[ii].end)
 	    offset = inclTable[ii].end + linesz;
@@ -655,7 +671,8 @@ process_linenos (CORE_ADDR start, CORE_ADDR end)
 
   for (ii = 0; ii < inclIndx; ++ii)
     {
-      if ((inclTable[ii].subfile)->line_vector)		/* Useless if!!! FIXMEmgo */
+      if (inclTable[ii].subfile != ((struct subfile *) &main_subfile)
+          && (inclTable[ii].subfile)->line_vector)		/* Useless if!!! FIXMEmgo */
 	{
 	  struct linetable *lineTb, *lv;
 
@@ -748,6 +765,8 @@ enter_line_range (struct subfile *subfile, unsigned beginoffset, unsigned endoff
 		  CORE_ADDR startaddr,	/* offsets to line table */
 		  CORE_ADDR endaddr, unsigned *firstLine)
 {
+  struct objfile *objfile = this_symtab_psymtab->objfile;
+  struct gdbarch *gdbarch = get_objfile_arch (objfile);
   unsigned int curoffset;
   CORE_ADDR addr;
   void *ext_lnno;
@@ -760,7 +779,7 @@ enter_line_range (struct subfile *subfile, unsigned beginoffset, unsigned endoff
     return;
   curoffset = beginoffset;
   limit_offset =
-    ((struct coff_symfile_info *) this_symtab_psymtab->objfile->deprecated_sym_private)
+    ((struct coff_symfile_info *) objfile->deprecated_sym_private)
     ->max_lineno_offset;
 
   if (endoffset != 0)
@@ -776,7 +795,7 @@ enter_line_range (struct subfile *subfile, unsigned beginoffset, unsigned endoff
   else
     limit_offset -= 1;
 
-  abfd = this_symtab_psymtab->objfile->obfd;
+  abfd = objfile->obfd;
   linesz = coff_data (abfd)->local_linesz;
   ext_lnno = alloca (linesz);
 
@@ -790,8 +809,7 @@ enter_line_range (struct subfile *subfile, unsigned beginoffset, unsigned endoff
       addr = (int_lnno.l_lnno
 	      ? int_lnno.l_addr.l_paddr
 	      : read_symbol_nvalue (int_lnno.l_addr.l_symndx));
-      addr += ANOFFSET (this_symtab_psymtab->objfile->section_offsets,
-			SECT_OFF_TEXT (this_symtab_psymtab->objfile));
+      addr += ANOFFSET (objfile->section_offsets, SECT_OFF_TEXT (objfile));
 
       if (addr < startaddr || (endaddr && addr >= endaddr))
 	return;
@@ -799,11 +817,12 @@ enter_line_range (struct subfile *subfile, unsigned beginoffset, unsigned endoff
       if (int_lnno.l_lnno == 0)
 	{
 	  *firstLine = read_symbol_lineno (int_lnno.l_addr.l_symndx);
-	  record_line (subfile, 0, addr);
+	  record_line (subfile, 0, gdbarch_addr_bits_remove (gdbarch, addr));
 	  --(*firstLine);
 	}
       else
-	record_line (subfile, *firstLine + int_lnno.l_lnno, addr);
+	record_line (subfile, *firstLine + int_lnno.l_lnno,
+		     gdbarch_addr_bits_remove (gdbarch, addr));
       curoffset += linesz;
     }
 }
@@ -814,8 +833,8 @@ enter_line_range (struct subfile *subfile, unsigned beginoffset, unsigned endoff
    text address for the file, and SIZE is the number of bytes of text.  */
 
 #define complete_symtab(name, start_addr) {	\
-  last_source_file = savestring (name, strlen (name));	\
-  last_source_start_addr = start_addr;			\
+  last_source_file = xstrdup (name);		\
+  last_source_start_addr = start_addr;		\
 }
 
 
@@ -834,7 +853,7 @@ enter_line_range (struct subfile *subfile, unsigned beginoffset, unsigned endoff
   namestr = (NAME); \
   if (namestr[0] == '.') ++namestr; \
   prim_record_minimal_symbol_and_info (namestr, (ADDR), (TYPE), \
-				       (char *)NULL, (SECTION), (asection *)NULL, (OBJFILE)); \
+				       (SECTION), (asection *)NULL, (OBJFILE)); \
   misc_func_recorded = 1;					\
 }
 
@@ -1427,7 +1446,7 @@ read_xcoff_symtab (struct partial_symtab *pst)
 
 
 #define	SYMNAME_ALLOC(NAME, ALLOCED)	\
-  (ALLOCED) ? (NAME) : obsavestring ((NAME), strlen (NAME), &objfile->objfile_obstack);
+  ((ALLOCED) ? (NAME) : obsavestring ((NAME), strlen (NAME), &objfile->objfile_obstack))
 
 
 /* process one xcoff symbol. */
@@ -1473,8 +1492,8 @@ process_xcoff_symbol (struct coff_symbol *cs, struct objfile *objfile)
          will be patched with the type from its stab entry later on in
          patch_block_stabs (), unless the file was compiled without -g.  */
 
-      DEPRECATED_SYMBOL_NAME (sym) = SYMNAME_ALLOC (name, symname_alloced);
-      SYMBOL_TYPE (sym) = builtin_type (current_gdbarch)->nodebug_text_symbol;
+      SYMBOL_SET_LINKAGE_NAME (sym, SYMNAME_ALLOC (name, symname_alloced));
+      SYMBOL_TYPE (sym) = objfile_type (objfile)->nodebug_text_symbol;
 
       SYMBOL_CLASS (sym) = LOC_BLOCK;
       SYMBOL_DUP (sym, sym2);
@@ -1487,7 +1506,7 @@ process_xcoff_symbol (struct coff_symbol *cs, struct objfile *objfile)
   else
     {
       /* In case we can't figure out the type, provide default. */
-      SYMBOL_TYPE (sym) = builtin_type (current_gdbarch)->nodebug_data_symbol;
+      SYMBOL_TYPE (sym) = objfile_type (objfile)->nodebug_data_symbol;
 
       switch (cs->c_sclass)
 	{
@@ -2029,11 +2048,6 @@ xcoff_end_psymtab (struct partial_symtab *pst, char **include_list,
 
   sort_pst_symbols (pst);
 
-  /* If there is already a psymtab or symtab for a file of this name,
-     remove it.  (If there is a symtab, more drastic things also
-     happen.)  This happens in VxWorks.  */
-  free_named_symtabs (pst->filename);
-
   if (num_includes == 0
       && number_dependencies == 0
       && pst->n_global_syms == 0
@@ -2118,6 +2132,7 @@ function_outside_compilation_unit_complaint (const char *arg1)
 static void
 scan_xcoff_symtab (struct objfile *objfile)
 {
+  struct gdbarch *gdbarch = get_objfile_arch (objfile);
   CORE_ADDR toc_offset = 0;	/* toc offset value in data section. */
   char *filestring = NULL;
 
@@ -2283,7 +2298,7 @@ scan_xcoff_symtab (struct objfile *objfile)
 		      prim_record_minimal_symbol_and_info
 			(namestring, symbol.n_value,
 			 sclass == C_HIDEXT ? mst_file_data : mst_data,
-			 NULL, secnum_to_section (symbol.n_scnum, objfile),
+			 secnum_to_section (symbol.n_scnum, objfile),
 			 NULL, objfile);
 		    break;
 
@@ -2358,7 +2373,7 @@ scan_xcoff_symtab (struct objfile *objfile)
 		      prim_record_minimal_symbol_and_info
 			(namestring, symbol.n_value,
 			 sclass == C_HIDEXT ? mst_file_data : mst_data,
-			 NULL, secnum_to_section (symbol.n_scnum, objfile),
+			 secnum_to_section (symbol.n_scnum, objfile),
 			 NULL, objfile);
 		    break;
 		  }
@@ -2375,7 +2390,7 @@ scan_xcoff_symtab (struct objfile *objfile)
 		      prim_record_minimal_symbol_and_info
 			(namestring, symbol.n_value,
 			 sclass == C_HIDEXT ? mst_file_bss : mst_bss,
-			 NULL, secnum_to_section (symbol.n_scnum, objfile),
+			 secnum_to_section (symbol.n_scnum, objfile),
 			 NULL, objfile);
 		    break;
 		  }
@@ -2582,11 +2597,11 @@ scan_xcoff_symtab (struct objfile *objfile)
 	      case 'S':
 		symbol.n_value += ANOFFSET (objfile->section_offsets, SECT_OFF_DATA (objfile));
 
-		if (gdbarch_static_transform_name_p (current_gdbarch))
+		if (gdbarch_static_transform_name_p (gdbarch))
 		  namestring = gdbarch_static_transform_name
-				 (current_gdbarch, namestring);
+				 (gdbarch, namestring);
 
-		add_psymbol_to_list (namestring, p - namestring,
+		add_psymbol_to_list (namestring, p - namestring, 1,
 				     VAR_DOMAIN, LOC_STATIC,
 				     &objfile->static_psymbols,
 				     0, symbol.n_value,
@@ -2597,7 +2612,7 @@ scan_xcoff_symtab (struct objfile *objfile)
 		symbol.n_value += ANOFFSET (objfile->section_offsets, SECT_OFF_DATA (objfile));
 		/* The addresses in these entries are reported to be
 		   wrong.  See the code that reads 'G's for symtabs. */
-		add_psymbol_to_list (namestring, p - namestring,
+		add_psymbol_to_list (namestring, p - namestring, 1,
 				     VAR_DOMAIN, LOC_STATIC,
 				     &objfile->global_psymbols,
 				     0, symbol.n_value,
@@ -2615,7 +2630,7 @@ scan_xcoff_symtab (struct objfile *objfile)
 		    || (p == namestring + 1
 			&& namestring[0] != ' '))
 		  {
-		    add_psymbol_to_list (namestring, p - namestring,
+		    add_psymbol_to_list (namestring, p - namestring, 1,
 					 STRUCT_DOMAIN, LOC_TYPEDEF,
 					 &objfile->static_psymbols,
 					 symbol.n_value, 0,
@@ -2623,7 +2638,7 @@ scan_xcoff_symtab (struct objfile *objfile)
 		    if (p[2] == 't')
 		      {
 			/* Also a typedef with the same name.  */
-			add_psymbol_to_list (namestring, p - namestring,
+			add_psymbol_to_list (namestring, p - namestring, 1,
 					     VAR_DOMAIN, LOC_TYPEDEF,
 					     &objfile->static_psymbols,
 					     symbol.n_value, 0,
@@ -2636,7 +2651,7 @@ scan_xcoff_symtab (struct objfile *objfile)
 	      case 't':
 		if (p != namestring)	/* a name is there, not just :T... */
 		  {
-		    add_psymbol_to_list (namestring, p - namestring,
+		    add_psymbol_to_list (namestring, p - namestring, 1,
 					 VAR_DOMAIN, LOC_TYPEDEF,
 					 &objfile->static_psymbols,
 					 symbol.n_value, 0,
@@ -2698,7 +2713,7 @@ scan_xcoff_symtab (struct objfile *objfile)
 			  ;
 			/* Note that the value doesn't matter for
 			   enum constants in psymtabs, just in symtabs.  */
-			add_psymbol_to_list (p, q - p,
+			add_psymbol_to_list (p, q - p, 1,
 					     VAR_DOMAIN, LOC_CONST,
 					     &objfile->static_psymbols, 0,
 					     0, psymtab_language, objfile);
@@ -2716,7 +2731,7 @@ scan_xcoff_symtab (struct objfile *objfile)
 
 	      case 'c':
 		/* Constant, e.g. from "const" in Pascal.  */
-		add_psymbol_to_list (namestring, p - namestring,
+		add_psymbol_to_list (namestring, p - namestring, 1,
 				     VAR_DOMAIN, LOC_CONST,
 				     &objfile->static_psymbols, symbol.n_value,
 				     0, psymtab_language, objfile);
@@ -2733,7 +2748,7 @@ scan_xcoff_symtab (struct objfile *objfile)
 		    xfree (name);
 		  }
 		symbol.n_value += ANOFFSET (objfile->section_offsets, SECT_OFF_TEXT (objfile));
-		add_psymbol_to_list (namestring, p - namestring,
+		add_psymbol_to_list (namestring, p - namestring, 1,
 				     VAR_DOMAIN, LOC_BLOCK,
 				     &objfile->static_psymbols,
 				     0, symbol.n_value,
@@ -2753,8 +2768,16 @@ scan_xcoff_symtab (struct objfile *objfile)
 		    function_outside_compilation_unit_complaint (name);
 		    xfree (name);
 		  }
+
+		/* We need only the minimal symbols for these
+		   loader-generated definitions.   Keeping the global
+		   symbols leads to "in psymbols but not in symbols"
+		   errors. */
+		if (strncmp (namestring, "@FIX", 4) == 0)
+		  continue;
+
 		symbol.n_value += ANOFFSET (objfile->section_offsets, SECT_OFF_TEXT (objfile));
-		add_psymbol_to_list (namestring, p - namestring,
+		add_psymbol_to_list (namestring, p - namestring, 1,
 				     VAR_DOMAIN, LOC_BLOCK,
 				     &objfile->global_psymbols,
 				     0, symbol.n_value,
@@ -2826,7 +2849,7 @@ scan_xcoff_symtab (struct objfile *objfile)
 /* Return the toc offset value for a given objfile.  */
 
 CORE_ADDR
-get_toc_offset (struct objfile *objfile)
+xcoff_get_toc_offset (struct objfile *objfile)
 {
   if (objfile)
     return ((struct coff_symfile_info *) objfile->deprecated_sym_private)->toc_offset;
@@ -2840,11 +2863,10 @@ get_toc_offset (struct objfile *objfile)
 
    SECTION_OFFSETS contains offsets relative to which the symbols in the
    various sections are (depending where the sections were actually loaded).
-   MAINLINE is true if we are reading the main symbol
-   table (as opposed to a shared lib or dynamically loaded file).  */
+*/
 
 static void
-xcoff_initial_scan (struct objfile *objfile, int mainline)
+xcoff_initial_scan (struct objfile *objfile, int symfile_flags)
 {
   bfd *abfd;
   int val;
@@ -2920,9 +2942,7 @@ xcoff_initial_scan (struct objfile *objfile, int mainline)
     perror_with_name (_("reading symbol table"));
 
   /* If we are reinitializing, or if we have never loaded syms yet, init */
-  if (mainline
-      || (objfile->global_psymbols.size == 0
-	  && objfile->static_psymbols.size == 0))
+  if (objfile->global_psymbols.size == 0 && objfile->static_psymbols.size == 0)
     /* I'm not sure how how good num_symbols is; the rule of thumb in
        init_psymbol_list was developed for a.out.  On the one hand,
        num_symbols includes auxents.  On the other hand, it doesn't
@@ -3015,8 +3035,12 @@ static struct sym_fns xcoff_sym_fns =
   default_symfile_segments,	/* sym_segments: Get segment information from
 				   a file.  */
   aix_process_linenos,          /* sym_read_linetable */
+  default_symfile_relocate,	/* sym_relocate: Relocate a debug section.  */
   NULL				/* next: pointer to next struct sym_fns */
 };
+
+/* Provide a prototype to silence -Wmissing-prototypes.  */
+extern initialize_file_ftype _initialize_xcoffread;
 
 void
 _initialize_xcoffread (void)

@@ -1,5 +1,5 @@
 /* Header file for GDB CLI command implementation library.
-   Copyright (c) 2000,2006,2007,2008 Free Software Foundation, Inc.
+   Copyright (c) 2000,2006,2007,2008,2009,2010 Free Software Foundation, Inc.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -40,6 +40,10 @@ extern struct cmd_list_element *deletelist;
 /* Chain containing all defined detach subcommands. */
 
 extern struct cmd_list_element *detachlist;
+
+/* Chain containing all defined kill subcommands.  */
+
+extern struct cmd_list_element *killlist;
 
 /* Chain containing all defined toggle subcommands. */
 

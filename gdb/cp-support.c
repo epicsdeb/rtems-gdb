@@ -1,5 +1,5 @@
 /* Helper routines for C++ support in GDB.
-   Copyright (C) 2002, 2003, 2004, 2005, 2007, 2008
+   Copyright (C) 2002, 2003, 2004, 2005, 2007, 2008, 2009, 2010
    Free Software Foundation, Inc.
 
    Contributed by MontaVista Software.
@@ -32,6 +32,9 @@
 #include "block.h"
 #include "complaints.h"
 #include "gdbtypes.h"
+#include "exceptions.h"
+#include "expression.h"
+#include "value.h"
 
 #include "safe-ctype.h"
 
@@ -69,6 +72,18 @@ struct cmd_list_element *maint_cplus_cmd_list = NULL;
 
 static void maint_cplus_command (char *arg, int from_tty);
 static void first_component_command (char *arg, int from_tty);
+
+/* Operator validation.
+   NOTE: Multi-byte operators (usually the assignment variety operator)
+   must appear before the single byte version, i.e., "+=" before "+".  */
+static const char *operator_tokens[] =
+  {
+    "++", "+=", "+", "->*", "->", "--", "-=", "-", "*=", "*", "/=", "/",
+    "%=", "%", "!=", "==", "!", "&&", "<<=", "<<", ">>=", ">>",
+    "<=", "<", ">=", ">", "~", "&=", "&", "|=", "||", "|", "^=", "^",
+    "=", "()", "[]", ",", "new", "delete"
+    /* new[] and delete[] require special whitespace handling */
+  };
 
 /* Return 1 if STRING is clearly already in canonical form.  This
    function is conservative; things which it does not recognize are
@@ -167,7 +182,7 @@ mangled_name_to_comp (const char *mangled_name, int options,
 
   if (ret == NULL)
     {
-      free (demangled_name);
+      xfree (demangled_name);
       return NULL;
     }
 
@@ -180,7 +195,7 @@ mangled_name_to_comp (const char *mangled_name, int options,
 char *
 cp_class_name_from_physname (const char *physname)
 {
-  void *storage;
+  void *storage = NULL;
   char *demangled_name = NULL, *ret;
   struct demangle_component *ret_comp, *prev_comp, *cur_comp;
   int done;
@@ -324,7 +339,7 @@ unqualified_name_from_comp (struct demangle_component *comp)
 char *
 method_name_from_physname (const char *physname)
 {
-  void *storage;
+  void *storage = NULL;
   char *demangled_name = NULL, *ret;
   struct demangle_component *ret_comp;
   int done;
@@ -377,8 +392,8 @@ cp_func_name (const char *full_name)
    (optionally) a return type.  Return the name of the function without
    parameters or return type, or NULL if we can not parse the name.  */
 
-static char *
-remove_params (const char *demangled_name)
+char *
+cp_remove_params (const char *demangled_name)
 {
   int done = 0;
   struct demangle_component *ret_comp;
@@ -649,7 +664,7 @@ overload_list_add_symbol (struct symbol *sym, const char *oload_name)
       return;
 
   /* Get the demangled name without parameters */
-  sym_name = remove_params (SYMBOL_NATURAL_NAME (sym));
+  sym_name = cp_remove_params (SYMBOL_NATURAL_NAME (sym));
   if (!sym_name)
     return;
 
@@ -716,10 +731,10 @@ make_symbol_overload_list_using (const char *func_name,
        current != NULL;
        current = current->next)
     {
-      if (strcmp (namespace, current->outer) == 0)
+      if (strcmp (namespace, current->import_dest) == 0)
 	{
 	  make_symbol_overload_list_using (func_name,
-					   current->inner);
+					   current->import_src);
 	}
     }
 
@@ -841,7 +856,7 @@ cp_lookup_rtti_type (const char *name, struct block *block)
   struct symbol * rtti_sym;
   struct type * rtti_type;
 
-  rtti_sym = lookup_symbol (name, block, STRUCT_DOMAIN, NULL, NULL);
+  rtti_sym = lookup_symbol (name, block, STRUCT_DOMAIN, NULL);
 
   if (rtti_sym == NULL)
     {
@@ -892,8 +907,14 @@ maint_cplus_command (char *arg, int from_tty)
 static void
 first_component_command (char *arg, int from_tty)
 {
-  int len = cp_find_first_component (arg);
-  char *prefix = alloca (len + 1);
+  int len;  
+  char *prefix; 
+
+  if (!arg)
+    return;
+
+  len = cp_find_first_component (arg);
+  prefix = alloca (len + 1);
 
   memcpy (prefix, arg, len);
   prefix[len] = '\0';
@@ -902,6 +923,107 @@ first_component_command (char *arg, int from_tty)
 }
 
 extern initialize_file_ftype _initialize_cp_support; /* -Wmissing-prototypes */
+
+#define SKIP_SPACE(P)				\
+  do						\
+  {						\
+    while (*(P) == ' ' || *(P) == '\t')		\
+      ++(P);					\
+  }						\
+  while (0)
+
+/* Returns the length of the operator name or 0 if INPUT does not
+   point to a valid C++ operator.  INPUT should start with "operator".  */
+int
+cp_validate_operator (const char *input)
+{
+  int i;
+  char *copy;
+  const char *p;
+  struct expression *expr;
+  struct value *val;
+  struct gdb_exception except;
+  struct cleanup *old_chain;
+
+  p = input;
+
+  if (strncmp (p, "operator", 8) == 0)
+    {
+      int valid = 0;
+      p += 8;
+
+      SKIP_SPACE (p);
+      for (i = 0; i < sizeof (operator_tokens) / sizeof (operator_tokens[0]);
+	   ++i)
+	{
+	  int length = strlen (operator_tokens[i]);
+	  /* By using strncmp here, we MUST have operator_tokens ordered!
+	     See additional notes where operator_tokens is defined above.  */
+	  if (strncmp (p, operator_tokens[i], length) == 0)
+	    {
+	      const char *op = p;
+	      valid = 1;
+	      p += length;
+
+	      if (strncmp (op, "new", 3) == 0
+		  || strncmp (op, "delete", 6) == 0)
+		{
+
+		  /* Special case: new[] and delete[].  We must be careful
+		     to swallow whitespace before/in "[]".  */
+		  SKIP_SPACE (p);
+
+		  if (*p == '[')
+		    {
+		      ++p;
+		      SKIP_SPACE (p);
+		      if (*p == ']')
+			++p;
+		      else
+			valid = 0;
+		    }
+		}
+
+	      if (valid)
+		return (p - input);
+	    }
+	}
+
+      /* Check input for a conversion operator.  */
+
+      /* Skip past base typename */
+      while (*p != '*' && *p != '&' && *p != 0 && *p != ' ')
+	++p;
+      SKIP_SPACE (p);
+
+      /* Add modifiers '*'/'&' */
+      while (*p == '*' || *p == '&')
+	{
+	  ++p;
+	  SKIP_SPACE (p);
+	}
+
+      /* Check for valid type.  [Remember: input starts with 
+	 "operator".]  */
+      copy = savestring (input + 8, p - input - 8);
+      expr = NULL;
+      val = NULL;
+      TRY_CATCH (except, RETURN_MASK_ALL)
+	{
+	  expr = parse_expression (copy);
+	  val = evaluate_type (expr);
+	}
+
+      xfree (copy);
+      if (expr)
+	xfree (expr);
+
+      if (val != NULL && value_type (val) != NULL)
+	return (p - input);
+    }
+
+  return 0;
+}
 
 void
 _initialize_cp_support (void)

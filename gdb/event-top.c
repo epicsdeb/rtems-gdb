@@ -1,6 +1,6 @@
 /* Top level stuff for GDB, the GNU debugger.
 
-   Copyright (C) 1999, 2000, 2001, 2002, 2004, 2005, 2007, 2008
+   Copyright (C) 1999, 2000, 2001, 2002, 2004, 2005, 2007, 2008, 2009, 2010
    Free Software Foundation, Inc.
 
    Written by Elena Zannoni <ezannoni@cygnus.com> of Cygnus Solutions.
@@ -31,6 +31,8 @@
 #include <signal.h>
 #include "exceptions.h"
 #include "cli/cli-script.h"     /* for reset_command_nest_depth */
+#include "main.h"
+#include "gdbthread.h"
 
 /* For dont_repeat() */
 #include "gdbcmd.h"
@@ -44,7 +46,6 @@
 
 static void rl_callback_read_char_wrapper (gdb_client_data client_data);
 static void command_line_handler (char *rl);
-static void command_line_handler_continuation (struct continuation_arg *arg);
 static void change_line_handler (void);
 static void change_annotation_level (void);
 static void command_handler (char *command);
@@ -268,7 +269,7 @@ display_gdb_prompt (char *new_prompt)
   if (!current_interp_display_prompt_p ())
     return;
 
-  if (target_executing && sync_execution)
+  if (sync_execution && is_running (inferior_ptid))
     {
       /* This is to trick readline into not trying to display the
          prompt.  Even though we display the prompt using this
@@ -371,22 +372,22 @@ change_annotation_level (void)
 /* Pushes a new prompt on the prompt stack. Each prompt has three
    parts: prefix, prompt, suffix. Usually prefix and suffix are empty
    strings, except when the annotation level is 2. Memory is allocated
-   within savestring for the new prompt. */
+   within xstrdup for the new prompt. */
 void
 push_prompt (char *prefix, char *prompt, char *suffix)
 {
   the_prompts.top++;
-  PREFIX (0) = savestring (prefix, strlen (prefix));
+  PREFIX (0) = xstrdup (prefix);
 
   /* Note that this function is used by the set annotate 2
      command. This is why we take care of saving the old prompt
      in case a new one is not specified. */
   if (prompt)
-    PROMPT (0) = savestring (prompt, strlen (prompt));
+    PROMPT (0) = xstrdup (prompt);
   else
-    PROMPT (0) = savestring (PROMPT (-1), strlen (PROMPT (-1)));
+    PROMPT (0) = xstrdup (PROMPT (-1));
 
-  SUFFIX (0) = savestring (suffix, strlen (suffix));
+  SUFFIX (0) = xstrdup (suffix);
 }
 
 /* Pops the top of the prompt stack, and frees the memory allocated for it. */
@@ -403,7 +404,7 @@ pop_prompt (void)
     if (strcmp (PROMPT (0), PROMPT (-1)))
       {
 	xfree (PROMPT (-1));
-	PROMPT (-1) = savestring (PROMPT (0), strlen (PROMPT (0)));
+	PROMPT (-1) = xstrdup (PROMPT (0));
       }
 
   xfree (PREFIX (0));
@@ -424,6 +425,7 @@ stdin_event_handler (int error, gdb_client_data client_data)
       printf_unfiltered (_("error detected on stdin\n"));
       delete_file_handler (input_fd);
       discard_all_continuations ();
+      discard_all_intermediate_continuations ();
       /* If stdin died, we may as well kill gdb. */
       quit_command ((char *) 0, stdin == instream);
     }
@@ -436,15 +438,18 @@ stdin_event_handler (int error, gdb_client_data client_data)
    the exec operation. */
 
 void
-async_enable_stdin (void *dummy)
+async_enable_stdin (void)
 {
-  /* See NOTE in async_disable_stdin() */
-  /* FIXME: cagney/1999-09-27: Call this before clearing
-     sync_execution.  Current target_terminal_ours() implementations
-     check for sync_execution before switching the terminal. */
-  target_terminal_ours ();
-  pop_prompt ();
-  sync_execution = 0;
+  if (sync_execution)
+    {
+      /* See NOTE in async_disable_stdin() */
+      /* FIXME: cagney/1999-09-27: Call this before clearing
+	 sync_execution.  Current target_terminal_ours() implementations
+	 check for sync_execution before switching the terminal. */
+      target_terminal_ours ();
+      pop_prompt ();
+      sync_execution = 0;
+    }
 }
 
 /* Disable reads from stdin (the console) marking the command as
@@ -453,19 +458,11 @@ async_enable_stdin (void *dummy)
 void
 async_disable_stdin (void)
 {
-  sync_execution = 1;
-  push_prompt ("", "", "");
-  /* FIXME: cagney/1999-09-27: At present this call is technically
-     redundant since infcmd.c and infrun.c both already call
-     target_terminal_inferior().  As the terminal handling (in
-     sync/async mode) is refined, the duplicate calls can be
-     eliminated (Here or in infcmd.c/infrun.c). */
-  target_terminal_inferior ();
-  /* Add the reinstate of stdin to the list of cleanups to be done
-     in case the target errors out and dies. These cleanups are also
-     done in case of normal successful termination of the execution
-     command, by complete_execution(). */
-  make_exec_error_cleanup (async_enable_stdin, NULL);
+  if (!sync_execution)
+    {
+      sync_execution = 1;
+      push_prompt ("", "", "");
+    }
 }
 
 
@@ -478,10 +475,7 @@ async_disable_stdin (void)
 static void
 command_handler (char *command)
 {
-  struct cleanup *old_chain;
   int stdin_is_tty = ISATTY (stdin);
-  struct continuation_arg *arg1;
-  struct continuation_arg *arg2;
   long time_at_cmd_start;
 #ifdef HAVE_SBRK
   long space_at_cmd_start = 0;
@@ -492,7 +486,6 @@ command_handler (char *command)
   quit_flag = 0;
   if (instream == stdin && stdin_is_tty)
     reinitialize_more_filter ();
-  old_chain = make_cleanup (null_cleanup, 0);
 
   /* If readline returned a NULL command, it means that the 
      connection with the terminal is gone. This happens at the
@@ -517,70 +510,8 @@ command_handler (char *command)
 
   execute_command (command, instream == stdin);
 
-  /* Set things up for this function to be compete later, once the
-     execution has completed, if we are doing an execution command,
-     otherwise, just go ahead and finish. */
-  if (target_can_async_p () && target_executing)
-    {
-      arg1 =
-	(struct continuation_arg *) xmalloc (sizeof (struct continuation_arg));
-      arg2 =
-	(struct continuation_arg *) xmalloc (sizeof (struct continuation_arg));
-      arg1->next = arg2;
-      arg2->next = NULL;
-      arg1->data.longint = time_at_cmd_start;
-#ifdef HAVE_SBRK
-      arg2->data.longint = space_at_cmd_start;
-#endif
-      add_continuation (command_line_handler_continuation, arg1);
-    }
-
-  /* Do any commands attached to breakpoint we stopped at. Only if we
-     are always running synchronously. Or if we have just executed a
-     command that doesn't start the target. */
-  if (!target_can_async_p () || !target_executing)
-    {
-      bpstat_do_actions (&stop_bpstat);
-      do_cleanups (old_chain);
-
-      if (display_time)
-	{
-	  long cmd_time = get_run_time () - time_at_cmd_start;
-
-	  printf_unfiltered (_("Command execution time: %ld.%06ld\n"),
-			     cmd_time / 1000000, cmd_time % 1000000);
-	}
-
-      if (display_space)
-	{
-#ifdef HAVE_SBRK
-	  char *lim = (char *) sbrk (0);
-	  long space_now = lim - lim_at_start;
-	  long space_diff = space_now - space_at_cmd_start;
-
-	  printf_unfiltered (_("Space used: %ld (%c%ld for this command)\n"),
-			     space_now,
-			     (space_diff >= 0 ? '+' : '-'),
-			     space_diff);
-#endif
-	}
-    }
-}
-
-/* Do any commands attached to breakpoint we stopped at. Only if we
-   are always running synchronously. Or if we have just executed a
-   command that doesn't start the target. */
-void
-command_line_handler_continuation (struct continuation_arg *arg)
-{
-  extern int display_time;
-  extern int display_space;
-
-  long time_at_cmd_start  = arg->data.longint;
-  long space_at_cmd_start = arg->next->data.longint;
-
-  bpstat_do_actions (&stop_bpstat);
-  /*do_cleanups (old_chain); *//*?????FIXME????? */
+  /* Do any commands attached to breakpoint we stopped at.  */
+  bpstat_do_actions ();
 
   if (display_time)
     {
@@ -589,6 +520,7 @@ command_line_handler_continuation (struct continuation_arg *arg)
       printf_unfiltered (_("Command execution time: %ld.%06ld\n"),
 			 cmd_time / 1000000, cmd_time % 1000000);
     }
+
   if (display_space)
     {
 #ifdef HAVE_SBRK
@@ -690,10 +622,10 @@ command_line_handler (char *rl)
 
   if (p > linebuffer && *(p - 1) == '\\')
     {
+      *p = '\0';
       p--;			/* Put on top of '\'.  */
 
-      readline_input_state.linebuffer = savestring (linebuffer,
-						    strlen (linebuffer));
+      readline_input_state.linebuffer = xstrdup (linebuffer);
       readline_input_state.linebuffer_ptr = p;
 
       /* We will not invoke a execute_command if there is more
@@ -975,13 +907,9 @@ handle_sigint (int sig)
      immediate_quit is set. If we didn't, SIGINT would be really
      processed only the next time through the event loop.  To get to
      that point, though, the command that we want to interrupt needs to
-     finish first, which is unacceptable. */
-  if (immediate_quit)
-    async_request_quit (0);
-  else
-    /* If immediate quit is not set, we process SIGINT the next time
-       through the loop, which is fine. */
-    mark_async_signal_handler_wrapper (sigint_token);
+     finish first, which is unacceptable.  If immediate quit is not set,
+     we process SIGINT the next time through the loop, which is fine. */
+  gdb_call_async_signal_handler (sigint_token, immediate_quit);
 }
 
 /* Quit GDB if SIGTERM is received.
@@ -1046,7 +974,7 @@ async_disconnect (gdb_client_data arg)
 		"Could not kill the program being debugged",
 		RETURN_MASK_ALL);
   signal (SIGHUP, SIG_DFL);	/*FIXME: ??????????? */
-  kill (getpid (), SIGHUP);
+  raise (SIGHUP);
 }
 #endif
 
@@ -1074,7 +1002,7 @@ async_stop_sig (gdb_client_data arg)
 #elif HAVE_SIGSETMASK
   sigsetmask (0);
 #endif
-  kill (getpid (), SIGTSTP);
+  raise (SIGTSTP);
   signal (SIGTSTP, handle_stop_sig);
 #else
   signal (STOP_SIGNAL, handle_stop_sig);
@@ -1135,7 +1063,7 @@ set_async_annotation_level (char *args, int from_tty, struct cmd_list_element *c
 void
 set_async_prompt (char *args, int from_tty, struct cmd_list_element *c)
 {
-  PROMPT (0) = savestring (new_async_prompt, strlen (new_async_prompt));
+  PROMPT (0) = xstrdup (new_async_prompt);
 }
 
 /* Set things up for readline to be invoked via the alternate
@@ -1148,8 +1076,6 @@ gdb_setup_readline (void)
      that the sync setup is ALL done in gdb_init, and we would only
      mess it up here.  The sync stuff should really go away over
      time.  */
-  extern int batch_silent;
-
   if (!batch_silent)
     gdb_stdout = stdio_fileopen (stdout);
   gdb_stderr = stdio_fileopen (stderr);

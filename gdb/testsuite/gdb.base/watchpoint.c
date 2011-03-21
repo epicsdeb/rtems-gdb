@@ -30,7 +30,7 @@ int ival2 = -1;
 int ival3 = -1;
 int ival4 = -1;
 int ival5 = -1;
-char buf[10];
+char buf[30] = "testtesttesttesttesttesttestte";
 struct foo
 {
   int val;
@@ -38,6 +38,8 @@ struct foo
 struct foo struct1, struct2, *ptr1, *ptr2;
 
 int doread = 0;
+
+char *global_ptr;
 
 void marker1 ()
 {
@@ -93,6 +95,7 @@ func3 ()
   x = 1;				/* second x assignment */
   y = 1;
   y = 2;
+  buf[26] = 3;
 }
 
 int
@@ -108,6 +111,14 @@ func1 ()
      breakpoint.  */
   func2 ();
   return 73;
+}
+
+void
+func4 ()
+{
+  buf[0] = 3;
+  global_ptr = buf;
+  buf[0] = 7;
 }
 
 int main ()
@@ -184,6 +195,8 @@ int main ()
   marker6 ();
 
   func3 ();
+
+  func4 ();
 
   return 0;
 }

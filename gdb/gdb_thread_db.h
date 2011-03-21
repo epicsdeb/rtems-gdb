@@ -1,22 +1,23 @@
 #ifdef HAVE_THREAD_DB_H
 #include <thread_db.h>
-#else
 
-#ifdef HAVE_STDINT_H
-#include <stdint.h>
-typedef uint32_t gdb_uint32_t;
-#define GDB_UINT32_C(c)	UINT32_C(c)
-#else
-typedef unsigned int gdb_uint32_t;
-#define GDB_UINT32_C(c)	c ## U
+#ifndef LIBTHREAD_DB_SO
+#define LIBTHREAD_DB_SO "libthread_db.so.1"
 #endif
 
-/* Copyright (C) 1999, 2000, 2007, 2008 Free Software Foundation, Inc.
+#ifndef LIBTHREAD_DB_SEARCH_PATH
+#define LIBTHREAD_DB_SEARCH_PATH ""
+#endif
+
+#else
+
+/* Copyright (C) 1999, 2000, 2007, 2008, 2009, 2010
+Free Software Foundation, Inc.
    This file is part of the GNU C Library.
 
    The GNU C Library is free software; you can redistribute it and/or
    modify it under the terms of the GNU Library General Public License as
-   published by the Free Software Foundation; either version 2 of the
+   published by the Free Software Foundation; either version 3 of the
    License, or (at your option) any later version.
 
    The GNU C Library is distributed in the hope that it will be useful,
@@ -24,10 +25,8 @@ typedef unsigned int gdb_uint32_t;
    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
    Library General Public License for more details.
 
-   You should have received a copy of the GNU Library General Public
-   License along with the GNU C Library; see the file COPYING.LIB.  If not,
-   write to the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
-   Boston, MA 02110-1301, USA.  */
+   You should have received a copy of the GNU General Public License
+   along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
 #ifndef _THREAD_DB_H
 #define _THREAD_DB_H	1
@@ -119,14 +118,14 @@ typedef struct td_thrhandle
 /* Bitmask of enabled events. */
 typedef struct td_thr_events
 {
-  gdb_uint32_t event_bits[TD_EVENTSIZE];
+  uint32_t event_bits[TD_EVENTSIZE];
 } td_thr_events_t;
 
 /* Event set manipulation macros. */
 #define __td_eventmask(n) \
-  (GDB_UINT32_C (1) << (((n) - 1) & BT_UIMASK))
+  (UINT32_C (1) << (((n) - 1) & BT_UIMASK))
 #define __td_eventword(n) \
-  ((GDB_UINT32_C ((n) - 1)) >> BT_UISHIFT)
+  ((UINT32_C ((n) - 1)) >> BT_UISHIFT)
 
 #define td_event_emptyset(setp) \
   do {									      \
@@ -139,7 +138,7 @@ typedef struct td_thr_events
   do {									      \
     int __i;								      \
     for (__i = TD_EVENTSIZE; __i > 0; --__i)				      \
-      (setp)->event_bits[__i - 1] = GDB_UINT32_C (0xffffffff);		      \
+      (setp)->event_bits[__i - 1] = UINT32_C (0xffffffff);		      \
   } while (0)
 
 #define td_event_addset(setp, n) \

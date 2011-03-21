@@ -1,7 +1,7 @@
 # This testcase is part of GDB, the GNU debugger.
 
 # Copyright 1988, 1990, 1991, 1992, 1993, 1994, 1995, 1996, 1997, 1999, 2000,
-# 2001, 2004, 2007, 2008 Free Software Foundation, Inc.
+# 2001, 2004, 2007, 2008, 2009, 2010 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -120,7 +120,7 @@ proc test_set { args } {
 # range of values that are common to both (0-127).
 #    
 
-test_set "set variable v_char=0" "print v_char" ".\[0-9\]* = 0 \'.0\'"        "set variable char=0" 
+test_set "set variable v_char=0" "print v_char" ".\[0-9\]* = 0 \'.000\'"        "set variable char=0" 
 test_set "set variable v_char=1" "print v_char" ".\[0-9\]* = 1 \'.001\'"        "set variable char=1" 
 test_set "set variable v_char=7" "print v_char" ".\[0-9\]* = 7 \'.a\'"        "set variable char=7 (Bel)" 
 test_set "set variable v_char=32" "print v_char" ".\[0-9\]* = 32 \' \'"        "set variable char=32 (SPC)" 
@@ -131,7 +131,7 @@ test_set "set variable v_char=127" "print v_char" ".\[0-9\]* = 127 \'.177\'"    
 #
 # test "set variable" for type "signed char"
 #    
-test_set "set variable v_char=0" "print v_signed_char" ".\[0-9\]* = 0 \'.0\'"                 "set variable signed char=0" 
+test_set "set variable v_char=0" "print v_signed_char" ".\[0-9\]* = 0 \'.000\'"                 "set variable signed char=0" 
 test_set "set variable v_signed_char=1" "print v_signed_char" ".\[0-9\]* = 1 \'.001\'"        "set variable signed char=1" 
 test_set "set variable v_signed_char=7" "print v_signed_char" ".\[0-9\]* = 7 \'.a\'"        "set variable signed char=7 (Bel)" 
 test_set "set variable v_signed_char=32" "print v_signed_char" ".\[0-9\]* = 32 \' \'"        "set variable signed char=32 (SPC)" 
@@ -150,7 +150,7 @@ gdb_test "print v_signed_char" ".\[0-9\]* = -1 \'.377\'" \
 #
 # test "set variable" for type "unsigned char"
 #
-test_set "set variable v_unsigned_char=0" "print v_unsigned_char" ".\[0-9\]* = 0 \'.0\'"        "set variable unsigned char=0" 
+test_set "set variable v_unsigned_char=0" "print v_unsigned_char" ".\[0-9\]* = 0 \'.000\'"        "set variable unsigned char=0" 
 test_set "set variable v_unsigned_char=1" "print v_unsigned_char" ".\[0-9\]* = 1 \'.001\'"        "set variable unsigned char=1" 
 test_set "set variable v_unsigned_char=7" "print v_unsigned_char" ".\[0-9\]* = 7 \'.a\'"        "set variable unsigned char=7 (Bel)" 
 test_set "set variable v_unsigned_char=32" "print v_unsigned_char" ".\[0-9\]* = 32 \' \'"        "set variable unsigned char=32 (SPC)" 
@@ -374,7 +374,8 @@ v_long_member = 3,.*v_float_member = 4,.*v_double_member = 5.*\}" \
 
 # We need to up this because this can be really slow on some boards.
 # (malloc() is called as part of the test).
-set timeout 60;
+set prev_timeout $timeout
+set timeout 60
 
 # Change the values
 test_set "set variable v_struct1 = {32, 33, 34, 35, 36, 37}" \
@@ -391,6 +392,8 @@ test_set "set variable v_struct1 = {'h', 1, 2, 3, 4.0, 5.0}" \
 .*v_int_member = 2,.*\
 v_long_member = 3,.*v_float_member = 4,.*v_double_member = 5.*\\}" \
   "set print structure #3"
+
+set timeout $prev_timeout
 
 # Test printing of enumeration bitfields.
 # GNU C supports them, some other compilers don't.

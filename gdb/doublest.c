@@ -1,7 +1,7 @@
 /* Floating point routines for GDB, the GNU debugger.
 
    Copyright (C) 1986, 1988, 1989, 1990, 1991, 1992, 1993, 1994, 1995, 1996,
-   1997, 1998, 1999, 2000, 2001, 2003, 2004, 2005, 2007, 2008
+   1997, 1998, 1999, 2000, 2001, 2003, 2004, 2005, 2007, 2008, 2009, 2010
    Free Software Foundation, Inc.
 
    This file is part of GDB.
@@ -761,27 +761,27 @@ floatformat_from_doublest (const struct floatformat *fmt,
    but not passed on by GDB.  This should be fixed.  */
 
 static const struct floatformat *
-floatformat_from_length (int len)
+floatformat_from_length (struct gdbarch *gdbarch, int len)
 {
   const struct floatformat *format;
-  if (len * TARGET_CHAR_BIT == gdbarch_float_bit (current_gdbarch))
-    format = gdbarch_float_format (current_gdbarch)
-	       [gdbarch_byte_order (current_gdbarch)];
-  else if (len * TARGET_CHAR_BIT == gdbarch_double_bit (current_gdbarch))
-    format = gdbarch_double_format (current_gdbarch)
-	       [gdbarch_byte_order (current_gdbarch)];
-  else if (len * TARGET_CHAR_BIT == gdbarch_long_double_bit (current_gdbarch))
-    format = gdbarch_long_double_format (current_gdbarch)
-	       [gdbarch_byte_order (current_gdbarch)];
+  if (len * TARGET_CHAR_BIT == gdbarch_float_bit (gdbarch))
+    format = gdbarch_float_format (gdbarch)
+	       [gdbarch_byte_order (gdbarch)];
+  else if (len * TARGET_CHAR_BIT == gdbarch_double_bit (gdbarch))
+    format = gdbarch_double_format (gdbarch)
+	       [gdbarch_byte_order (gdbarch)];
+  else if (len * TARGET_CHAR_BIT == gdbarch_long_double_bit (gdbarch))
+    format = gdbarch_long_double_format (gdbarch)
+	       [gdbarch_byte_order (gdbarch)];
   /* On i386 the 'long double' type takes 96 bits,
      while the real number of used bits is only 80,
      both in processor and in memory.  
      The code below accepts the real bit size.  */ 
-  else if ((gdbarch_long_double_format (current_gdbarch) != NULL) 
-	   && (len * TARGET_CHAR_BIT ==
-               gdbarch_long_double_format (current_gdbarch)[0]->totalsize))
-    format = gdbarch_long_double_format (current_gdbarch)
-	       [gdbarch_byte_order (current_gdbarch)];
+  else if ((gdbarch_long_double_format (gdbarch) != NULL)
+	   && (len * TARGET_CHAR_BIT
+               == gdbarch_long_double_format (gdbarch)[0]->totalsize))
+    format = gdbarch_long_double_format (gdbarch)
+	       [gdbarch_byte_order (gdbarch)];
   else
     format = NULL;
   if (format == NULL)
@@ -793,52 +793,12 @@ floatformat_from_length (int len)
 const struct floatformat *
 floatformat_from_type (const struct type *type)
 {
+  struct gdbarch *gdbarch = get_type_arch (type);
   gdb_assert (TYPE_CODE (type) == TYPE_CODE_FLT);
   if (TYPE_FLOATFORMAT (type) != NULL)
-    return TYPE_FLOATFORMAT (type)[gdbarch_byte_order (current_gdbarch)];
+    return TYPE_FLOATFORMAT (type)[gdbarch_byte_order (gdbarch)];
   else
-    return floatformat_from_length (TYPE_LENGTH (type));
-}
-
-/* If the host doesn't define NAN, use zero instead.  */
-#ifndef NAN
-#define NAN 0.0
-#endif
-
-/* Extract a floating-point number of length LEN from a target-order
-   byte-stream at ADDR.  Returns the value as type DOUBLEST.  */
-
-static DOUBLEST
-extract_floating_by_length (const void *addr, int len)
-{
-  const struct floatformat *fmt = floatformat_from_length (len);
-  DOUBLEST val;
-
-  floatformat_to_doublest (fmt, addr, &val);
-  return val;
-}
-
-DOUBLEST
-deprecated_extract_floating (const void *addr, int len)
-{
-  return extract_floating_by_length (addr, len);
-}
-
-/* Store VAL as a floating-point number of length LEN to a
-   target-order byte-stream at ADDR.  */
-
-static void
-store_floating_by_length (void *addr, int len, DOUBLEST val)
-{
-  const struct floatformat *fmt = floatformat_from_length (len);
-
-  floatformat_from_doublest (fmt, &val, addr);
-}
-
-void
-deprecated_store_floating (void *addr, int len, DOUBLEST val)
-{
-  store_floating_by_length (addr, len, val);
+    return floatformat_from_length (gdbarch, TYPE_LENGTH (type));
 }
 
 /* Extract a floating-point number of type TYPE from a target-order
@@ -847,18 +807,10 @@ deprecated_store_floating (void *addr, int len, DOUBLEST val)
 DOUBLEST
 extract_typed_floating (const void *addr, const struct type *type)
 {
+  const struct floatformat *fmt = floatformat_from_type (type);
   DOUBLEST retval;
 
-  gdb_assert (TYPE_CODE (type) == TYPE_CODE_FLT);
-
-  if (TYPE_FLOATFORMAT (type) == NULL)
-    /* Not all code remembers to set the FLOATFORMAT (language
-       specific code? stabs?) so handle that here as a special case.  */
-    return extract_floating_by_length (addr, TYPE_LENGTH (type));
-
-  floatformat_to_doublest 
-	(TYPE_FLOATFORMAT (type)[gdbarch_byte_order (current_gdbarch)],
-			   addr, &retval);
+  floatformat_to_doublest (fmt, addr, &retval);
   return retval;
 }
 
@@ -868,7 +820,7 @@ extract_typed_floating (const void *addr, const struct type *type)
 void
 store_typed_floating (void *addr, const struct type *type, DOUBLEST val)
 {
-  gdb_assert (TYPE_CODE (type) == TYPE_CODE_FLT);
+  const struct floatformat *fmt = floatformat_from_type (type);
 
   /* FIXME: kettenis/2001-10-28: It is debatable whether we should
      zero out any remaining bytes in the target buffer when TYPE is
@@ -890,14 +842,7 @@ store_typed_floating (void *addr, const struct type *type, DOUBLEST val)
      See also the function convert_typed_floating below.  */
   memset (addr, 0, TYPE_LENGTH (type));
 
-  if (TYPE_FLOATFORMAT (type) == NULL)
-    /* Not all code remembers to set the FLOATFORMAT (language
-       specific code? stabs?) so handle that here as a special case.  */
-    store_floating_by_length (addr, TYPE_LENGTH (type), val);
-  else
-    floatformat_from_doublest
-	(TYPE_FLOATFORMAT (type)[gdbarch_byte_order (current_gdbarch)],
-	&val, addr);
+  floatformat_from_doublest (fmt, &val, addr);
 }
 
 /* Convert a floating-point number of type FROM_TYPE from a
@@ -910,9 +855,6 @@ convert_typed_floating (const void *from, const struct type *from_type,
 {
   const struct floatformat *from_fmt = floatformat_from_type (from_type);
   const struct floatformat *to_fmt = floatformat_from_type (to_type);
-
-  gdb_assert (TYPE_CODE (from_type) == TYPE_CODE_FLT);
-  gdb_assert (TYPE_CODE (to_type) == TYPE_CODE_FLT);
 
   if (from_fmt == NULL || to_fmt == NULL)
     {
@@ -940,7 +882,7 @@ convert_typed_floating (const void *from, const struct type *from_type,
   else
     {
       /* The floating-point types don't match.  The best we can do
-         (aport from simulating the target FPU) is converting to the
+         (apart from simulating the target FPU) is converting to the
          widest floating-point type supported by the host, and then
          again to the desired type.  */
       DOUBLEST d;

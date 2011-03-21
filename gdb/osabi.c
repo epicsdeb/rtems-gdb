@@ -1,6 +1,6 @@
 /* OS ABI variant handling for GDB.
 
-   Copyright (C) 2001, 2002, 2003, 2004, 2007, 2008
+   Copyright (C) 2001, 2002, 2003, 2004, 2007, 2008, 2009, 2010
    Free Software Foundation, Inc.
 
    This file is part of GDB.
@@ -72,6 +72,8 @@ static const char * const gdb_osabi_names[] =
 
   "Cygwin",
   "AIX",
+  "DICOS",
+  "Darwin",
 
   "<invalid>"
 };
@@ -83,6 +85,30 @@ gdbarch_osabi_name (enum gdb_osabi osabi)
     return gdb_osabi_names[osabi];
 
   return gdb_osabi_names[GDB_OSABI_INVALID];
+}
+
+/* Lookup the OS ABI corresponding to the specified target description
+   string.  */
+
+enum gdb_osabi
+osabi_from_tdesc_string (const char *name)
+{
+  int i;
+
+  for (i = 0; i < ARRAY_SIZE (gdb_osabi_names); i++)
+    if (strcmp (name, gdb_osabi_names[i]) == 0)
+      {
+	/* See note above: the name table matches the indices assigned
+	   to enum gdb_osabi.  */
+	enum gdb_osabi osabi = (enum gdb_osabi) i;
+
+	if (osabi == GDB_OSABI_INVALID)
+	  return GDB_OSABI_UNKNOWN;
+	else
+	  return osabi;
+      }
+
+  return GDB_OSABI_UNKNOWN;
 }
 
 /* Handler for a given architecture/OS ABI pair.  There should be only
@@ -203,10 +229,11 @@ gdbarch_lookup_osabi (bfd *abfd)
   if (user_osabi_state == osabi_user)
     return user_selected_osabi;
 
-  /* If we don't have a binary, return the default OS ABI (if set) or
-     unknown (otherwise).  */
+  /* If we don't have a binary, just return unknown.  The caller may
+     have other sources the OSABI can be extracted from, e.g., the
+     target description.  */
   if (abfd == NULL) 
-    return GDB_OSABI_DEFAULT;
+    return GDB_OSABI_UNKNOWN;
 
   match = GDB_OSABI_UNKNOWN;
   match_specific = 0;
@@ -267,12 +294,7 @@ gdbarch_lookup_osabi (bfd *abfd)
 	}
     }
 
-  /* If we didn't find a match, but a default was specified at configure
-     time, return the default.  */
-  if (GDB_OSABI_DEFAULT != GDB_OSABI_UNKNOWN && match == GDB_OSABI_UNKNOWN)
-    return GDB_OSABI_DEFAULT;
-  else
-    return match;
+  return match;
 }
 
 
@@ -594,7 +616,7 @@ show_osabi (struct ui_file *file, int from_tty, struct cmd_list_element *c,
   if (user_osabi_state == osabi_auto)
     fprintf_filtered (file,
 		      _("The current OS ABI is \"auto\" (currently \"%s\").\n"),
-		      gdbarch_osabi_name (gdbarch_osabi (current_gdbarch)));
+		      gdbarch_osabi_name (gdbarch_osabi (get_current_arch ())));
   else
     fprintf_filtered (file, _("The current OS ABI is \"%s\".\n"),
 		      gdbarch_osabi_name (user_selected_osabi));

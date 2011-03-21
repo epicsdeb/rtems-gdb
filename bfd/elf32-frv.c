@@ -1,5 +1,5 @@
 /* FRV-specific support for 32-bit ELF.
-   Copyright 2002, 2003, 2004, 2005, 2006, 2007
+   Copyright 2002, 2003, 2004, 2005, 2006, 2007, 2008, 2009, 2010
    Free Software Foundation, Inc.
 
    This file is part of BFD, the Binary File Descriptor library.
@@ -24,7 +24,7 @@
 #include "libbfd.h"
 #include "elf-bfd.h"
 #include "elf/frv.h"
-#include "elf/dwarf2.h"
+#include "dwarf2.h"
 #include "hashtab.h"
 
 /* Forward declarations.  */
@@ -882,8 +882,9 @@ struct frvfdpic_elf_link_hash_table
 
 /* Get the FRV ELF linker hash table from a link_info structure.  */
 
-#define frvfdpic_hash_table(info) \
-  ((struct frvfdpic_elf_link_hash_table *) ((info)->hash))
+#define frvfdpic_hash_table(p) \
+  (elf_hash_table_id ((struct elf_link_hash_table *) ((p)->hash)) \
+  == FRV_ELF_DATA ? ((struct frvfdpic_elf_link_hash_table *) ((p)->hash)) : NULL)
 
 #define frvfdpic_got_section(info) \
   (frvfdpic_hash_table (info)->sgot)
@@ -1006,7 +1007,8 @@ frvfdpic_elf_link_hash_table_create (bfd *abfd)
 
   if (!_bfd_elf_link_hash_table_init (&ret->elf, abfd,
 				      _bfd_elf_link_hash_newfunc,
-				      sizeof (struct elf_link_hash_entry)))
+				      sizeof (struct elf_link_hash_entry),
+				      FRV_ELF_DATA))
     {
       free (ret);
       return NULL;
@@ -1397,7 +1399,8 @@ _frvfdpic_emit_got_relocs_plt_entries (struct frvfdpic_relocs_info *entry,
 	dynindx = entry->d.h->dynindx;
       else
 	{
-	  if (sec->output_section
+	  if (sec
+	      && sec->output_section
 	      && ! bfd_is_abs_section (sec->output_section)
 	      && ! bfd_is_und_section (sec->output_section))
 	    dynindx = elf_section_data (sec->output_section)->dynindx;
@@ -1679,8 +1682,9 @@ _frvfdpic_emit_got_relocs_plt_entries (struct frvfdpic_relocs_info *entry,
 	     of the section.  For a non-local function, it's
 	     disregarded.  */
 	  lowword = ad;
-	  if (entry->symndx == -1 && entry->d.h->dynindx != -1
-	      && entry->d.h->dynindx == idx)
+	  if (sec == NULL
+	      || (entry->symndx == -1 && entry->d.h->dynindx != -1
+		  && entry->d.h->dynindx == idx))
 	    highword = 0;
 	  else
 	    highword = _frvfdpic_osec_to_segment
@@ -5736,6 +5740,10 @@ elf32_frvfdpic_relax_section (bfd *abfd ATTRIBUTE_UNUSED, asection *sec,
 {
   struct _frvfdpic_dynamic_got_plt_info gpinfo;
 
+  if (info->relocatable)
+    (*info->callbacks->einfo)
+      (_("%P%F: --relax and -r may not be used together\n"));
+
   /* If we return early, we didn't change anything.  */
   *again = FALSE;
 
@@ -6836,7 +6844,7 @@ frv_elf_print_private_bfd_data (abfd, ptr)
   _bfd_elf_print_private_bfd_data (abfd, ptr);
 
   flags = elf_elfheader (abfd)->e_flags;
-  fprintf (file, _("private flags = 0x%lx:"), (long)flags);
+  fprintf (file, _("private flags = 0x%lx:"), (unsigned long) flags);
 
   switch (flags & EF_FRV_CPU_MASK)
     {

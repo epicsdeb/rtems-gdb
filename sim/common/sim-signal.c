@@ -1,5 +1,5 @@
 /* Simulator signal support
-   Copyright (C) 1997, 2007, 2008 Free Software Foundation, Inc.
+   Copyright (C) 1997, 2007, 2008, 2009, 2010 Free Software Foundation, Inc.
    Contributed by Cygnus Support
 
 This file is part of the GNU Simulators.
@@ -26,7 +26,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
    to not think the process has died (so it can be debugged at the point of
    failure).  */
 
-#ifdef _MSC_VER
+#ifdef _WIN32
 #ifndef SIGTRAP
 #define SIGTRAP 5
 #endif

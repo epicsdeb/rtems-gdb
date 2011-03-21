@@ -1,7 +1,7 @@
 /* Generic remote debugging interface for simulators.
 
    Copyright (C) 1993, 1994, 1995, 1996, 1997, 1998, 1999, 2000, 2001, 2002,
-   2004, 2005, 2006, 2007, 2008 Free Software Foundation, Inc.
+   2004, 2005, 2006, 2007, 2008, 2009, 2010 Free Software Foundation, Inc.
 
    Contributed by Cygnus Support.
    Steve Chamberlain (sac@cygnus.com).
@@ -41,6 +41,7 @@
 #include "sim-regno.h"
 #include "arch-utils.h"
 #include "readline/readline.h"
+#include "gdbthread.h"
 
 /* Prototypes */
 
@@ -69,13 +70,9 @@ static void gdb_os_vprintf_filtered (host_callback *, const char *, va_list);
 
 static void gdb_os_evprintf_filtered (host_callback *, const char *, va_list);
 
-static void gdb_os_error (host_callback *, const char *, ...);
+static void gdb_os_error (host_callback *, const char *, ...) ATTR_NORETURN;
 
-static void gdbsim_fetch_register (struct regcache *regcache, int regno);
-
-static void gdbsim_store_register (struct regcache *regcache, int regno);
-
-static void gdbsim_kill (void);
+static void gdbsim_kill (struct target_ops *);
 
 static void gdbsim_load (char *prog, int fromtty);
 
@@ -83,19 +80,15 @@ static void gdbsim_open (char *args, int from_tty);
 
 static void gdbsim_close (int quitting);
 
-static void gdbsim_detach (char *args, int from_tty);
-
-static void gdbsim_resume (ptid_t ptid, int step, enum target_signal siggnal);
-
-static ptid_t gdbsim_wait (ptid_t ptid, struct target_waitstatus *status);
+static void gdbsim_detach (struct target_ops *ops, char *args, int from_tty);
 
 static void gdbsim_prepare_to_store (struct regcache *regcache);
 
 static void gdbsim_files_info (struct target_ops *target);
 
-static void gdbsim_mourn_inferior (void);
+static void gdbsim_mourn_inferior (struct target_ops *target);
 
-static void gdbsim_stop (void);
+static void gdbsim_stop (ptid_t ptid);
 
 void simulator_command (char *args, int from_tty);
 
@@ -114,6 +107,12 @@ static int program_loaded = 0;
    this.  We also need to record the result of sim_open so we can pass it
    back to the other sim_foo routines.  */
 static SIM_DESC gdbsim_desc = 0;
+
+/* This is the ptid we use while we're connected to the simulator.
+   Its value is arbitrary, as the simulator target don't have a notion
+   or processes or threads, but we need something non-null to place in
+   inferior_ptid.  */
+static ptid_t remote_sim_ptid;
 
 static void
 dump_mem (char *buf, int len)
@@ -255,17 +254,12 @@ gdb_os_evprintf_filtered (host_callback * p, const char *format, va_list ap)
 /* GDB version of error callback.  */
 
 static void
-gdb_os_error (host_callback * p, const char *format,...)
+gdb_os_error (host_callback * p, const char *format, ...)
 {
-  if (deprecated_error_hook)
-    (*deprecated_error_hook) ();
-  else
-    {
-      va_list args;
-      va_start (args, format);
-      verror (format, args);
-      va_end (args);
-    }
+  va_list args;
+  va_start (args, format);
+  verror (format, args);
+  va_end (args);
 }
 
 int
@@ -277,13 +271,14 @@ one2one_register_sim_regno (struct gdbarch *gdbarch, int regnum)
 }
 
 static void
-gdbsim_fetch_register (struct regcache *regcache, int regno)
+gdbsim_fetch_register (struct target_ops *ops,
+		       struct regcache *regcache, int regno)
 {
   struct gdbarch *gdbarch = get_regcache_arch (regcache);
   if (regno == -1)
     {
       for (regno = 0; regno < gdbarch_num_regs (gdbarch); regno++)
-	gdbsim_fetch_register (regcache, regno);
+	gdbsim_fetch_register (ops, regcache, regno);
       return;
     }
 
@@ -345,13 +340,14 @@ gdbsim_fetch_register (struct regcache *regcache, int regno)
 
 
 static void
-gdbsim_store_register (struct regcache *regcache, int regno)
+gdbsim_store_register (struct target_ops *ops,
+		       struct regcache *regcache, int regno)
 {
   struct gdbarch *gdbarch = get_regcache_arch (regcache);
   if (regno == -1)
     {
       for (regno = 0; regno < gdbarch_num_regs (gdbarch); regno++)
-	gdbsim_store_register (regcache, regno);
+	gdbsim_store_register (ops, regcache, regno);
       return;
     }
   else if (gdbarch_register_sim_regno (gdbarch, regno) >= 0)
@@ -382,7 +378,7 @@ gdbsim_store_register (struct regcache *regcache, int regno)
    and releasing other resources acquired by the simulated program.  */
 
 static void
-gdbsim_kill (void)
+gdbsim_kill (struct target_ops *ops)
 {
   if (remote_debug)
     printf_filtered ("gdbsim_kill\n");
@@ -399,12 +395,13 @@ gdbsim_kill (void)
 static void
 gdbsim_load (char *args, int fromtty)
 {
-  char **argv = buildargv (args);
+  char **argv;
   char *prog;
 
-  if (argv == NULL)
-    nomem (0);
+  if (args == NULL)
+      error_no_arg (_("program to load"));
 
+  argv = gdb_buildargv (args);
   make_cleanup_freeargv (argv);
 
   prog = tilde_expand (argv[0]);
@@ -437,7 +434,8 @@ gdbsim_load (char *args, int fromtty)
    user types "run" after having attached.  */
 
 static void
-gdbsim_create_inferior (char *exec_file, char *args, char **env, int from_tty)
+gdbsim_create_inferior (struct target_ops *target, char *exec_file, char *args,
+			char **env, int from_tty)
 {
   int len;
   char *arg_buf, **argv;
@@ -452,7 +450,8 @@ gdbsim_create_inferior (char *exec_file, char *args, char **env, int from_tty)
 		     (exec_file ? exec_file : "(NULL)"),
 		     args);
 
-  gdbsim_kill ();
+  if (ptid_equal (inferior_ptid, remote_sim_ptid))
+    gdbsim_kill (target);
   remove_breakpoints ();
   init_wait_for_inferior ();
 
@@ -464,15 +463,17 @@ gdbsim_create_inferior (char *exec_file, char *args, char **env, int from_tty)
       strcat (arg_buf, exec_file);
       strcat (arg_buf, " ");
       strcat (arg_buf, args);
-      argv = buildargv (arg_buf);
+      argv = gdb_buildargv (arg_buf);
       make_cleanup_freeargv (argv);
     }
   else
     argv = NULL;
   sim_create_inferior (gdbsim_desc, exec_bfd, argv, env);
 
-  inferior_ptid = pid_to_ptid (42);
-  target_mark_running (&gdbsim_ops);
+  inferior_ptid = remote_sim_ptid;
+  inferior_appeared (current_inferior (), ptid_get_pid (inferior_ptid));
+  add_thread_silent (inferior_ptid);
+
   insert_breakpoints ();	/* Needed to get correct instruction in cache */
 
   clear_proceed_status ();
@@ -535,9 +536,7 @@ gdbsim_open (char *args, int from_tty)
       strcat (arg_buf, " ");	/* 1 */
       strcat (arg_buf, args);
     }
-  argv = buildargv (arg_buf);
-  if (argv == NULL)
-    error (_("Insufficient memory available to allocate simulator arg list."));
+  argv = gdb_buildargv (arg_buf);
   make_cleanup_freeargv (argv);
 
   init_callbacks ();
@@ -552,7 +551,6 @@ gdbsim_open (char *args, int from_tty)
   /* There's nothing running after "target sim" or "load"; not until
      "run".  */
   inferior_ptid = null_ptid;
-  target_mark_exited (&gdbsim_ops);
 }
 
 /* Does whatever cleanup is required for a target that we are no longer
@@ -580,6 +578,8 @@ gdbsim_close (int quitting)
 
   end_callbacks ();
   generic_mourn_inferior ();
+  delete_thread_silent (remote_sim_ptid);
+  delete_inferior_silent (ptid_get_pid (remote_sim_ptid));
 }
 
 /* Takes a program previously attached to and detaches it.
@@ -592,7 +592,7 @@ gdbsim_close (int quitting)
    Use this when you want to detach and do something else with your gdb.  */
 
 static void
-gdbsim_detach (char *args, int from_tty)
+gdbsim_detach (struct target_ops *ops, char *args, int from_tty)
 {
   if (remote_debug)
     printf_filtered ("gdbsim_detach: args \"%s\"\n", args);
@@ -610,9 +610,10 @@ static enum target_signal resume_siggnal;
 static int resume_step;
 
 static void
-gdbsim_resume (ptid_t ptid, int step, enum target_signal siggnal)
+gdbsim_resume (struct target_ops *ops,
+	       ptid_t ptid, int step, enum target_signal siggnal)
 {
-  if (PIDGET (inferior_ptid) != 42)
+  if (!ptid_equal (inferior_ptid, remote_sim_ptid))
     error (_("The program is not being run."));
 
   if (remote_debug)
@@ -632,7 +633,7 @@ gdbsim_resume (ptid_t ptid, int step, enum target_signal siggnal)
    For simulators that do not support this operation, just abort */
 
 static void
-gdbsim_stop (void)
+gdbsim_stop (ptid_t ptid)
 {
   if (!sim_stop (gdbsim_desc))
     {
@@ -668,11 +669,12 @@ gdb_os_poll_quit (host_callback *p)
 static void
 gdbsim_cntrl_c (int signo)
 {
-  gdbsim_stop ();
+  gdbsim_stop (remote_sim_ptid);
 }
 
 static ptid_t
-gdbsim_wait (ptid_t ptid, struct target_waitstatus *status)
+gdbsim_wait (struct target_ops *ops,
+	     ptid_t ptid, struct target_waitstatus *status, int options)
 {
   static RETSIGTYPE (*prev_sigint) ();
   int sigrc = 0;
@@ -769,8 +771,8 @@ gdbsim_xfer_inferior_memory (CORE_ADDR memaddr, gdb_byte *myaddr, int len,
       /* FIXME: Send to something other than STDOUT? */
       printf_filtered ("gdbsim_xfer_inferior_memory: myaddr 0x");
       gdb_print_host_address (myaddr, gdb_stdout);
-      printf_filtered (", memaddr 0x%s, len %d, write %d\n",
-		       paddr_nz (memaddr), len, write);
+      printf_filtered (", memaddr %s, len %d, write %d\n",
+		       paddress (target_gdbarch, memaddr), len, write);
       if (remote_debug && write)
 	dump_mem (myaddr, len);
     }
@@ -810,14 +812,14 @@ gdbsim_files_info (struct target_ops *target)
 /* Clear the simulator's notion of what the break points are.  */
 
 static void
-gdbsim_mourn_inferior (void)
+gdbsim_mourn_inferior (struct target_ops *target)
 {
   if (remote_debug)
     printf_filtered ("gdbsim_mourn_inferior:\n");
 
   remove_breakpoints ();
-  target_mark_exited (&gdbsim_ops);
   generic_mourn_inferior ();
+  delete_thread_silent (remote_sim_ptid);
 }
 
 /* Pass the command argument through to the simulator verbatim.  The
@@ -849,6 +851,35 @@ simulator_command (char *args, int from_tty)
   registers_changed ();
 }
 
+/* Check to see if a thread is still alive.  */
+
+static int
+gdbsim_thread_alive (struct target_ops *ops, ptid_t ptid)
+{
+  if (ptid_equal (ptid, remote_sim_ptid))
+    /* The simulators' task is always alive.  */
+    return 1;
+
+  return 0;
+}
+
+/* Convert a thread ID to a string.  Returns the string in a static
+   buffer.  */
+
+static char *
+gdbsim_pid_to_str (struct target_ops *ops, ptid_t ptid)
+{
+  static char buf[64];
+
+  if (ptid_equal (remote_sim_ptid, ptid))
+    {
+      xsnprintf (buf, sizeof buf, "Thread <main>");
+      return buf;
+    }
+
+  return normal_pid_to_str (ptid);
+}
+
 /* Define the target subroutine names */
 
 struct target_ops gdbsim_ops;
@@ -876,17 +907,15 @@ init_gdbsim_ops (void)
   gdbsim_ops.to_create_inferior = gdbsim_create_inferior;
   gdbsim_ops.to_mourn_inferior = gdbsim_mourn_inferior;
   gdbsim_ops.to_stop = gdbsim_stop;
+  gdbsim_ops.to_thread_alive = gdbsim_thread_alive;
+  gdbsim_ops.to_pid_to_str = gdbsim_pid_to_str;
   gdbsim_ops.to_stratum = process_stratum;
-  gdbsim_ops.to_has_all_memory = 1;
-  gdbsim_ops.to_has_memory = 1;
-  gdbsim_ops.to_has_stack = 1;
-  gdbsim_ops.to_has_registers = 1;
-  gdbsim_ops.to_has_execution = 1;
+  gdbsim_ops.to_has_all_memory = default_child_has_all_memory;
+  gdbsim_ops.to_has_memory = default_child_has_memory;
+  gdbsim_ops.to_has_stack = default_child_has_stack;
+  gdbsim_ops.to_has_registers = default_child_has_registers;
+  gdbsim_ops.to_has_execution = default_child_has_execution;
   gdbsim_ops.to_magic = OPS_MAGIC;
-
-#ifdef TARGET_REDEFINE_DEFAULT_OPS
-  TARGET_REDEFINE_DEFAULT_OPS (&gdbsim_ops);
-#endif
 }
 
 void
@@ -897,4 +926,8 @@ _initialize_remote_sim (void)
 
   add_com ("sim", class_obscure, simulator_command,
 	   _("Send a command to the simulator."));
+
+  /* Yes, 42000 is arbitrary.  The only sense out of it, is that it
+     isn't 0.  */
+  remote_sim_ptid = ptid_build (42000, 0, 42000);
 }

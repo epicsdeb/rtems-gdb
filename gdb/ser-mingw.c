@@ -1,6 +1,6 @@
 /* Serial interface for local (hardwired) serial ports on Windows systems
 
-   Copyright (C) 2006, 2007, 2008 Free Software Foundation, Inc.
+   Copyright (C) 2006, 2007, 2008, 2009, 2010 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -32,6 +32,8 @@
 #include "gdb_assert.h"
 #include "gdb_string.h"
 
+#include "command.h"
+
 void _initialize_ser_windows (void);
 
 struct ser_windows_state
@@ -51,13 +53,6 @@ ser_windows_open (struct serial *scb, const char *name)
   struct ser_windows_state *state;
   COMMTIMEOUTS timeouts;
 
-  /* Only allow COM ports.  */
-  if (strncmp (name, "COM", 3) != 0)
-    {
-      errno = ENOENT;
-      return -1;
-    }
-
   h = CreateFile (name, GENERIC_READ | GENERIC_WRITE, 0, NULL,
 		  OPEN_EXISTING, FILE_FLAG_OVERLAPPED, NULL);
   if (h == INVALID_HANDLE_VALUE)
@@ -66,7 +61,7 @@ ser_windows_open (struct serial *scb, const char *name)
       return -1;
     }
 
-  scb->fd = _open_osfhandle ((long) h, O_RDWR);
+  scb->fd = _open_osfhandle ((intptr_t) h, O_RDWR);
   if (scb->fd < 0)
     {
       errno = ENOENT;
@@ -578,6 +573,7 @@ console_select_thread (void *arg)
 
       SetEvent(state->have_stopped);
     }
+  return 0;
 }
 
 static int
@@ -638,6 +634,7 @@ pipe_select_thread (void *arg)
 
       SetEvent (state->have_stopped);
     }
+  return 0;
 }
 
 static DWORD WINAPI
@@ -662,6 +659,7 @@ file_select_thread (void *arg)
 
       SetEvent (state->have_stopped);
     }
+  return 0;
 }
 
 static void
@@ -824,12 +822,17 @@ pipe_windows_open (struct serial *scb, const char *name)
 {
   struct pipe_state *ps;
   FILE *pex_stderr;
+  char **argv;
+  struct cleanup *back_to;
 
-  char **argv = buildargv (name);
-  struct cleanup *back_to = make_cleanup_freeargv (argv);
+  if (name == NULL)
+    error_no_arg (_("child command"));
+
+  argv = gdb_buildargv (name);
+  back_to = make_cleanup_freeargv (argv);
+
   if (! argv[0] || argv[0][0] == '\0')
     error ("missing child command");
-
 
   ps = make_pipe_state ();
   make_cleanup (cleanup_pipe_state, ps);
@@ -1263,7 +1266,7 @@ _initialize_ser_windows (void)
   ops->write = ser_base_write;
   ops->flush_output = ser_base_flush_output;
   ops->flush_input = ser_base_flush_input;
-  ops->send_break = ser_base_send_break;
+  ops->send_break = ser_tcp_send_break;
   ops->go_raw = ser_base_raw;
   ops->get_tty_state = ser_base_get_tty_state;
   ops->set_tty_state = ser_base_set_tty_state;

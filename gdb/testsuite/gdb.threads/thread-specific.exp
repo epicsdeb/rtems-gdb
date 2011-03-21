@@ -1,4 +1,4 @@
-# Copyright 2004, 2007, 2008 Free Software Foundation, Inc.
+# Copyright 2004, 2007, 2008, 2009, 2010 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -12,9 +12,6 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
-
-# Please email any bugs, comments, and/or additions to this file to:
-# bug-gdb@prep.ai.mit.edu
 
 # This file was written by Daniel Jacobowitz <drow@mvista.com>.
 # It tests that the correct breakpoint is reported when we hit a
@@ -44,6 +41,9 @@ proc get_thread_list { } {
 
   gdb_test_multiple "info threads" "get threads list" {
     -re "info threads\r\n" {
+      exp_continue
+    }
+    -re "New Thread \[^\n\]*\n" {
       exp_continue
     }
     -re "^\\*  *(\[0-9\]*) Thread \[^\n\]*main\[^\n\]*\n" {

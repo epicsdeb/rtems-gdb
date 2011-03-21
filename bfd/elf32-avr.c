@@ -1,6 +1,6 @@
 /* AVR-specific support for 32-bit ELF
-   Copyright 1999, 2000, 2001, 2002, 2003, 2004, 2006, 2007
-   Free Software Foundation, Inc.
+   Copyright 1999, 2000, 2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008, 2009,
+   2010  Free Software Foundation, Inc.
    Contributed by Denis Chertykov <denisc@overta.ru>
 
    This file is part of BFD, the Binary File Descriptor library.
@@ -38,7 +38,7 @@ static bfd_boolean debug_stubs = FALSE;
 
 /* We use two hash tables to hold information for linking avr objects.
 
-   The first is the elf32_avr_link_hash_tablse which is derived from the
+   The first is the elf32_avr_link_hash_table which is derived from the
    stanard ELF linker hash table.  We use this as a place to attach the other
    hash table and some static information.
 
@@ -104,8 +104,8 @@ struct elf32_avr_link_hash_table
 /* Various hash macros and functions.  */
 #define avr_link_hash_table(p) \
   /* PR 3874: Check that we have an AVR style hash table before using it.  */\
-  ((p)->hash->table.newfunc != elf32_avr_link_hash_newfunc ? NULL : \
-   ((struct elf32_avr_link_hash_table *) ((p)->hash)))
+  (elf_hash_table_id ((struct elf_link_hash_table *) ((p)->hash)) \
+  == AVR_ELF_DATA ? ((struct elf32_avr_link_hash_table *) ((p)->hash)) : NULL)
 
 #define avr_stub_hash_entry(ent) \
   ((struct elf32_avr_stub_hash_entry *)(ent))
@@ -617,7 +617,8 @@ elf32_avr_link_hash_table_create (bfd *abfd)
 
   if (!_bfd_elf_link_hash_table_init (&htab->etab, abfd,
                                       elf32_avr_link_hash_newfunc,
-                                      sizeof (struct elf_link_hash_entry)))
+                                      sizeof (struct elf_link_hash_entry),
+				      AVR_ELF_DATA))
     {
       free (htab);
       return NULL;
@@ -775,14 +776,14 @@ static bfd_vma
 avr_get_stub_addr (bfd_vma srel,
                    struct elf32_avr_link_hash_table *htab)
 {
-  unsigned int index;
+  unsigned int sindex;
   bfd_vma stub_sec_addr =
               (htab->stub_sec->output_section->vma +
 	       htab->stub_sec->output_offset);
 
-  for (index = 0; index < htab->amt_max_entry_cnt; index ++)
-    if (htab->amt_destination_addr[index] == srel)
-      return htab->amt_stub_offsets[index] + stub_sec_addr;
+  for (sindex = 0; sindex < htab->amt_max_entry_cnt; sindex ++)
+    if (htab->amt_destination_addr[sindex] == srel)
+      return htab->amt_stub_offsets[sindex] + stub_sec_addr;
 
   /* Return an address that could not be reached by 16 bit relocs.  */
   return 0x020000;
@@ -854,10 +855,11 @@ avr_final_link_relocate (reloc_howto_type *                 howto,
 	{
           /* Relative distance is too large.  */
 
-	  /* Always apply WRAPAROUND for avr2 and avr4.  */
+	  /* Always apply WRAPAROUND for avr2, avr25, and avr4.  */
 	  switch (bfd_get_mach (input_bfd))
 	    {
 	    case bfd_mach_avr2:
+	    case bfd_mach_avr25:
 	    case bfd_mach_avr4:
 	      break;
 
@@ -1166,6 +1168,9 @@ elf32_avr_relocate_section (bfd *output_bfd ATTRIBUTE_UNUSED,
   Elf_Internal_Rela *           relend;
   struct elf32_avr_link_hash_table * htab = avr_link_hash_table (info);
 
+  if (htab == NULL)
+    return FALSE;
+
   symtab_hdr = & elf_tdata (input_bfd)->symtab_hdr;
   sym_hashes = elf_sym_hashes (input_bfd);
   relend     = relocs + input_section->reloc_count;
@@ -1296,8 +1301,20 @@ bfd_elf_avr_final_write_processing (bfd *abfd,
       val = E_AVR_MACH_AVR1;
       break;
 
+    case bfd_mach_avr25:
+      val = E_AVR_MACH_AVR25;
+      break;
+
     case bfd_mach_avr3:
       val = E_AVR_MACH_AVR3;
+      break;
+
+    case bfd_mach_avr31:
+      val = E_AVR_MACH_AVR31;
+      break;
+
+    case bfd_mach_avr35:
+      val = E_AVR_MACH_AVR35;
       break;
 
     case bfd_mach_avr4:
@@ -1306,6 +1323,10 @@ bfd_elf_avr_final_write_processing (bfd *abfd,
 
     case bfd_mach_avr5:
       val = E_AVR_MACH_AVR5;
+      break;
+
+    case bfd_mach_avr51:
+      val = E_AVR_MACH_AVR51;
       break;
 
     case bfd_mach_avr6:
@@ -1342,8 +1363,20 @@ elf32_avr_object_p (bfd *abfd)
 	  e_set = bfd_mach_avr1;
 	  break;
 
+	case E_AVR_MACH_AVR25:
+	  e_set = bfd_mach_avr25;
+	  break;
+
 	case E_AVR_MACH_AVR3:
 	  e_set = bfd_mach_avr3;
+	  break;
+
+	case E_AVR_MACH_AVR31:
+	  e_set = bfd_mach_avr31;
+	  break;
+
+	case E_AVR_MACH_AVR35:
+	  e_set = bfd_mach_avr35;
 	  break;
 
 	case E_AVR_MACH_AVR4:
@@ -1352,6 +1385,10 @@ elf32_avr_object_p (bfd *abfd)
 
 	case E_AVR_MACH_AVR5:
 	  e_set = bfd_mach_avr5;
+	  break;
+
+	case E_AVR_MACH_AVR51:
+	  e_set = bfd_mach_avr51;
 	  break;
 
 	case E_AVR_MACH_AVR6:
@@ -1382,7 +1419,6 @@ elf32_avr_relax_delete_bytes (bfd *abfd,
   Elf_Internal_Rela *irelalign;
   Elf_Internal_Sym *isym;
   Elf_Internal_Sym *isymbuf = NULL;
-  Elf_Internal_Sym *isymend;
   bfd_vma toaddr;
   struct elf_link_hash_entry **sym_hashes;
   struct elf_link_hash_entry **end_hashes;
@@ -1478,7 +1514,6 @@ elf32_avr_relax_delete_bytes (bfd *abfd,
            if (ELF32_R_SYM (irel->r_info) < symtab_hdr->sh_info)
              {
                /* A local symbol.  */
-               Elf_Internal_Sym *isym;
                asection *sym_sec;
 
                isym = isymbuf + ELF32_R_SYM (irel->r_info);
@@ -1520,13 +1555,19 @@ elf32_avr_relax_delete_bytes (bfd *abfd,
 
   /* Adjust the local symbols defined in this section.  */
   isym = (Elf_Internal_Sym *) symtab_hdr->contents;
-  isymend = isym + symtab_hdr->sh_info;
-  for (; isym < isymend; isym++)
+  /* Fix PR 9841, there may be no local symbols.  */
+  if (isym != NULL)
     {
-      if (isym->st_shndx == sec_shndx
-          && isym->st_value > addr
-          && isym->st_value < toaddr)
-        isym->st_value -= count;
+      Elf_Internal_Sym *isymend;
+
+      isymend = isym + symtab_hdr->sh_info;
+      for (; isym < isymend; isym++)
+	{
+	  if (isym->st_shndx == sec_shndx
+	      && isym->st_value > addr
+	      && isym->st_value < toaddr)
+	    isym->st_value -= count;
+	}
     }
 
   /* Now adjust the global symbols defined in this section.  */
@@ -1596,6 +1637,10 @@ elf32_avr_relax_section (bfd *abfd,
   static Elf_Internal_Rela *last_reloc = NULL;
   struct elf32_avr_link_hash_table *htab;
 
+  if (link_info->relocatable)
+    (*link_info->callbacks->einfo)
+      (_("%P%F: --relax and -r may not be used together\n"));
+
   htab = avr_link_hash_table (link_info);
   if (htab == NULL)
     return FALSE;
@@ -1661,8 +1706,8 @@ elf32_avr_relax_section (bfd *abfd,
       bfd_vma symval;
 
       if (   ELF32_R_TYPE (irel->r_info) != R_AVR_13_PCREL
-          && ELF32_R_TYPE (irel->r_info) != R_AVR_7_PCREL
-          && ELF32_R_TYPE (irel->r_info) != R_AVR_CALL)
+	     && ELF32_R_TYPE (irel->r_info) != R_AVR_7_PCREL
+	     && ELF32_R_TYPE (irel->r_info) != R_AVR_CALL)
         continue;
 
       /* Get the section contents if we haven't done so already.  */
@@ -1679,7 +1724,7 @@ elf32_avr_relax_section (bfd *abfd,
             }
         }
 
-     /* Read this BFD's local symbols if we haven't done so already.  */
+      /* Read this BFD's local symbols if we haven't done so already.  */
       if (isymbuf == NULL && symtab_hdr->sh_info != 0)
         {
           isymbuf = (Elf_Internal_Sym *) symtab_hdr->contents;
@@ -1738,9 +1783,9 @@ elf32_avr_relax_section (bfd *abfd,
          the linker is run.  */
       switch (ELF32_R_TYPE (irel->r_info))
         {
-         /* Try to turn a 22-bit absolute call/jump into an 13-bit
-            pc-relative rcall/rjmp.  */
-         case R_AVR_CALL:
+	  /* Try to turn a 22-bit absolute call/jump into an 13-bit
+	     pc-relative rcall/rjmp.  */
+	case R_AVR_CALL:
           {
             bfd_vma value = symval + irel->r_addend;
             bfd_vma dot, gap;
@@ -1765,27 +1810,27 @@ elf32_avr_relax_section (bfd *abfd,
                vaiable avr_pc_wrap_around with the appropriate value.
                I.e. 0x4000 for a 16k device.  */
             {
-               /* Shrinking the code size makes the gaps larger in the
-                  case of wrap-arounds.  So we use a heuristical safety
-                  margin to avoid that during relax the distance gets
-                  again too large for the short jumps.  Let's assume
-                  a typical code-size reduction due to relax for a
-                  16k device of 600 bytes.  So let's use twice the
-                  typical value as safety margin.  */
-               int rgap;
-               int safety_margin;
+	      /* Shrinking the code size makes the gaps larger in the
+		 case of wrap-arounds.  So we use a heuristical safety
+		 margin to avoid that during relax the distance gets
+		 again too large for the short jumps.  Let's assume
+		 a typical code-size reduction due to relax for a
+		 16k device of 600 bytes.  So let's use twice the
+		 typical value as safety margin.  */
+	      int rgap;
+	      int safety_margin;
 
-               int assumed_shrink = 600;
-               if (avr_pc_wrap_around > 0x4000)
-                 assumed_shrink = 900;
+	      int assumed_shrink = 600;
+	      if (avr_pc_wrap_around > 0x4000)
+		assumed_shrink = 900;
 
-               safety_margin = 2 * assumed_shrink;
+	      safety_margin = 2 * assumed_shrink;
 
-               rgap = avr_relative_distance_considering_wrap_around (gap);
+	      rgap = avr_relative_distance_considering_wrap_around (gap);
 
-               if (rgap >= (-4092 + safety_margin)
-                   && rgap <= (4094 - safety_margin))
-		 distance_short_enough = 1;
+	      if (rgap >= (-4092 + safety_margin)
+		  && rgap <= (4094 - safety_margin))
+		distance_short_enough = 1;
             }
 
             if (distance_short_enough)
@@ -1879,9 +1924,9 @@ elf32_avr_relax_section (bfd *abfd,
                 if (irel->r_offset + 3 < sec->size)
                   {
                     next_insn_msb =
-                        bfd_get_8 (abfd, contents + irel->r_offset + 3);
+		      bfd_get_8 (abfd, contents + irel->r_offset + 3);
                     next_insn_lsb =
-                        bfd_get_8 (abfd, contents + irel->r_offset + 2);
+		      bfd_get_8 (abfd, contents + irel->r_offset + 2);
                   }
 
 		if ((0x95 == next_insn_msb) && (0x08 == next_insn_lsb))
@@ -1909,9 +1954,9 @@ elf32_avr_relax_section (bfd *abfd,
                 if (irel->r_offset + 5 < sec->size)
                   {
                     next_insn_msb =
-                        bfd_get_8 (abfd, contents + irel->r_offset + 5);
+		      bfd_get_8 (abfd, contents + irel->r_offset + 5);
                     next_insn_lsb =
-                        bfd_get_8 (abfd, contents + irel->r_offset + 4);
+		      bfd_get_8 (abfd, contents + irel->r_offset + 4);
                   }
 
                 if ((0x95 == next_insn_msb) && (0x08 == next_insn_lsb))
@@ -1946,11 +1991,11 @@ elf32_avr_relax_section (bfd *abfd,
                 if (irel->r_offset + insn_size + 1 < sec->size)
                   {
                     next_insn_msb =
-                        bfd_get_8 (abfd, contents + irel->r_offset
-                                         + insn_size + 1);
+		      bfd_get_8 (abfd, contents + irel->r_offset
+				 + insn_size + 1);
                     next_insn_lsb =
-                        bfd_get_8 (abfd, contents + irel->r_offset
-                                         + insn_size);
+		      bfd_get_8 (abfd, contents + irel->r_offset
+				 + insn_size);
                   }
 
                 if ((0x95 == next_insn_msb) && (0x08 == next_insn_lsb))
@@ -1977,9 +2022,9 @@ elf32_avr_relax_section (bfd *abfd,
                         unsigned char preceeding_msb;
                         unsigned char preceeding_lsb;
                         preceeding_msb =
-                            bfd_get_8 (abfd, contents + irel->r_offset - 1);
+			  bfd_get_8 (abfd, contents + irel->r_offset - 1);
                         preceeding_lsb =
-                            bfd_get_8 (abfd, contents + irel->r_offset - 2);
+			  bfd_get_8 (abfd, contents + irel->r_offset - 2);
 
                         /* sbic.  */
                         if (0x99 == preceeding_msb)
@@ -1991,12 +2036,12 @@ elf32_avr_relax_section (bfd *abfd,
 
                         /* sbrc */
                         if ((0xfc == (preceeding_msb & 0xfe)
-                            && (0x00 == (preceeding_lsb & 0x08))))
+			     && (0x00 == (preceeding_lsb & 0x08))))
                           there_is_preceeding_non_skip_insn = 0;
 
                         /* sbrs */
                         if ((0xfe == (preceeding_msb & 0xfe)
-                            && (0x00 == (preceeding_lsb & 0x08))))
+			     && (0x00 == (preceeding_lsb & 0x08))))
                           there_is_preceeding_non_skip_insn = 0;
 
                         /* cpse */
@@ -2024,7 +2069,7 @@ elf32_avr_relax_section (bfd *abfd,
 
                         int deleting_ret_is_safe = 1;
                         unsigned int section_offset_of_ret_insn =
-                                          irel->r_offset + insn_size;
+			  irel->r_offset + insn_size;
                         Elf_Internal_Sym *isym, *isymend;
                         unsigned int sec_shndx;
 
@@ -2034,146 +2079,142 @@ elf32_avr_relax_section (bfd *abfd,
                         /* Check for local symbols.  */
                         isym = (Elf_Internal_Sym *) symtab_hdr->contents;
                         isymend = isym + symtab_hdr->sh_info;
-                        for (; isym < isymend; isym++)
-                         {
-                           if (isym->st_value == section_offset_of_ret_insn
-                               && isym->st_shndx == sec_shndx)
-                             {
-                               deleting_ret_is_safe = 0;
-                               if (debug_relax)
-                                 printf ("local label prevents deletion of ret "
-                                         "insn at address 0x%x\n",
-                                         (int) dot + insn_size);
-                             }
-                         }
+			/* PR 6019: There may not be any local symbols.  */
+                        for (; isym != NULL && isym < isymend; isym++)
+			  {
+			    if (isym->st_value == section_offset_of_ret_insn
+				&& isym->st_shndx == sec_shndx)
+			      {
+				deleting_ret_is_safe = 0;
+				if (debug_relax)
+				  printf ("local label prevents deletion of ret "
+					  "insn at address 0x%x\n",
+					  (int) dot + insn_size);
+			      }
+			  }
 
-                         /* Now check for global symbols.  */
-                         {
-                           int symcount;
-                           struct elf_link_hash_entry **sym_hashes;
-                           struct elf_link_hash_entry **end_hashes;
+			/* Now check for global symbols.  */
+			{
+			  int symcount;
+			  struct elf_link_hash_entry **sym_hashes;
+			  struct elf_link_hash_entry **end_hashes;
 
-                           symcount = (symtab_hdr->sh_size
-                                       / sizeof (Elf32_External_Sym)
-                                       - symtab_hdr->sh_info);
-                           sym_hashes = elf_sym_hashes (abfd);
-                           end_hashes = sym_hashes + symcount;
-                           for (; sym_hashes < end_hashes; sym_hashes++)
-                            {
-                              struct elf_link_hash_entry *sym_hash =
-                                                                 *sym_hashes;
-                              if ((sym_hash->root.type == bfd_link_hash_defined
-                                  || sym_hash->root.type ==
+			  symcount = (symtab_hdr->sh_size
+				      / sizeof (Elf32_External_Sym)
+				      - symtab_hdr->sh_info);
+			  sym_hashes = elf_sym_hashes (abfd);
+			  end_hashes = sym_hashes + symcount;
+			  for (; sym_hashes < end_hashes; sym_hashes++)
+			    {
+			      struct elf_link_hash_entry *sym_hash =
+				*sym_hashes;
+			      if ((sym_hash->root.type == bfd_link_hash_defined
+				   || sym_hash->root.type ==
 				   bfd_link_hash_defweak)
-                                  && sym_hash->root.u.def.section == sec
-                                  && sym_hash->root.u.def.value == section_offset_of_ret_insn)
-                                {
-                                  deleting_ret_is_safe = 0;
-                                  if (debug_relax)
-                                    printf ("global label prevents deletion of "
-                                            "ret insn at address 0x%x\n",
-                                            (int) dot + insn_size);
-                                }
-                            }
-                         }
-                         /* Now we check for relocations pointing to ret.  */
-                         {
-                           Elf_Internal_Rela *irel;
-                           Elf_Internal_Rela *relend;
-                           Elf_Internal_Shdr *symtab_hdr;
+				  && sym_hash->root.u.def.section == sec
+				  && sym_hash->root.u.def.value == section_offset_of_ret_insn)
+				{
+				  deleting_ret_is_safe = 0;
+				  if (debug_relax)
+				    printf ("global label prevents deletion of "
+					    "ret insn at address 0x%x\n",
+					    (int) dot + insn_size);
+				}
+			    }
+			}
+			/* Now we check for relocations pointing to ret.  */
+			{
+			  Elf_Internal_Rela *rel;
+			  Elf_Internal_Rela *relend;
 
-                           symtab_hdr = &elf_tdata (abfd)->symtab_hdr;
-                           relend = elf_section_data (sec)->relocs
-                                    + sec->reloc_count;
+			  relend = elf_section_data (sec)->relocs
+			    + sec->reloc_count;
 
-                           for (irel = elf_section_data (sec)->relocs;
-                                irel < relend; irel++)
-                             {
-                               bfd_vma reloc_target = 0;
-                               bfd_vma symval;
-                               Elf_Internal_Sym *isymbuf = NULL;
+			  for (rel = elf_section_data (sec)->relocs;
+			       rel < relend; rel++)
+			    {
+			      bfd_vma reloc_target = 0;
 
-                               /* Read this BFD's local symbols if we haven't
-                                  done so already.  */
-                               if (isymbuf == NULL && symtab_hdr->sh_info != 0)
-                                 {
-                                   isymbuf = (Elf_Internal_Sym *)
-                                             symtab_hdr->contents;
-                                   if (isymbuf == NULL)
-                                     isymbuf = bfd_elf_get_elf_syms
-				       (abfd,
-					symtab_hdr,
-					symtab_hdr->sh_info, 0,
-					NULL, NULL, NULL);
-                                   if (isymbuf == NULL)
-                                     break;
-                                  }
+			      /* Read this BFD's local symbols if we haven't
+				 done so already.  */
+			      if (isymbuf == NULL && symtab_hdr->sh_info != 0)
+				{
+				  isymbuf = (Elf_Internal_Sym *)
+				    symtab_hdr->contents;
+				  if (isymbuf == NULL)
+				    isymbuf = bfd_elf_get_elf_syms
+				      (abfd,
+				       symtab_hdr,
+				       symtab_hdr->sh_info, 0,
+				       NULL, NULL, NULL);
+				  if (isymbuf == NULL)
+				    break;
+				}
 
-                               /* Get the value of the symbol referred to
-                                  by the reloc.  */
-                               if (ELF32_R_SYM (irel->r_info)
-                                   < symtab_hdr->sh_info)
-                                 {
-                                   /* A local symbol.  */
-                                   Elf_Internal_Sym *isym;
-                                   asection *sym_sec;
+			      /* Get the value of the symbol referred to
+				 by the reloc.  */
+			      if (ELF32_R_SYM (rel->r_info)
+				  < symtab_hdr->sh_info)
+				{
+				  /* A local symbol.  */
+				  asection *sym_sec;
 
-                                   isym = isymbuf
-                                          + ELF32_R_SYM (irel->r_info);
-                                   sym_sec = bfd_section_from_elf_index
-				     (abfd, isym->st_shndx);
-                                   symval = isym->st_value;
+				  isym = isymbuf
+				    + ELF32_R_SYM (rel->r_info);
+				  sym_sec = bfd_section_from_elf_index
+				    (abfd, isym->st_shndx);
+				  symval = isym->st_value;
 
-                                   /* If the reloc is absolute, it will not
-                                      have a symbol or section associated
-                                      with it.  */
+				  /* If the reloc is absolute, it will not
+				     have a symbol or section associated
+				     with it.  */
 
-                                   if (sym_sec)
-                                     {
-                                       symval +=
-                                           sym_sec->output_section->vma
-                                           + sym_sec->output_offset;
-                                       reloc_target = symval + irel->r_addend;
-                                     }
-                                   else
-                                     {
-                                       reloc_target = symval + irel->r_addend;
-                                       /* Reference symbol is absolute.  */
-                                     }
-                                 }
-			       /* else ... reference symbol is extern.  */
+				  if (sym_sec)
+				    {
+				      symval +=
+					sym_sec->output_section->vma
+					+ sym_sec->output_offset;
+				      reloc_target = symval + rel->r_addend;
+				    }
+				  else
+				    {
+				      reloc_target = symval + rel->r_addend;
+				      /* Reference symbol is absolute.  */
+				    }
+				}
+			      /* else ... reference symbol is extern.  */
 
-                               if (address_of_ret == reloc_target)
-                                 {
-                                   deleting_ret_is_safe = 0;
-                                   if (debug_relax)
-                                     printf ("ret from "
-                                             "rjmp/jmp ret sequence at address"
-                                             " 0x%x could not be deleted. ret"
-                                             " is target of a relocation.\n",
-                                             (int) address_of_ret);
-                                 }
-                             }
-                         }
+			      if (address_of_ret == reloc_target)
+				{
+				  deleting_ret_is_safe = 0;
+				  if (debug_relax)
+				    printf ("ret from "
+					    "rjmp/jmp ret sequence at address"
+					    " 0x%x could not be deleted. ret"
+					    " is target of a relocation.\n",
+					    (int) address_of_ret);
+				}
+			    }
+			}
 
-                         if (deleting_ret_is_safe)
-                           {
-                             if (debug_relax)
-                               printf ("unreachable ret instruction "
-                                       "at address 0x%x deleted.\n",
-                                       (int) dot + insn_size);
+			if (deleting_ret_is_safe)
+			  {
+			    if (debug_relax)
+			      printf ("unreachable ret instruction "
+				      "at address 0x%x deleted.\n",
+				      (int) dot + insn_size);
 
-                             /* Delete two bytes of data.  */
-                             if (!elf32_avr_relax_delete_bytes (abfd, sec,
-                                        irel->r_offset + insn_size, 2))
-                               goto error_return;
+			    /* Delete two bytes of data.  */
+			    if (!elf32_avr_relax_delete_bytes (abfd, sec,
+							       irel->r_offset + insn_size, 2))
+			      goto error_return;
 
-                             /* That will change things, so, we should relax
-                                again. Note that this is not required, and it
-                                may be slow.  */
-                             *again = TRUE;
-                             break;
-                           }
+			    /* That will change things, so, we should relax
+			       again. Note that this is not required, and it
+			       may be slow.  */
+			    *again = TRUE;
+			    break;
+			  }
                       }
 
                   }
@@ -2526,7 +2567,7 @@ elf32_avr_setup_section_lists (bfd *output_bfd,
   asection *section;
   asection **input_list, **list;
   bfd_size_type amt;
-  struct elf32_avr_link_hash_table *htab = avr_link_hash_table(info);
+  struct elf32_avr_link_hash_table *htab = avr_link_hash_table (info);
 
   if (htab == NULL || htab->no_stubs)
     return 0;
@@ -2589,6 +2630,7 @@ get_local_syms (bfd *input_bfd, struct bfd_link_info *info)
   unsigned int bfd_indx;
   Elf_Internal_Sym *local_syms, **all_local_syms;
   struct elf32_avr_link_hash_table *htab = avr_link_hash_table (info);
+  bfd_size_type amt;
 
   if (htab == NULL)
     return -1;
@@ -2596,7 +2638,7 @@ get_local_syms (bfd *input_bfd, struct bfd_link_info *info)
   /* We want to read in symbol extension records only once.  To do this
      we need to read in the local symbols in parallel and save them for
      later use; so hold pointers to the local symbols in an array.  */
-  bfd_size_type amt = sizeof (Elf_Internal_Sym *) * htab->bfd_count;
+  amt = sizeof (Elf_Internal_Sym *) * htab->bfd_count;
   all_local_syms = bfd_zmalloc (amt);
   htab->all_local_syms = all_local_syms;
   if (all_local_syms == NULL)
@@ -2757,15 +2799,20 @@ elf32_avr_size_stubs (bfd *output_bfd,
                       /* It's a local symbol.  */
                       Elf_Internal_Sym *sym;
                       Elf_Internal_Shdr *hdr;
+		      unsigned int shndx;
 
                       sym = local_syms + r_indx;
-                      hdr = elf_elfsections (input_bfd)[sym->st_shndx];
-                      sym_sec = hdr->bfd_section;
                       if (ELF_ST_TYPE (sym->st_info) != STT_SECTION)
                         sym_value = sym->st_value;
-                      destination = (sym_value + irela->r_addend
-                                     + sym_sec->output_offset
-                                     + sym_sec->output_section->vma);
+		      shndx = sym->st_shndx;
+		      if (shndx < elf_numsections (input_bfd))
+			{
+			  hdr = elf_elfsections (input_bfd)[shndx];
+			  sym_sec = hdr->bfd_section;
+			  destination = (sym_value + irela->r_addend
+					 + sym_sec->output_offset
+					 + sym_sec->output_section->vma);
+			}
                     }
                   else
                     {

@@ -1,6 +1,6 @@
 /* Definitions for targets without shared libraries for GDB, the GNU Debugger.
 
-   Copyright (C) 2004, 2007, 2008 Free Software Foundation, Inc.
+   Copyright (C) 2004, 2007, 2008, 2009, 2010 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -32,7 +32,7 @@ null_special_symbol_handling (void)
 }
 
 static void
-null_solib_create_inferior_hook (void)
+null_solib_create_inferior_hook (int from_tty)
 {
 }
 
@@ -50,7 +50,7 @@ null_free_so (struct so_list *so)
 
 static void
 null_relocate_section_addresses (struct so_list *so,
-                                 struct section_table *sec)
+                                 struct target_section *sec)
 {
 }
 
@@ -81,6 +81,7 @@ _initialize_null_solib (void)
   null_so_ops.current_sos = null_current_sos;
   null_so_ops.open_symbol_file_object = null_open_symbol_file_object;
   null_so_ops.in_dynsym_resolve_code = null_in_dynsym_resolve_code;
+  null_so_ops.bfd_open = solib_bfd_open;
 
   /* Set current_target_so_ops to null_so_ops if not already set.  */
   if (current_target_so_ops == 0)

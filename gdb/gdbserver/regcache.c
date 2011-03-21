@@ -1,5 +1,5 @@
 /* Register support routines for the remote server for GDB.
-   Copyright (C) 2001, 2002, 2004, 2005, 2007, 2008
+   Copyright (C) 2001, 2002, 2004, 2005, 2007, 2008, 2009, 2010
    Free Software Foundation, Inc.
 
    This file is part of GDB.
@@ -23,16 +23,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* The private data for the register cache.  Note that we have one
-   per inferior; this is primarily for simplicity, as the performance
-   benefit is minimal.  */
-
-struct inferior_regcache_data
-{
-  int registers_valid;
-  unsigned char *registers;
-};
-
 static int register_bytes;
 
 static struct reg *reg_defs;
@@ -40,20 +30,23 @@ static int num_registers;
 
 const char **gdbserver_expedite_regs;
 
-static struct inferior_regcache_data *
-get_regcache (struct thread_info *inf, int fetch)
+struct regcache *
+get_thread_regcache (struct thread_info *thread, int fetch)
 {
-  struct inferior_regcache_data *regcache;
+  struct regcache *regcache;
 
-  regcache = (struct inferior_regcache_data *) inferior_regcache_data (inf);
+  regcache = (struct regcache *) inferior_regcache_data (thread);
 
   if (regcache == NULL)
     fatal ("no register cache");
 
-  /* FIXME - fetch registers for INF */
   if (fetch && regcache->registers_valid == 0)
     {
-      fetch_inferior_registers (0);
+      struct thread_info *saved_inferior = current_inferior;
+
+      current_inferior = thread;
+      fetch_inferior_registers (regcache, -1);
+      current_inferior = saved_inferior;
       regcache->registers_valid = 1;
     }
 
@@ -64,16 +57,16 @@ void
 regcache_invalidate_one (struct inferior_list_entry *entry)
 {
   struct thread_info *thread = (struct thread_info *) entry;
-  struct inferior_regcache_data *regcache;
+  struct regcache *regcache;
 
-  regcache = (struct inferior_regcache_data *) inferior_regcache_data (thread);
+  regcache = (struct regcache *) inferior_regcache_data (thread);
 
   if (regcache->registers_valid)
     {
       struct thread_info *saved_inferior = current_inferior;
 
       current_inferior = thread;
-      store_inferior_registers (-1);
+      store_inferior_registers (regcache, -1);
       current_inferior = saved_inferior;
     }
 
@@ -81,30 +74,26 @@ regcache_invalidate_one (struct inferior_list_entry *entry)
 }
 
 void
-regcache_invalidate ()
+regcache_invalidate (void)
 {
   for_each_inferior (&all_threads, regcache_invalidate_one);
 }
 
-int
-registers_length (void)
-{
-  return 2 * register_bytes;
-}
-
-void *
+struct regcache *
 new_register_cache (void)
 {
-  struct inferior_regcache_data *regcache;
+  struct regcache *regcache;
 
-  regcache = malloc (sizeof (*regcache));
+  if (register_bytes == 0)
+    return NULL; /* The architecture hasn't been initialized yet.  */
 
-  /* Make sure to zero-initialize the register cache when it is created,
-     in case there are registers the target never fetches.  This way they'll
-     read as zero instead of garbage.  */
-  regcache->registers = calloc (1, register_bytes);
-  if (regcache->registers == NULL)
-    fatal ("Could not allocate register cache.");
+  regcache = xmalloc (sizeof (*regcache));
+
+  /* Make sure to zero-initialize the register cache when it is
+     created, in case there are registers the target never
+     fetches.  This way they'll read as zero instead of
+     garbage.  */
+  regcache->registers = xcalloc (1, register_bytes);
 
   regcache->registers_valid = 0;
 
@@ -112,20 +101,31 @@ new_register_cache (void)
 }
 
 void
-free_register_cache (void *regcache_p)
+free_register_cache (struct regcache *regcache)
 {
-  struct inferior_regcache_data *regcache
-    = (struct inferior_regcache_data *) regcache_p;
+  if (regcache)
+    {
+      free (regcache->registers);
+      free (regcache);
+    }
+}
 
-  free (regcache->registers);
-  free (regcache);
+static void
+realloc_register_cache (struct inferior_list_entry *thread_p)
+{
+  struct thread_info *thread = (struct thread_info *) thread_p;
+  struct regcache *regcache
+    = (struct regcache *) inferior_regcache_data (thread);
+
+  free_register_cache (regcache);
+  set_inferior_regcache_data (thread, new_register_cache ());
 }
 
 void
 set_register_cache (struct reg *regs, int n)
 {
   int offset, i;
-  
+
   reg_defs = regs;
   num_registers = n;
 
@@ -137,25 +137,33 @@ set_register_cache (struct reg *regs, int n)
     }
 
   register_bytes = offset / 8;
+
+  /* Make sure PBUFSIZ is large enough to hold a full register packet.  */
+  if (2 * register_bytes + 32 > PBUFSIZ)
+    fatal ("Register packet size exceeds PBUFSIZ.");
+
+  /* Re-allocate all pre-existing register caches.  */
+  for_each_inferior (&all_threads, realloc_register_cache);
 }
 
 void
-registers_to_string (char *buf)
+registers_to_string (struct regcache *regcache, char *buf)
 {
-  unsigned char *registers = get_regcache (current_inferior, 1)->registers;
+  unsigned char *registers = regcache->registers;
 
   convert_int_to_ascii (registers, buf, register_bytes);
 }
 
 void
-registers_from_string (char *buf)
+registers_from_string (struct regcache *regcache, char *buf)
 {
   int len = strlen (buf);
-  unsigned char *registers = get_regcache (current_inferior, 1)->registers;
+  unsigned char *registers = regcache->registers;
 
   if (len != register_bytes * 2)
     {
-      warning ("Wrong sized register packet (expected %d bytes, got %d)", 2*register_bytes, len);
+      warning ("Wrong sized register packet (expected %d bytes, got %d)",
+	       2*register_bytes, len);
       if (len > register_bytes * 2)
 	len = register_bytes * 2;
     }
@@ -199,40 +207,43 @@ register_size (int n)
 }
 
 static unsigned char *
-register_data (int n, int fetch)
+register_data (struct regcache *regcache, int n, int fetch)
 {
-  unsigned char *registers
-    = get_regcache (current_inferior, fetch)->registers;
-
-  return registers + (reg_defs[n].offset / 8);
+  return regcache->registers + (reg_defs[n].offset / 8);
 }
 
 void
-supply_register (int n, const void *buf)
+supply_register (struct regcache *regcache, int n, const void *buf)
 {
-  memcpy (register_data (n, 0), buf, register_size (n));
+  if (buf)
+    memcpy (register_data (regcache, n, 0), buf, register_size (n));
+  else
+    memset (register_data (regcache, n, 0), 0, register_size (n));
 }
 
 void
-supply_register_by_name (const char *name, const void *buf)
+supply_register_by_name (struct regcache *regcache,
+			 const char *name, const void *buf)
 {
-  supply_register (find_regno (name), buf);
+  supply_register (regcache, find_regno (name), buf);
 }
 
 void
-collect_register (int n, void *buf)
+collect_register (struct regcache *regcache, int n, void *buf)
 {
-  memcpy (buf, register_data (n, 1), register_size (n));
+  memcpy (buf, register_data (regcache, n, 1), register_size (n));
 }
 
 void
-collect_register_as_string (int n, char *buf)
+collect_register_as_string (struct regcache *regcache, int n, char *buf)
 {
-  convert_int_to_ascii (register_data (n, 1), buf, register_size (n));
+  convert_int_to_ascii (register_data (regcache, n, 1),
+			buf, register_size (n));
 }
 
 void
-collect_register_by_name (const char *name, void *buf)
+collect_register_by_name (struct regcache *regcache,
+			  const char *name, void *buf)
 {
-  collect_register (find_regno (name), buf);
+  collect_register (regcache, find_regno (name), buf);
 }

@@ -1,6 +1,6 @@
 /* TUI Interpreter definitions for GDB, the GNU debugger.
 
-   Copyright (C) 2003, 2007, 2008 Free Software Foundation, Inc.
+   Copyright (C) 2003, 2007, 2008, 2009, 2010 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -48,7 +48,7 @@ tui_exit (void)
 /* These implement the TUI interpreter.  */
 
 static void *
-tui_init (void)
+tui_init (int top_level)
 {
   /* Install exit handler to leave the screen in a good shape.  */
   atexit (tui_exit);
@@ -57,7 +57,8 @@ tui_init (void)
 
   tui_initialize_io ();
   tui_initialize_win ();
-  tui_initialize_readline ();
+  if (ui_file_isatty (gdb_stdout))
+    tui_initialize_readline ();
 
   return NULL;
 }
@@ -164,6 +165,10 @@ tui_command_loop (void *data)
       
       if (result == 0)
 	{
+	  /* If any exception escaped to here, we better enable
+	     stdin.  Otherwise, any command that calls async_disable_stdin,
+	     and then throws, will leave stdin inoperable.  */
+	  async_enable_stdin ();
 	  /* FIXME: this should really be a call to a hook that is
 	     interface specific, because interfaces can display the
 	     prompt in their own way.  */
@@ -185,6 +190,9 @@ tui_command_loop (void *data)
      to listen to.  So we exit GDB.  */
   return;
 }
+
+/* Provide a prototype to silence -Wmissing-prototypes.  */
+extern initialize_file_ftype _initialize_tui_interp;
 
 void
 _initialize_tui_interp (void)

@@ -142,7 +142,7 @@
 
 
 /* Copy the first part of user declarations.  */
-#line 37 "objc-exp.y"
+#line 35 "objc-exp.y"
 
 
 #include "defs.h"
@@ -162,6 +162,8 @@
 #include "top.h"
 #include "completer.h" /* For skip_quoted().  */
 #include "block.h"
+
+#define parse_type builtin_type (parse_gdbarch)
 
 /* Remap normal yacc parser interface names (yyparse, yylex, yyerror,
    etc), as well as gratuitiously global symbol names, so we can have
@@ -267,7 +269,7 @@ typedef union YYSTYPE {
     int *ivec;
   } YYSTYPE;
 /* Line 191 of yacc.c.  */
-#line 271 "objc-exp.c.tmp"
+#line 273 "objc-exp.c.tmp"
 # define yystype YYSTYPE /* obsolescent; will be withdrawn */
 # define YYSTYPE_IS_DECLARED 1
 # define YYSTYPE_IS_TRIVIAL 1
@@ -284,12 +286,12 @@ parse_number (char *, int, int, YYSTYPE *);
 
 
 /* Line 214 of yacc.c.  */
-#line 288 "objc-exp.c.tmp"
+#line 290 "objc-exp.c.tmp"
 
 #if ! defined (yyoverflow) || YYERROR_VERBOSE
 
 # ifndef YYFREE
-#  define YYFREE free
+#  define YYFREE xfree
 # endif
 # ifndef YYMALLOC
 #  define YYMALLOC xmalloc
@@ -521,19 +523,19 @@ static const unsigned short yyrline[] =
 {
        0,   231,   231,   232,   235,   242,   243,   248,   252,   256,
      260,   264,   268,   272,   276,   280,   284,   288,   294,   301,
-     305,   312,   320,   324,   333,   332,   354,   353,   369,   368,
-     377,   379,   382,   383,   386,   388,   390,   397,   394,   404,
-     408,   411,   415,   419,   422,   429,   435,   441,   447,   451,
-     455,   459,   463,   467,   471,   475,   479,   483,   487,   491,
-     495,   499,   503,   507,   511,   515,   519,   523,   527,   531,
-     537,   544,   555,   562,   565,   569,   576,   584,   609,   617,
-     634,   645,   661,   674,   699,   700,   734,   793,   799,   800,
-     801,   803,   805,   809,   811,   813,   815,   817,   820,   822,
-     827,   834,   836,   840,   842,   846,   848,   860,   864,   866,
-     874,   876,   878,   880,   882,   884,   886,   888,   890,   892,
-     894,   896,   898,   900,   903,   906,   909,   912,   914,   916,
-     918,   920,   927,   928,   931,   932,   938,   944,   953,   958,
-     965,   966,   967,   968,   969,   972,   973
+     305,   312,   320,   324,   333,   332,   355,   354,   370,   369,
+     378,   380,   383,   384,   387,   389,   391,   398,   395,   405,
+     409,   412,   416,   420,   423,   430,   436,   442,   448,   452,
+     456,   460,   464,   468,   472,   476,   480,   484,   488,   492,
+     496,   500,   504,   508,   512,   516,   520,   524,   528,   532,
+     538,   545,   556,   563,   566,   570,   577,   585,   610,   618,
+     635,   645,   660,   673,   698,   699,   727,   782,   788,   789,
+     790,   792,   794,   798,   800,   802,   804,   806,   809,   811,
+     816,   823,   825,   829,   831,   835,   837,   849,   853,   855,
+     863,   865,   867,   869,   871,   873,   875,   877,   879,   881,
+     883,   885,   887,   889,   892,   895,   898,   901,   905,   907,
+     911,   913,   920,   921,   924,   925,   931,   937,   946,   951,
+     958,   959,   960,   961,   962,   965,   966
 };
 #endif
 
@@ -1616,12 +1618,13 @@ yyreduce:
     {
 			  CORE_ADDR class;
 
-			  class = lookup_objc_class (copy_name (yyvsp[0].tsym.stoken));
+			  class = lookup_objc_class (parse_gdbarch,
+						     copy_name (yyvsp[0].tsym.stoken));
 			  if (class == 0)
 			    error ("%s is not an ObjC Class", 
 				   copy_name (yyvsp[0].tsym.stoken));
 			  write_exp_elt_opcode (OP_LONG);
-			  write_exp_elt_type (builtin_type_int);
+			  write_exp_elt_type (parse_type->builtin_int);
 			  write_exp_elt_longcst ((LONGEST) class);
 			  write_exp_elt_opcode (OP_LONG);
 			  start_msglist();
@@ -1629,7 +1632,7 @@ yyreduce:
     break;
 
   case 25:
-#line 347 "objc-exp.y"
+#line 348 "objc-exp.y"
     { write_exp_elt_opcode (OP_OBJC_MSGCALL);
 			  end_msglist();
 			  write_exp_elt_opcode (OP_OBJC_MSGCALL); 
@@ -1637,10 +1640,10 @@ yyreduce:
     break;
 
   case 26:
-#line 354 "objc-exp.y"
+#line 355 "objc-exp.y"
     {
 			  write_exp_elt_opcode (OP_LONG);
-			  write_exp_elt_type (builtin_type_int);
+			  write_exp_elt_type (parse_type->builtin_int);
 			  write_exp_elt_longcst ((LONGEST) yyvsp[0].class.class);
 			  write_exp_elt_opcode (OP_LONG);
 			  start_msglist();
@@ -1648,7 +1651,7 @@ yyreduce:
     break;
 
   case 27:
-#line 362 "objc-exp.y"
+#line 363 "objc-exp.y"
     { write_exp_elt_opcode (OP_OBJC_MSGCALL);
 			  end_msglist();
 			  write_exp_elt_opcode (OP_OBJC_MSGCALL); 
@@ -1656,12 +1659,12 @@ yyreduce:
     break;
 
   case 28:
-#line 369 "objc-exp.y"
+#line 370 "objc-exp.y"
     { start_msglist(); }
     break;
 
   case 29:
-#line 371 "objc-exp.y"
+#line 372 "objc-exp.y"
     { write_exp_elt_opcode (OP_OBJC_MSGCALL);
 			  end_msglist();
 			  write_exp_elt_opcode (OP_OBJC_MSGCALL); 
@@ -1669,59 +1672,59 @@ yyreduce:
     break;
 
   case 30:
-#line 378 "objc-exp.y"
+#line 379 "objc-exp.y"
     { add_msglist(&yyvsp[0].sval, 0); }
     break;
 
   case 34:
-#line 387 "objc-exp.y"
+#line 388 "objc-exp.y"
     { add_msglist(&yyvsp[-2].sval, 1); }
     break;
 
   case 35:
-#line 389 "objc-exp.y"
+#line 390 "objc-exp.y"
     { add_msglist(0, 1);   }
     break;
 
   case 36:
-#line 391 "objc-exp.y"
+#line 392 "objc-exp.y"
     { add_msglist(0, 0);   }
     break;
 
   case 37:
-#line 397 "objc-exp.y"
+#line 398 "objc-exp.y"
     { start_arglist (); }
     break;
 
   case 38:
-#line 399 "objc-exp.y"
+#line 400 "objc-exp.y"
     { write_exp_elt_opcode (OP_FUNCALL);
 			  write_exp_elt_longcst ((LONGEST) end_arglist ());
 			  write_exp_elt_opcode (OP_FUNCALL); }
     break;
 
   case 39:
-#line 405 "objc-exp.y"
+#line 406 "objc-exp.y"
     { start_arglist (); }
     break;
 
   case 41:
-#line 412 "objc-exp.y"
+#line 413 "objc-exp.y"
     { arglist_len = 1; }
     break;
 
   case 42:
-#line 416 "objc-exp.y"
+#line 417 "objc-exp.y"
     { arglist_len++; }
     break;
 
   case 43:
-#line 420 "objc-exp.y"
+#line 421 "objc-exp.y"
     { yyval.lval = end_arglist () - 1; }
     break;
 
   case 44:
-#line 423 "objc-exp.y"
+#line 424 "objc-exp.y"
     { write_exp_elt_opcode (OP_ARRAY);
 			  write_exp_elt_longcst ((LONGEST) 0);
 			  write_exp_elt_longcst ((LONGEST) yyvsp[0].lval);
@@ -1729,138 +1732,138 @@ yyreduce:
     break;
 
   case 45:
-#line 430 "objc-exp.y"
+#line 431 "objc-exp.y"
     { write_exp_elt_opcode (UNOP_MEMVAL);
 			  write_exp_elt_type (yyvsp[-2].tval);
 			  write_exp_elt_opcode (UNOP_MEMVAL); }
     break;
 
   case 46:
-#line 436 "objc-exp.y"
+#line 437 "objc-exp.y"
     { write_exp_elt_opcode (UNOP_CAST);
 			  write_exp_elt_type (yyvsp[-2].tval);
 			  write_exp_elt_opcode (UNOP_CAST); }
     break;
 
   case 47:
-#line 442 "objc-exp.y"
+#line 443 "objc-exp.y"
     { }
     break;
 
   case 48:
-#line 448 "objc-exp.y"
+#line 449 "objc-exp.y"
     { write_exp_elt_opcode (BINOP_REPEAT); }
     break;
 
   case 49:
-#line 452 "objc-exp.y"
+#line 453 "objc-exp.y"
     { write_exp_elt_opcode (BINOP_MUL); }
     break;
 
   case 50:
-#line 456 "objc-exp.y"
+#line 457 "objc-exp.y"
     { write_exp_elt_opcode (BINOP_DIV); }
     break;
 
   case 51:
-#line 460 "objc-exp.y"
+#line 461 "objc-exp.y"
     { write_exp_elt_opcode (BINOP_REM); }
     break;
 
   case 52:
-#line 464 "objc-exp.y"
+#line 465 "objc-exp.y"
     { write_exp_elt_opcode (BINOP_ADD); }
     break;
 
   case 53:
-#line 468 "objc-exp.y"
+#line 469 "objc-exp.y"
     { write_exp_elt_opcode (BINOP_SUB); }
     break;
 
   case 54:
-#line 472 "objc-exp.y"
+#line 473 "objc-exp.y"
     { write_exp_elt_opcode (BINOP_LSH); }
     break;
 
   case 55:
-#line 476 "objc-exp.y"
+#line 477 "objc-exp.y"
     { write_exp_elt_opcode (BINOP_RSH); }
     break;
 
   case 56:
-#line 480 "objc-exp.y"
+#line 481 "objc-exp.y"
     { write_exp_elt_opcode (BINOP_EQUAL); }
     break;
 
   case 57:
-#line 484 "objc-exp.y"
+#line 485 "objc-exp.y"
     { write_exp_elt_opcode (BINOP_NOTEQUAL); }
     break;
 
   case 58:
-#line 488 "objc-exp.y"
+#line 489 "objc-exp.y"
     { write_exp_elt_opcode (BINOP_LEQ); }
     break;
 
   case 59:
-#line 492 "objc-exp.y"
+#line 493 "objc-exp.y"
     { write_exp_elt_opcode (BINOP_GEQ); }
     break;
 
   case 60:
-#line 496 "objc-exp.y"
+#line 497 "objc-exp.y"
     { write_exp_elt_opcode (BINOP_LESS); }
     break;
 
   case 61:
-#line 500 "objc-exp.y"
+#line 501 "objc-exp.y"
     { write_exp_elt_opcode (BINOP_GTR); }
     break;
 
   case 62:
-#line 504 "objc-exp.y"
+#line 505 "objc-exp.y"
     { write_exp_elt_opcode (BINOP_BITWISE_AND); }
     break;
 
   case 63:
-#line 508 "objc-exp.y"
+#line 509 "objc-exp.y"
     { write_exp_elt_opcode (BINOP_BITWISE_XOR); }
     break;
 
   case 64:
-#line 512 "objc-exp.y"
+#line 513 "objc-exp.y"
     { write_exp_elt_opcode (BINOP_BITWISE_IOR); }
     break;
 
   case 65:
-#line 516 "objc-exp.y"
+#line 517 "objc-exp.y"
     { write_exp_elt_opcode (BINOP_LOGICAL_AND); }
     break;
 
   case 66:
-#line 520 "objc-exp.y"
+#line 521 "objc-exp.y"
     { write_exp_elt_opcode (BINOP_LOGICAL_OR); }
     break;
 
   case 67:
-#line 524 "objc-exp.y"
+#line 525 "objc-exp.y"
     { write_exp_elt_opcode (TERNOP_COND); }
     break;
 
   case 68:
-#line 528 "objc-exp.y"
+#line 529 "objc-exp.y"
     { write_exp_elt_opcode (BINOP_ASSIGN); }
     break;
 
   case 69:
-#line 532 "objc-exp.y"
+#line 533 "objc-exp.y"
     { write_exp_elt_opcode (BINOP_ASSIGN_MODIFY);
 			  write_exp_elt_opcode (yyvsp[-1].opcode);
 			  write_exp_elt_opcode (BINOP_ASSIGN_MODIFY); }
     break;
 
   case 70:
-#line 538 "objc-exp.y"
+#line 539 "objc-exp.y"
     { write_exp_elt_opcode (OP_LONG);
 			  write_exp_elt_type (yyvsp[0].typed_val_int.type);
 			  write_exp_elt_longcst ((LONGEST)(yyvsp[0].typed_val_int.val));
@@ -1868,7 +1871,7 @@ yyreduce:
     break;
 
   case 71:
-#line 545 "objc-exp.y"
+#line 546 "objc-exp.y"
     { YYSTYPE val;
 			  parse_number (yyvsp[0].ssym.stoken.ptr, yyvsp[0].ssym.stoken.length, 0, &val);
 			  write_exp_elt_opcode (OP_LONG);
@@ -1879,7 +1882,7 @@ yyreduce:
     break;
 
   case 72:
-#line 556 "objc-exp.y"
+#line 557 "objc-exp.y"
     { write_exp_elt_opcode (OP_DOUBLE);
 			  write_exp_elt_type (yyvsp[0].typed_val_float.type);
 			  write_exp_elt_dblcst (yyvsp[0].typed_val_float.dval);
@@ -1887,7 +1890,7 @@ yyreduce:
     break;
 
   case 75:
-#line 570 "objc-exp.y"
+#line 571 "objc-exp.y"
     {
 			  write_exp_elt_opcode (OP_OBJC_SELECTOR);
 			  write_exp_string (yyvsp[0].sval);
@@ -1895,16 +1898,16 @@ yyreduce:
     break;
 
   case 76:
-#line 577 "objc-exp.y"
+#line 578 "objc-exp.y"
     { write_exp_elt_opcode (OP_LONG);
-			  write_exp_elt_type (builtin_type_int);
+			  write_exp_elt_type (parse_type->builtin_int);
 			  CHECK_TYPEDEF (yyvsp[-1].tval);
 			  write_exp_elt_longcst ((LONGEST) TYPE_LENGTH (yyvsp[-1].tval));
 			  write_exp_elt_opcode (OP_LONG); }
     break;
 
   case 77:
-#line 585 "objc-exp.y"
+#line 586 "objc-exp.y"
     { /* C strings are converted into array
 			     constants with an explicit null byte
 			     added at the end.  Thus the array upper
@@ -1915,12 +1918,12 @@ yyreduce:
 			  while (count-- > 0)
 			    {
 			      write_exp_elt_opcode (OP_LONG);
-			      write_exp_elt_type (builtin_type_char);
+			      write_exp_elt_type (parse_type->builtin_char);
 			      write_exp_elt_longcst ((LONGEST)(*sp++));
 			      write_exp_elt_opcode (OP_LONG);
 			    }
 			  write_exp_elt_opcode (OP_LONG);
-			  write_exp_elt_type (builtin_type_char);
+			  write_exp_elt_type (parse_type->builtin_char);
 			  write_exp_elt_longcst ((LONGEST)'\0');
 			  write_exp_elt_opcode (OP_LONG);
 			  write_exp_elt_opcode (OP_ARRAY);
@@ -1930,14 +1933,14 @@ yyreduce:
     break;
 
   case 78:
-#line 612 "objc-exp.y"
+#line 613 "objc-exp.y"
     { write_exp_elt_opcode (OP_OBJC_NSSTRING);
 			  write_exp_string (yyvsp[0].sval);
 			  write_exp_elt_opcode (OP_OBJC_NSSTRING); }
     break;
 
   case 79:
-#line 618 "objc-exp.y"
+#line 619 "objc-exp.y"
     {
 			  if (yyvsp[0].ssym.sym != 0)
 			      yyval.bval = SYMBOL_BLOCK_VALUE (yyvsp[0].ssym.sym);
@@ -1955,11 +1958,10 @@ yyreduce:
     break;
 
   case 80:
-#line 635 "objc-exp.y"
+#line 636 "objc-exp.y"
     { struct symbol *tem
 			    = lookup_symbol (copy_name (yyvsp[0].sval), yyvsp[-2].bval,
-					     VAR_DOMAIN, (int *) NULL,
-					     (struct symtab **) NULL);
+					     VAR_DOMAIN, (int *) NULL);
 			  if (!tem || SYMBOL_CLASS (tem) != LOC_BLOCK)
 			    error ("No function \"%s\" in specified context.",
 				   copy_name (yyvsp[0].sval));
@@ -1970,8 +1972,7 @@ yyreduce:
 #line 646 "objc-exp.y"
     { struct symbol *sym;
 			  sym = lookup_symbol (copy_name (yyvsp[0].sval), yyvsp[-2].bval,
-					       VAR_DOMAIN, (int *) NULL,
-					       (struct symtab **) NULL);
+					       VAR_DOMAIN, (int *) NULL);
 			  if (sym == 0)
 			    error ("No symbol \"%s\" in specified context.",
 				   copy_name (yyvsp[0].sval));
@@ -1984,7 +1985,7 @@ yyreduce:
     break;
 
   case 82:
-#line 662 "objc-exp.y"
+#line 661 "objc-exp.y"
     {
 			  struct type *type = yyvsp[-2].tval;
 			  if (TYPE_CODE (type) != TYPE_CODE_STRUCT
@@ -2000,7 +2001,7 @@ yyreduce:
     break;
 
   case 83:
-#line 675 "objc-exp.y"
+#line 674 "objc-exp.y"
     {
 			  struct type *type = yyvsp[-3].tval;
 			  struct stoken tmp_token;
@@ -2026,7 +2027,7 @@ yyreduce:
     break;
 
   case 85:
-#line 701 "objc-exp.y"
+#line 700 "objc-exp.y"
     {
 			  char *name = copy_name (yyvsp[0].sval);
 			  struct symbol *sym;
@@ -2034,8 +2035,7 @@ yyreduce:
 
 			  sym =
 			    lookup_symbol (name, (const struct block *) NULL,
-					   VAR_DOMAIN, (int *) NULL,
-					   (struct symtab **) NULL);
+					   VAR_DOMAIN, (int *) NULL);
 			  if (sym)
 			    {
 			      write_exp_elt_opcode (OP_VAR_VALUE);
@@ -2047,21 +2047,16 @@ yyreduce:
 
 			  msymbol = lookup_minimal_symbol (name, NULL, NULL);
 			  if (msymbol != NULL)
-			    {
-			      write_exp_msymbol (msymbol,
-						 lookup_function_type (builtin_type_int),
-						 builtin_type_int);
-			    }
+			    write_exp_msymbol (msymbol);
+			  else if (!have_full_symbols () && !have_partial_symbols ())
+			    error ("No symbol table is loaded.  Use the \"file\" command.");
 			  else
-			    if (!have_full_symbols () && !have_partial_symbols ())
-			      error ("No symbol table is loaded.  Use the \"file\" command.");
-			    else
-			      error ("No symbol \"%s\" in current context.", name);
+			    error ("No symbol \"%s\" in current context.", name);
 			}
     break;
 
   case 86:
-#line 735 "objc-exp.y"
+#line 728 "objc-exp.y"
     { struct symbol *sym = yyvsp[0].ssym.sym;
 
 			  if (sym)
@@ -2104,11 +2099,7 @@ yyreduce:
 			      msymbol =
 				lookup_minimal_symbol (arg, NULL, NULL);
 			      if (msymbol != NULL)
-				{
-				  write_exp_msymbol (msymbol,
-						     lookup_function_type (builtin_type_int),
-						     builtin_type_int);
-				}
+				write_exp_msymbol (msymbol);
 			      else if (!have_full_symbols () && 
 				       !have_partial_symbols ())
 				error ("No symbol table is loaded.  Use the \"file\" command.");
@@ -2120,47 +2111,47 @@ yyreduce:
     break;
 
   case 90:
-#line 802 "objc-exp.y"
+#line 791 "objc-exp.y"
     { yyval.tval = follow_types (yyvsp[-1].tval); }
     break;
 
   case 91:
-#line 804 "objc-exp.y"
+#line 793 "objc-exp.y"
     { yyval.tval = follow_types (yyvsp[-2].tval); }
     break;
 
   case 92:
-#line 806 "objc-exp.y"
+#line 795 "objc-exp.y"
     { yyval.tval = follow_types (yyvsp[-2].tval); }
     break;
 
   case 93:
-#line 810 "objc-exp.y"
+#line 799 "objc-exp.y"
     { push_type (tp_pointer); yyval.voidval = 0; }
     break;
 
   case 94:
-#line 812 "objc-exp.y"
+#line 801 "objc-exp.y"
     { push_type (tp_pointer); yyval.voidval = yyvsp[0].voidval; }
     break;
 
   case 95:
-#line 814 "objc-exp.y"
+#line 803 "objc-exp.y"
     { push_type (tp_reference); yyval.voidval = 0; }
     break;
 
   case 96:
-#line 816 "objc-exp.y"
+#line 805 "objc-exp.y"
     { push_type (tp_reference); yyval.voidval = yyvsp[0].voidval; }
     break;
 
   case 98:
-#line 821 "objc-exp.y"
+#line 810 "objc-exp.y"
     { yyval.voidval = yyvsp[-1].voidval; }
     break;
 
   case 99:
-#line 823 "objc-exp.y"
+#line 812 "objc-exp.y"
     {
 			  push_type_int (yyvsp[0].lval);
 			  push_type (tp_array);
@@ -2168,7 +2159,7 @@ yyreduce:
     break;
 
   case 100:
-#line 828 "objc-exp.y"
+#line 817 "objc-exp.y"
     {
 			  push_type_int (yyvsp[0].lval);
 			  push_type (tp_array);
@@ -2177,42 +2168,42 @@ yyreduce:
     break;
 
   case 101:
-#line 835 "objc-exp.y"
+#line 824 "objc-exp.y"
     { push_type (tp_function); }
     break;
 
   case 102:
-#line 837 "objc-exp.y"
+#line 826 "objc-exp.y"
     { push_type (tp_function); }
     break;
 
   case 103:
-#line 841 "objc-exp.y"
+#line 830 "objc-exp.y"
     { yyval.lval = -1; }
     break;
 
   case 104:
-#line 843 "objc-exp.y"
+#line 832 "objc-exp.y"
     { yyval.lval = yyvsp[-1].typed_val_int.val; }
     break;
 
   case 105:
-#line 847 "objc-exp.y"
+#line 836 "objc-exp.y"
     { yyval.voidval = 0; }
     break;
 
   case 106:
-#line 849 "objc-exp.y"
-    { free (yyvsp[-1].tvec); yyval.voidval = 0; }
+#line 838 "objc-exp.y"
+    { xfree (yyvsp[-1].tvec); yyval.voidval = 0; }
     break;
 
   case 108:
-#line 865 "objc-exp.y"
+#line 854 "objc-exp.y"
     { yyval.tval = yyvsp[0].tsym.type; }
     break;
 
   case 109:
-#line 867 "objc-exp.y"
+#line 856 "objc-exp.y"
     {
 			  if (yyvsp[0].class.type == NULL)
 			    error ("No symbol \"%s\" in current context.", 
@@ -2223,160 +2214,164 @@ yyreduce:
     break;
 
   case 110:
-#line 875 "objc-exp.y"
-    { yyval.tval = builtin_type_int; }
+#line 864 "objc-exp.y"
+    { yyval.tval = parse_type->builtin_int; }
     break;
 
   case 111:
-#line 877 "objc-exp.y"
-    { yyval.tval = builtin_type_long; }
+#line 866 "objc-exp.y"
+    { yyval.tval = parse_type->builtin_long; }
     break;
 
   case 112:
-#line 879 "objc-exp.y"
-    { yyval.tval = builtin_type_short; }
+#line 868 "objc-exp.y"
+    { yyval.tval = parse_type->builtin_short; }
     break;
 
   case 113:
-#line 881 "objc-exp.y"
-    { yyval.tval = builtin_type_long; }
+#line 870 "objc-exp.y"
+    { yyval.tval = parse_type->builtin_long; }
     break;
 
   case 114:
-#line 883 "objc-exp.y"
-    { yyval.tval = builtin_type_unsigned_long; }
+#line 872 "objc-exp.y"
+    { yyval.tval = parse_type->builtin_unsigned_long; }
     break;
 
   case 115:
-#line 885 "objc-exp.y"
-    { yyval.tval = builtin_type_long_long; }
+#line 874 "objc-exp.y"
+    { yyval.tval = parse_type->builtin_long_long; }
     break;
 
   case 116:
-#line 887 "objc-exp.y"
-    { yyval.tval = builtin_type_long_long; }
+#line 876 "objc-exp.y"
+    { yyval.tval = parse_type->builtin_long_long; }
     break;
 
   case 117:
-#line 889 "objc-exp.y"
-    { yyval.tval = builtin_type_unsigned_long_long; }
+#line 878 "objc-exp.y"
+    { yyval.tval = parse_type->builtin_unsigned_long_long; }
     break;
 
   case 118:
-#line 891 "objc-exp.y"
-    { yyval.tval = builtin_type_unsigned_long_long; }
+#line 880 "objc-exp.y"
+    { yyval.tval = parse_type->builtin_unsigned_long_long; }
     break;
 
   case 119:
-#line 893 "objc-exp.y"
-    { yyval.tval = builtin_type_short; }
+#line 882 "objc-exp.y"
+    { yyval.tval = parse_type->builtin_short; }
     break;
 
   case 120:
-#line 895 "objc-exp.y"
-    { yyval.tval = builtin_type_unsigned_short; }
+#line 884 "objc-exp.y"
+    { yyval.tval = parse_type->builtin_unsigned_short; }
     break;
 
   case 121:
-#line 897 "objc-exp.y"
-    { yyval.tval = builtin_type_double; }
+#line 886 "objc-exp.y"
+    { yyval.tval = parse_type->builtin_double; }
     break;
 
   case 122:
-#line 899 "objc-exp.y"
-    { yyval.tval = builtin_type_long_double; }
+#line 888 "objc-exp.y"
+    { yyval.tval = parse_type->builtin_long_double; }
     break;
 
   case 123:
-#line 901 "objc-exp.y"
+#line 890 "objc-exp.y"
     { yyval.tval = lookup_struct (copy_name (yyvsp[0].sval),
 					      expression_context_block); }
     break;
 
   case 124:
-#line 904 "objc-exp.y"
+#line 893 "objc-exp.y"
     { yyval.tval = lookup_struct (copy_name (yyvsp[0].sval),
 					      expression_context_block); }
     break;
 
   case 125:
-#line 907 "objc-exp.y"
+#line 896 "objc-exp.y"
     { yyval.tval = lookup_union (copy_name (yyvsp[0].sval),
 					     expression_context_block); }
     break;
 
   case 126:
-#line 910 "objc-exp.y"
+#line 899 "objc-exp.y"
     { yyval.tval = lookup_enum (copy_name (yyvsp[0].sval),
 					    expression_context_block); }
     break;
 
   case 127:
-#line 913 "objc-exp.y"
-    { yyval.tval = lookup_unsigned_typename (TYPE_NAME(yyvsp[0].tsym.type)); }
+#line 902 "objc-exp.y"
+    { yyval.tval = lookup_unsigned_typename (parse_language,
+							 parse_gdbarch,
+							 TYPE_NAME(yyvsp[0].tsym.type)); }
     break;
 
   case 128:
-#line 915 "objc-exp.y"
-    { yyval.tval = builtin_type_unsigned_int; }
+#line 906 "objc-exp.y"
+    { yyval.tval = parse_type->builtin_unsigned_int; }
     break;
 
   case 129:
-#line 917 "objc-exp.y"
-    { yyval.tval = lookup_signed_typename (TYPE_NAME(yyvsp[0].tsym.type)); }
+#line 908 "objc-exp.y"
+    { yyval.tval = lookup_signed_typename (parse_language,
+						       parse_gdbarch,
+						       TYPE_NAME(yyvsp[0].tsym.type)); }
     break;
 
   case 130:
-#line 919 "objc-exp.y"
-    { yyval.tval = builtin_type_int; }
+#line 912 "objc-exp.y"
+    { yyval.tval = parse_type->builtin_int; }
     break;
 
   case 131:
-#line 921 "objc-exp.y"
+#line 914 "objc-exp.y"
     { yyval.tval = lookup_template_type(copy_name(yyvsp[-3].sval), yyvsp[-1].tval,
 						    expression_context_block);
 			}
     break;
 
   case 132:
-#line 927 "objc-exp.y"
+#line 920 "objc-exp.y"
     { yyval.tval = yyvsp[0].tval; }
     break;
 
   case 133:
-#line 928 "objc-exp.y"
+#line 921 "objc-exp.y"
     { yyval.tval = yyvsp[0].tval; }
     break;
 
   case 135:
-#line 933 "objc-exp.y"
+#line 926 "objc-exp.y"
     {
 		  yyval.tsym.stoken.ptr = "int";
 		  yyval.tsym.stoken.length = 3;
-		  yyval.tsym.type = builtin_type_int;
+		  yyval.tsym.type = parse_type->builtin_int;
 		}
     break;
 
   case 136:
-#line 939 "objc-exp.y"
+#line 932 "objc-exp.y"
     {
 		  yyval.tsym.stoken.ptr = "long";
 		  yyval.tsym.stoken.length = 4;
-		  yyval.tsym.type = builtin_type_long;
+		  yyval.tsym.type = parse_type->builtin_long;
 		}
     break;
 
   case 137:
-#line 945 "objc-exp.y"
+#line 938 "objc-exp.y"
     {
 		  yyval.tsym.stoken.ptr = "short";
 		  yyval.tsym.stoken.length = 5;
-		  yyval.tsym.type = builtin_type_short;
+		  yyval.tsym.type = parse_type->builtin_short;
 		}
     break;
 
   case 138:
-#line 954 "objc-exp.y"
+#line 947 "objc-exp.y"
     { yyval.tvec = (struct type **) xmalloc (sizeof (struct type *) * 2);
 		  yyval.ivec[0] = 1;	/* Number of types in vector.  */
 		  yyval.tvec[1] = yyvsp[0].tval;
@@ -2384,7 +2379,7 @@ yyreduce:
     break;
 
   case 139:
-#line 959 "objc-exp.y"
+#line 952 "objc-exp.y"
     { int len = sizeof (struct type *) * (++(yyvsp[-2].ivec[0]) + 1);
 		  yyval.tvec = (struct type **) xrealloc ((char *) yyvsp[-2].tvec, len);
 		  yyval.tvec[yyval.ivec[0]] = yyvsp[0].tval;
@@ -2392,27 +2387,27 @@ yyreduce:
     break;
 
   case 140:
-#line 965 "objc-exp.y"
+#line 958 "objc-exp.y"
     { yyval.sval = yyvsp[0].ssym.stoken; }
     break;
 
   case 141:
-#line 966 "objc-exp.y"
+#line 959 "objc-exp.y"
     { yyval.sval = yyvsp[0].ssym.stoken; }
     break;
 
   case 142:
-#line 967 "objc-exp.y"
+#line 960 "objc-exp.y"
     { yyval.sval = yyvsp[0].tsym.stoken; }
     break;
 
   case 143:
-#line 968 "objc-exp.y"
+#line 961 "objc-exp.y"
     { yyval.sval = yyvsp[0].class.stoken; }
     break;
 
   case 144:
-#line 969 "objc-exp.y"
+#line 962 "objc-exp.y"
     { yyval.sval = yyvsp[0].ssym.stoken; }
     break;
 
@@ -2420,7 +2415,7 @@ yyreduce:
     }
 
 /* Line 1000 of yacc.c.  */
-#line 2424 "objc-exp.c.tmp"
+#line 2419 "objc-exp.c.tmp"
 
   yyvsp -= yylen;
   yyssp -= yylen;
@@ -2645,7 +2640,7 @@ yyreturn:
 }
 
 
-#line 983 "objc-exp.y"
+#line 976 "objc-exp.y"
 
 
 /* Take care of parsing a number (anything that starts with a digit).
@@ -2697,11 +2692,11 @@ parse_number (p, len, parsed_float, putithere)
       c = tolower (p[len - 1]);
 
       if (c == 'f')
-	putithere->typed_val_float.type = builtin_type_float;
+	putithere->typed_val_float.type = parse_type->builtin_float;
       else if (c == 'l')
-	putithere->typed_val_float.type = builtin_type_long_double;
+	putithere->typed_val_float.type = parse_type->builtin_long_double;
       else if (isdigit (c) || c == '.')
-	putithere->typed_val_float.type = builtin_type_double;
+	putithere->typed_val_float.type = parse_type->builtin_double;
       else
 	return ERROR;
 
@@ -2807,9 +2802,9 @@ parse_number (p, len, parsed_float, putithere)
 
   un = (unsigned LONGEST)n >> 2;
   if (long_p == 0
-      && (un >> (gdbarch_int_bit (current_gdbarch) - 2)) == 0)
+      && (un >> (gdbarch_int_bit (parse_gdbarch) - 2)) == 0)
     {
-      high_bit = ((unsigned LONGEST)1) << (gdbarch_int_bit (current_gdbarch) - 1);
+      high_bit = ((unsigned LONGEST)1) << (gdbarch_int_bit (parse_gdbarch) - 1);
 
       /* A large decimal (not hex or octal) constant (between INT_MAX
 	 and UINT_MAX) is a long or unsigned long, according to ANSI,
@@ -2817,28 +2812,28 @@ parse_number (p, len, parsed_float, putithere)
 	 int.  This probably should be fixed.  GCC gives a warning on
 	 such constants.  */
 
-      unsigned_type = builtin_type_unsigned_int;
-      signed_type = builtin_type_int;
+      unsigned_type = parse_type->builtin_unsigned_int;
+      signed_type = parse_type->builtin_int;
     }
   else if (long_p <= 1
-	   && (un >> (gdbarch_long_bit (current_gdbarch) - 2)) == 0)
+	   && (un >> (gdbarch_long_bit (parse_gdbarch) - 2)) == 0)
     {
-      high_bit = ((unsigned LONGEST)1) << (gdbarch_long_bit (current_gdbarch) - 1);
-      unsigned_type = builtin_type_unsigned_long;
-      signed_type = builtin_type_long;
+      high_bit = ((unsigned LONGEST)1) << (gdbarch_long_bit (parse_gdbarch) - 1);
+      unsigned_type = parse_type->builtin_unsigned_long;
+      signed_type = parse_type->builtin_long;
     }
   else
     {
       high_bit = (((unsigned LONGEST)1)
-		  << (gdbarch_long_long_bit (current_gdbarch) - 32 - 1)
+		  << (gdbarch_long_long_bit (parse_gdbarch) - 32 - 1)
 		  << 16
 		  << 16);
       if (high_bit == 0)
 	/* A long long does not fit in a LONGEST.  */
 	high_bit =
 	  (unsigned LONGEST)1 << (sizeof (LONGEST) * HOST_CHAR_BIT - 1);
-      unsigned_type = builtin_type_unsigned_long_long;
-      signed_type = builtin_type_long_long;
+      unsigned_type = parse_type->builtin_unsigned_long_long;
+      signed_type = parse_type->builtin_long_long;
     }
 
    putithere->typed_val_int.val = n;
@@ -2954,7 +2949,7 @@ yylex ()
 	error ("Empty character constant.");
 
       yylval.typed_val_int.val = c;
-      yylval.typed_val_int.type = builtin_type_char;
+      yylval.typed_val_int.type = parse_type->builtin_char;
 
       c = *lexptr++;
       if (c != '\'')
@@ -3240,7 +3235,7 @@ yylex ()
     case 8:
       if (strncmp (tokstart, "unsigned", 8) == 0)
 	return UNSIGNED;
-      if (current_language->la_language == language_cplus
+      if (parse_language->la_language == language_cplus
 	  && strncmp (tokstart, "template", 8) == 0)
 	return TEMPLATE;
       if (strncmp (tokstart, "volatile", 8) == 0)
@@ -3257,7 +3252,7 @@ yylex ()
 	return DOUBLE_KEYWORD;
       break;
     case 5:
-      if ((current_language->la_language == language_cplus)
+      if ((parse_language->la_language == language_cplus)
 	  && strncmp (tokstart, "class", 5) == 0)
 	return CLASS;
       if (strncmp (tokstart, "union", 5) == 0)
@@ -3301,16 +3296,15 @@ yylex ()
     int is_a_field_of_this = 0, *need_this;
     int hextype;
 
-    if (current_language->la_language == language_cplus ||
-	current_language->la_language == language_objc)
+    if (parse_language->la_language == language_cplus ||
+	parse_language->la_language == language_objc)
       need_this = &is_a_field_of_this;
     else
       need_this = (int *) NULL;
 
     sym = lookup_symbol (tmp, expression_context_block,
 			 VAR_DOMAIN,
-			 need_this,
-			 (struct symtab **) NULL);
+			 need_this);
     /* Call lookup_symtab, not lookup_partial_symtab, in case there
        are no psymtabs (coff, xcoff, or some future change to blow
        away the psymtabs once symbols are read).  */
@@ -3387,8 +3381,7 @@ yylex ()
 		      tmp1[p - namestart] = '\0';
 		      cur_sym = lookup_symbol (ncopy, 
 					       expression_context_block,
-					       VAR_DOMAIN, (int *) NULL,
-					       (struct symtab **) NULL);
+					       VAR_DOMAIN, (int *) NULL);
 		      if (cur_sym)
 			{
 			  if (SYMBOL_CLASS (cur_sym) == LOC_TYPEDEF)
@@ -3416,15 +3409,15 @@ yylex ()
 	  return TYPENAME;
         }
     yylval.tsym.type
-      = language_lookup_primitive_type_by_name (current_language,
-						current_gdbarch, tmp);
+      = language_lookup_primitive_type_by_name (parse_language,
+						parse_gdbarch, tmp);
     if (yylval.tsym.type != NULL)
       return TYPENAME;
 
     /* See if it's an ObjC classname.  */
     if (!sym)
       {
-	CORE_ADDR Class = lookup_objc_class(tmp);
+	CORE_ADDR Class = lookup_objc_class (parse_gdbarch, tmp);
 	if (Class)
 	  {
 	    yylval.class.class = Class;

@@ -1,4 +1,4 @@
-# Copyright 1992, 1994, 1996, 1997, 1998, 2001, 2003, 2007, 2008
+# Copyright 1992, 1994, 1996, 1997, 1998, 2001, 2003, 2007, 2008, 2009, 2010
 # Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
@@ -13,9 +13,6 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
-
-# Please email any bugs, comments, and/or additions to this file to:
-# bug-gdb@prep.ai.mit.edu
 
 # This file was written by Michael Snyder (msnyder@cygnus.com)
 
@@ -63,7 +60,6 @@ send_gdb "set annotate 2\n"
 gdb_expect {
 	-re ".*\032\032pre-prompt.*$gdb_prompt .*\032\032prompt.*$" \
 				{ pass "set annotate 2" }
- 	-re ".*$gdb_prompt $"	{ fail "set annotate 2" }
 	timeout			{ fail "(timeout) set annotate 2" }
     }
 
@@ -71,7 +67,6 @@ send_gdb "show annotate\n"
 gdb_expect {
 	-re ".*\032\032post-prompt.*Annotation_level is 2..*\032\032pre-prompt.*$gdb_prompt .*\032\032prompt.*$" \
 				{ pass "show annotate (2)" }
- 	-re ".*$gdb_prompt $"	{ fail "show annotate (2)" }
 	timeout			{ fail "(timeout) show annotate (2)" }
     }
 
@@ -80,7 +75,6 @@ send_gdb "info line 1\n"
 gdb_expect {
 	-re ".*\032\032post-prompt.*Line 1 of .* is at address .* but contains no code.*:1:0:beg:0x.*\032\032pre-prompt.*$gdb_prompt .*\032\032prompt.*$" \
 				{ pass "annotation_level 2" }
-	-re ".*$gdb_prompt $"	{ fail "annotation_level 2" }
 	timeout			{ fail "(timeout) annotation_level 2" }
     }
 
@@ -110,6 +104,10 @@ if { ![target_info exists use_gdb_stub] && ![target_info exists noargs] } {
 gdb_test "set check range on" "" "set check range on" 
 #test show check range on
 gdb_test "show check range" "Range checking is \"on\"\..*" "show check range (on)" 
+#test set check range off with trailing space
+gdb_test "set check range off " "" "set check range off" 
+#test show check range off
+gdb_test "show check range" "Range checking is \"off\"\..*" "show check range (off)" 
 #test set check range auto
 gdb_test "set check range auto" "" "set check range auto" 
 #test show check range auto
@@ -118,6 +116,10 @@ gdb_test "show check range" "Range checking is \"auto; currently .*" "show check
 gdb_test "set check type on" "" "set check type on" 
 #test show check type on
 gdb_test "show check type" "Type checking is \"on\"..*" "show check type (on)" 
+#test set check type off with trailing space
+gdb_test "set check type off " "" "set check type off" 
+#test show check type off
+gdb_test "show check type" "Type checking is \"off\"..*" "show check type (off)" 
 #test set check type auto
 gdb_test "set check type auto" "" "set check type auto" 
 #test show check type
@@ -176,6 +178,13 @@ gdb_test "show history size" "The size of the command history is 100..*" "show h
 gdb_test "set language asm" "" "set language asm" 
 #test show language asm
 gdb_test "show language" "The current source language is \"asm\"..*" "show language (asm)" 
+#test set language java, with a trailing space
+gdb_test "set language java " "" "set language java"
+#test show language java
+gdb_test "show language" "The current source language is \"java\"..*" "show language (java)" 
+#test completion for set language.
+gdb_test "complete set language min" "set language minimal" \
+  "complete set language minimal"
 #test set language auto
 gdb_test "set language auto" "" "set language auto" 
 #test show language

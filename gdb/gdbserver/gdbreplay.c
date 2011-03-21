@@ -1,6 +1,6 @@
 /* Replay a remote debug session logfile for GDB.
-   Copyright (C) 1996, 1998, 1999, 2000, 2002, 2003, 2005, 2006, 2007, 2008
-   Free Software Foundation, Inc.
+   Copyright (C) 1996, 1998, 1999, 2000, 2002, 2003, 2005, 2006, 2007, 2008,
+   2009, 2010 Free Software Foundation, Inc.
    Written by Fred Fish (fnf@cygnus.com) from pieces of gdbserver.
 
    This file is part of GDB.
@@ -69,6 +69,10 @@ typedef int socklen_t;
 /* Sort of a hack... */
 #define EOL (EOF - 1)
 
+/* Version information, from version.c.  */
+extern const char version[];
+extern const char host_name[];
+
 static int remote_desc;
 
 #ifdef __MINGW32CE__
@@ -127,7 +131,7 @@ strerror (DWORD error)
    Then return to command level.  */
 
 static void
-perror_with_name (char *string)
+perror_with_name (const char *string)
 {
 #ifndef STDC_HEADERS
   extern int errno;
@@ -232,7 +236,7 @@ remote_open (char *name)
       setsockopt (tmp_desc, SOL_SOCKET, SO_KEEPALIVE, (char *) &tmp, sizeof (tmp));
 
       /* Tell TCP not to delay small packets.  This greatly speeds up
-         interactive response. */
+	 interactive response. */
       tmp = 1;
       setsockopt (remote_desc, IPPROTO_TCP, TCP_NODELAY,
 		  (char *) &tmp, sizeof (tmp));
@@ -387,16 +391,44 @@ play (FILE *fp)
     }
 }
 
+static void
+gdbreplay_version (void)
+{
+  printf ("GNU gdbreplay %s%s\n"
+	  "Copyright (C) 2010 Free Software Foundation, Inc.\n"
+	  "gdbreplay is free software, covered by the GNU General Public License.\n"
+	  "This gdbreplay was configured as \"%s\"\n",
+	  PKGVERSION, version, host_name);
+}
+
+static void
+gdbreplay_usage (FILE *stream)
+{
+  fprintf (stream, "Usage:\tgdbreplay <logfile> <host:port>\n");
+  if (REPORT_BUGS_TO[0] && stream == stdout)
+    fprintf (stream, "Report bugs to \"%s\".\n", REPORT_BUGS_TO);
+}
+
 int
 main (int argc, char *argv[])
 {
   FILE *fp;
   int ch;
 
+  if (argc >= 2 && strcmp (argv[1], "--version") == 0)
+    {
+      gdbreplay_version ();
+      exit (0);
+    }
+  if (argc >= 2 && strcmp (argv[1], "--help") == 0)
+    {
+      gdbreplay_usage (stdout);
+      exit (0);
+    }
+
   if (argc < 3)
     {
-      fprintf (stderr, "Usage: gdbreplay <logfile> <host:port>\n");
-      fflush (stderr);
+      gdbreplay_usage (stderr);
       exit (1);
     }
   fp = fopen (argv[1], "r");

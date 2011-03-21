@@ -1,7 +1,7 @@
 /* Serial interface for local (hardwired) serial ports on Un*x like systems
 
    Copyright (C) 1992, 1993, 1994, 1995, 1996, 1998, 1999, 2000, 2001, 2003,
-   2004, 2005, 2007, 2008 Free Software Foundation, Inc.
+   2004, 2005, 2007, 2008, 2009, 2010 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -368,16 +368,13 @@ hardwire_send_break (struct serial *scb)
 #ifdef HAVE_SGTTY
   {
     int status;
-    struct timeval timeout;
 
     status = ioctl (scb->fd, TIOCSBRK, 0);
 
     /* Can't use usleep; it doesn't exist in BSD 4.2.  */
-    /* Note that if this select() is interrupted by a signal it will not wait
-       the full length of time.  I think that is OK.  */
-    timeout.tv_sec = 0;
-    timeout.tv_usec = 250000;
-    gdb_select (0, 0, 0, 0, &timeout);
+    /* Note that if this gdb_select() is interrupted by a signal it will not
+       wait the full length of time.  I think that is OK.  */
+    gdb_usleep (250000);
     status = ioctl (scb->fd, TIOCCBRK, 0);
     return status;
   }

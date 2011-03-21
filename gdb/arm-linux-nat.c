@@ -1,6 +1,6 @@
 /* GNU/Linux on ARM native support.
-   Copyright (C) 1999, 2000, 2001, 2002, 2004, 2005, 2006, 2007, 2008
-   Free Software Foundation, Inc.
+   Copyright (C) 1999, 2000, 2001, 2002, 2004, 2005, 2006, 2007, 2008, 2009,
+   2010 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -246,7 +246,7 @@ fetch_register (struct regcache *regcache, int regno)
     {
       if (arm_apcs_32)
         regcache_raw_supply (regcache, ARM_PS_REGNUM,
-			     (char *) &regs[ARM_CPSR_REGNUM]);
+			     (char *) &regs[ARM_CPSR_GREGNUM]);
       else
         regcache_raw_supply (regcache, ARM_PS_REGNUM,
 			     (char *) &regs[ARM_PC_REGNUM]);
@@ -286,7 +286,7 @@ fetch_regs (struct regcache *regcache)
 
   if (arm_apcs_32)
     regcache_raw_supply (regcache, ARM_PS_REGNUM,
-			 (char *) &regs[ARM_CPSR_REGNUM]);
+			 (char *) &regs[ARM_CPSR_GREGNUM]);
   else
     regcache_raw_supply (regcache, ARM_PS_REGNUM,
 			 (char *) &regs[ARM_PC_REGNUM]);
@@ -324,7 +324,7 @@ store_register (const struct regcache *regcache, int regno)
     regcache_raw_collect (regcache, regno, (char *) &regs[regno]);
   else if (arm_apcs_32 && regno == ARM_PS_REGNUM)
     regcache_raw_collect (regcache, regno,
-			 (char *) &regs[ARM_CPSR_REGNUM]);
+			 (char *) &regs[ARM_CPSR_GREGNUM]);
   else if (!arm_apcs_32 && regno == ARM_PS_REGNUM)
     regcache_raw_collect (regcache, ARM_PC_REGNUM,
 			 (char *) &regs[ARM_PC_REGNUM]);
@@ -362,7 +362,7 @@ store_regs (const struct regcache *regcache)
 
   if (arm_apcs_32 && regcache_valid_p (regcache, ARM_PS_REGNUM))
     regcache_raw_collect (regcache, ARM_PS_REGNUM,
-			 (char *) &regs[ARM_CPSR_REGNUM]);
+			 (char *) &regs[ARM_CPSR_GREGNUM]);
 
   ret = ptrace (PTRACE_SETREGS, tid, 0, &regs);
 
@@ -452,7 +452,8 @@ store_wmmx_regs (const struct regcache *regcache)
    point registers depending upon the value of regno.  */
 
 static void
-arm_linux_fetch_inferior_registers (struct regcache *regcache, int regno)
+arm_linux_fetch_inferior_registers (struct target_ops *ops,
+				    struct regcache *regcache, int regno)
 {
   if (-1 == regno)
     {
@@ -478,7 +479,8 @@ arm_linux_fetch_inferior_registers (struct regcache *regcache, int regno)
    point registers depending upon the value of regno.  */
 
 static void
-arm_linux_store_inferior_registers (struct regcache *regcache, int regno)
+arm_linux_store_inferior_registers (struct target_ops *ops,
+				    struct regcache *regcache, int regno)
 {
   if (-1 == regno)
     {

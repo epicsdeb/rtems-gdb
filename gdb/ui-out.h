@@ -1,6 +1,6 @@
 /* Output generating routines for GDB.
 
-   Copyright (C) 1999, 2000, 2001, 2002, 2003, 2005, 2007, 2008
+   Copyright (C) 1999, 2000, 2001, 2002, 2003, 2005, 2007, 2008, 2009, 2010
    Free Software Foundation, Inc.
 
    Contributed by Cygnus Solutions.
@@ -115,7 +115,7 @@ extern void ui_out_field_fmt_int (struct ui_out *uiout, int width,
 		 		  int value);
 
 extern void ui_out_field_core_addr (struct ui_out *uiout, const char *fldname,
-				    CORE_ADDR address);
+				    struct gdbarch *gdbarch, CORE_ADDR address);
 
 extern void ui_out_field_string (struct ui_out * uiout, const char *fldname,
 				 const char *string);

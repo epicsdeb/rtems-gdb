@@ -1,7 +1,8 @@
 /* Core dump and executable file functions above target vector, for GDB.
 
    Copyright (C) 1986, 1987, 1989, 1991, 1992, 1993, 1994, 1996, 1997, 1998,
-   1999, 2000, 2001, 2003, 2006, 2007, 2008 Free Software Foundation, Inc.
+   1999, 2000, 2001, 2003, 2006, 2007, 2008, 2009, 2010
+   Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -74,7 +75,7 @@ core_file_command (char *filename, int from_tty)
     error (_("GDB can't read core files on this machine."));
 
   if (!filename)
-    (t->to_detach) (filename, from_tty);
+    (t->to_detach) (t, filename, from_tty);
   else
     (t->to_open) (filename, from_tty);
 }
@@ -152,6 +153,7 @@ reopen_exec_file (void)
   int res;
   struct stat st;
   long mtime;
+  struct cleanup *cleanups;
 
   /* Don't do anything if there isn't an exec file. */
   if (exec_bfd == NULL)
@@ -159,12 +161,18 @@ reopen_exec_file (void)
 
   /* If the timestamp of the exec file has changed, reopen it. */
   filename = xstrdup (bfd_get_filename (exec_bfd));
-  make_cleanup (xfree, filename);
-  mtime = bfd_get_mtime (exec_bfd);
+  cleanups = make_cleanup (xfree, filename);
   res = stat (filename, &st);
 
-  if (mtime && mtime != st.st_mtime)
+  if (exec_bfd_mtime && exec_bfd_mtime != st.st_mtime)
     exec_file_attach (filename, 0);
+  else
+    /* If we accessed the file since last opening it, close it now;
+       this stops GDB from holding the executable open after it
+       exits.  */
+    bfd_cache_close_all ();
+
+  do_cleanups (cleanups);
 #endif
 }
 
@@ -201,38 +209,42 @@ Use the \"file\" or \"exec-file\" command."));
 }
 
 
-/* Report a memory error with error().  */
+/* Report a memory error by throwing a MEMORY_ERROR error.  */
 
 void
 memory_error (int status, CORE_ADDR memaddr)
 {
-  struct ui_file *tmp_stream = mem_fileopen ();
-  make_cleanup_ui_file_delete (tmp_stream);
-
   if (status == EIO)
-    {
-      /* Actually, address between memaddr and memaddr + len
-         was out of bounds. */
-      fprintf_unfiltered (tmp_stream, "Cannot access memory at address ");
-      fputs_filtered (paddress (memaddr), tmp_stream);
-    }
+    /* Actually, address between memaddr and memaddr + len was out of
+       bounds.  */
+    throw_error (MEMORY_ERROR,
+		 _("Cannot access memory at address %s"),
+		 paddress (target_gdbarch, memaddr));
   else
-    {
-      fprintf_filtered (tmp_stream, "Error accessing memory address ");
-      fputs_filtered (paddress (memaddr), tmp_stream);
-      fprintf_filtered (tmp_stream, ": %s.",
-		       safe_strerror (status));
-    }
-
-  error_stream (tmp_stream);
+    throw_error (MEMORY_ERROR,
+		 _("Error accessing memory address %s: %s."),
+		 paddress (target_gdbarch, memaddr),
+		 safe_strerror (status));
 }
 
 /* Same as target_read_memory, but report an error if can't read.  */
+
 void
 read_memory (CORE_ADDR memaddr, gdb_byte *myaddr, int len)
 {
   int status;
   status = target_read_memory (memaddr, myaddr, len);
+  if (status != 0)
+    memory_error (status, memaddr);
+}
+
+/* Same as target_read_stack, but report an error if can't read.  */
+
+void
+read_stack (CORE_ADDR memaddr, gdb_byte *myaddr, int len)
+{
+  int status;
+  status = target_read_stack (memaddr, myaddr, len);
   if (status != 0)
     memory_error (status, memaddr);
 }
@@ -246,6 +258,7 @@ struct captured_read_memory_integer_arguments
 {
   CORE_ADDR memaddr;
   int len;
+  enum bfd_endian byte_order;
   LONGEST result;
 };
 
@@ -262,8 +275,9 @@ do_captured_read_memory_integer (void *data)
   struct captured_read_memory_integer_arguments *args = (struct captured_read_memory_integer_arguments*) data;
   CORE_ADDR memaddr = args->memaddr;
   int len = args->len;
+  enum bfd_endian byte_order = args->byte_order;
 
-  args->result = read_memory_integer (memaddr, len);
+  args->result = read_memory_integer (memaddr, len, byte_order);
 
   return 1;
 }
@@ -273,12 +287,14 @@ do_captured_read_memory_integer (void *data)
    if successful.  */
 
 int
-safe_read_memory_integer (CORE_ADDR memaddr, int len, LONGEST *return_value)
+safe_read_memory_integer (CORE_ADDR memaddr, int len, enum bfd_endian byte_order,
+			  LONGEST *return_value)
 {
   int status;
   struct captured_read_memory_integer_arguments args;
   args.memaddr = memaddr;
   args.len = len;
+  args.byte_order = byte_order;
 
   status = catch_errors (do_captured_read_memory_integer, &args,
                         "", RETURN_MASK_ALL);
@@ -289,21 +305,21 @@ safe_read_memory_integer (CORE_ADDR memaddr, int len, LONGEST *return_value)
 }
 
 LONGEST
-read_memory_integer (CORE_ADDR memaddr, int len)
+read_memory_integer (CORE_ADDR memaddr, int len, enum bfd_endian byte_order)
 {
   gdb_byte buf[sizeof (LONGEST)];
 
   read_memory (memaddr, buf, len);
-  return extract_signed_integer (buf, len);
+  return extract_signed_integer (buf, len, byte_order);
 }
 
 ULONGEST
-read_memory_unsigned_integer (CORE_ADDR memaddr, int len)
+read_memory_unsigned_integer (CORE_ADDR memaddr, int len, enum bfd_endian byte_order)
 {
   gdb_byte buf[sizeof (ULONGEST)];
 
   read_memory (memaddr, buf, len);
-  return extract_unsigned_integer (buf, len);
+  return extract_unsigned_integer (buf, len, byte_order);
 }
 
 void
@@ -346,65 +362,30 @@ void
 write_memory (CORE_ADDR memaddr, const bfd_byte *myaddr, int len)
 {
   int status;
-  gdb_byte *bytes = alloca (len);
-  
-  memcpy (bytes, myaddr, len);
-  status = target_write_memory (memaddr, bytes, len);
+  status = target_write_memory (memaddr, myaddr, len);
   if (status != 0)
     memory_error (status, memaddr);
 }
 
 /* Store VALUE at ADDR in the inferior as a LEN-byte unsigned integer.  */
 void
-write_memory_unsigned_integer (CORE_ADDR addr, int len, ULONGEST value)
+write_memory_unsigned_integer (CORE_ADDR addr, int len, enum bfd_endian byte_order,
+			       ULONGEST value)
 {
   gdb_byte *buf = alloca (len);
-  store_unsigned_integer (buf, len, value);
+  store_unsigned_integer (buf, len, byte_order, value);
   write_memory (addr, buf, len);
 }
 
 /* Store VALUE at ADDR in the inferior as a LEN-byte signed integer.  */
 void
-write_memory_signed_integer (CORE_ADDR addr, int len, LONGEST value)
+write_memory_signed_integer (CORE_ADDR addr, int len, enum bfd_endian byte_order,
+			     LONGEST value)
 {
   gdb_byte *buf = alloca (len);
-  store_signed_integer (buf, len, value);
+  store_signed_integer (buf, len, byte_order, value);
   write_memory (addr, buf, len);
 }
-
-
-
-#if 0
-/* Enable after 4.12.  It is not tested.  */
-
-/* Search code.  Targets can just make this their search function, or
-   if the protocol has a less general search function, they can call this
-   in the cases it can't handle.  */
-void
-generic_search (int len, char *data, char *mask, CORE_ADDR startaddr,
-		int increment, CORE_ADDR lorange, CORE_ADDR hirange,
-		CORE_ADDR *addr_found, char *data_found)
-{
-  int i;
-  CORE_ADDR curaddr = startaddr;
-
-  while (curaddr >= lorange && curaddr < hirange)
-    {
-      read_memory (curaddr, data_found, len);
-      for (i = 0; i < len; ++i)
-	if ((data_found[i] & mask[i]) != data[i])
-	  goto try_again;
-      /* It matches.  */
-      *addr_found = curaddr;
-      return;
-
-    try_again:
-      curaddr += increment;
-    }
-  *addr_found = (CORE_ADDR) 0;
-  return;
-}
-#endif /* 0 */
 
 /* The current default bfd target.  Points to storage allocated for
    gnutarget_string.  */
@@ -436,7 +417,7 @@ set_gnutarget (char *newtarget)
 {
   if (gnutarget_string != NULL)
     xfree (gnutarget_string);
-  gnutarget_string = savestring (newtarget, strlen (newtarget));
+  gnutarget_string = xstrdup (newtarget);
   set_gnutarget_command (NULL, 0, NULL);
 }
 
@@ -452,7 +433,7 @@ No arg means have no core file.  This command has been superseded by the\n\
 
   
   add_setshow_string_noescape_cmd ("gnutarget", class_files,
-				   &gnutarget_string, _("(\
+				   &gnutarget_string, _("\
 Set the current BFD target."), _("\
 Show the current BFD target."), _("\
 Use `set gnutarget auto' to specify automatic detection."),

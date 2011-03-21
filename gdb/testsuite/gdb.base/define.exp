@@ -1,4 +1,4 @@
-# Copyright 1998, 1999, 2001, 2003, 2004, 2007, 2008
+# Copyright 1998, 1999, 2001, 2003, 2004, 2007, 2008, 2009, 2010
 # Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
@@ -13,9 +13,6 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
-
-# Please email any bugs, comments, and/or additions to this file to:
-# bug-gdb@prep.ai.mit.edu
 
 # This file was written by Elena Zannoni. (ezannoni@cygnus.com)
 
@@ -203,6 +200,31 @@ gdb_expect {
   timeout {fail "(timeout) help user command: nextwhere"}
 }
 
+# Verify that the document command preserves whitespace in the beginning of the line.
+#
+send_gdb "document nextwhere\n"
+gdb_expect {
+  -re "Type documentation for \"nextwhere\".\r\nEnd with a line saying just \"end\".\r\n>$"\
+          {send_gdb "   A next command that first shows you where you're stepping from.\nend\n"
+           gdb_expect {
+             -re "$gdb_prompt $" {}
+             timeout {fail "(timeout) preserve whitespace in help string"}
+           }
+          }
+  -re "$gdb_prompt $"\
+          {fail "preserve whitespace in help string"}
+  timeout {fail "(timeout) preserve whitespace in help string"}
+}
+
+send_gdb "help nextwhere\n"
+gdb_expect {
+  -re "   A next command that first shows you where you're stepping from.\r\n$gdb_prompt $"\
+          {pass "preserve whitespace in help string"}
+  -re "$gdb_prompt $"\
+          {fail "preserve whitespace in help string"}
+  timeout {fail "(timeout) preserve whitespace in help string"}
+}
+
 # Verify that the command parser doesn't require a space after an 'if'
 # command in a user defined function.
 #
@@ -324,6 +346,37 @@ gdb_expect {
   timeout {fail "(timeout) define hook undefined command: bar"}
 }
 
+# Test creation of an additional target subcommand.
+gdb_test_multiple "define target testsuite" "" {
+    -re "Type commands for definition of \"target testsuite\".\r\nEnd with a line saying just \"end\".\r\n>$" {
+	gdb_test "printf \"hello\\n\"\nend" "" "define target testsuite"
+    }
+}
+gdb_test_multiple "document target testsuite" "" {
+    -re "Type documentation for \"target testsuite\".\r\nEnd with a line saying just \"end\".\r\n>$" {
+	gdb_test "A test target.\nend" "" "document target testsuite"
+    }
+}
+
+gdb_test "help target" ".*A test target.*"
+gdb_test "target testsuite" "hello"
+gdb_test "show user target testsuite" "User command \"target testsuite\":\r\n  printf \"hello\\\\n\"\r\n"
+
+# We should even be able to hook subcommands.
+gdb_test_multiple "define target hook-testsuite" "" {
+    -re "Type commands for definition of \"target hook-testsuite\".\r\nEnd with a line saying just \"end\".\r\n>$" {
+	gdb_test "printf \"one\\n\"\nend" "" "define target hook-testsuite"
+    }
+}
+
+gdb_test_multiple "define target hookpost-testsuite" "" {
+    -re "Type commands for definition of \"target hookpost-testsuite\".\r\nEnd with a line saying just \"end\".\r\n>$" {
+	gdb_test "printf \"two\\n\"\nend" "" "define target hookpost-testsuite"
+    }
+}
+
+gdb_test "target testsuite" "one\r\nhello\r\ntwo" "target testsuite with hooks"
+
 # This is a quasi-define command: Verify that the user can redefine
 # GDB's gdb_prompt.
 #
@@ -345,9 +398,3 @@ gdb_expect {
 
 gdb_exit
 return 0
-
-
-
-
-
-

@@ -1,5 +1,6 @@
 /* Miscellaneous simulator utilities.
-   Copyright (C) 1997, 1998, 2007, 2008 Free Software Foundation, Inc.
+   Copyright (C) 1997, 1998, 2007, 2008, 2009, 2010
+   Free Software Foundation, Inc.
    Contributed by Cygnus Support.
 
 This file is part of GDB, the GNU debugger.
@@ -52,15 +53,13 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
    Set by sim_resume.  */
 struct sim_state *current_state;
 
-/* Allocate zero filled memory with xmalloc - xmalloc aborts of the
+/* Allocate zero filled memory with xcalloc - xcalloc aborts if the
    allocation fails.  */
 
 void *
 zalloc (unsigned long size)
 {
-  void *memory = (void *) xmalloc (size);
-  memset (memory, 0, size);
-  return memory;
+  return xcalloc (1, size);
 }
 
 void

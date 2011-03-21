@@ -1,6 +1,6 @@
 /* Slightly more portable version of <sys/select.h>.
 
-   Copyright (C) 2006, 2007, 2008 Free Software Foundation, Inc.
+   Copyright (C) 2006, 2007, 2008, 2009, 2010 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -22,6 +22,8 @@
 
 #ifdef HAVE_SYS_SELECT_H
 #include <sys/select.h>
+#else
+#include <sys/time.h>
 #endif
 
 #ifdef USE_WIN32API

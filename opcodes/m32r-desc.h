@@ -2,7 +2,7 @@
 
 THIS FILE IS MACHINE GENERATED WITH CGEN.
 
-Copyright 1996-2007 Free Software Foundation, Inc.
+Copyright 1996-2010 Free Software Foundation, Inc.
 
 This file is part of the GNU Binutils and/or GDB, the GNU debugger.
 
@@ -25,16 +25,10 @@ This file is part of the GNU Binutils and/or GDB, the GNU debugger.
 #ifndef M32R_CPU_H
 #define M32R_CPU_H
 
-#include "opcode/cgen-bitset.h"
-
 #define CGEN_ARCH m32r
 
 /* Given symbol S, return m32r_cgen_<S>.  */
-#if defined (__STDC__) || defined (ALMOST_STDC) || defined (HAVE_STRINGIZE)
 #define CGEN_SYM(s) m32r##_cgen_##s
-#else
-#define CGEN_SYM(s) m32r/**/_cgen_/**/s
-#endif
 
 
 /* Selected cpu families.  */
@@ -196,8 +190,8 @@ typedef enum cgen_hw_type {
 typedef enum cgen_operand_attr {
   CGEN_OPERAND_VIRTUAL, CGEN_OPERAND_PCREL_ADDR, CGEN_OPERAND_ABS_ADDR, CGEN_OPERAND_SIGN_OPT
  , CGEN_OPERAND_SIGNED, CGEN_OPERAND_NEGATIVE, CGEN_OPERAND_RELAX, CGEN_OPERAND_SEM_ONLY
- , CGEN_OPERAND_RELOC, CGEN_OPERAND_HASH_PREFIX, CGEN_OPERAND_END_BOOLS, CGEN_OPERAND_START_NBOOLS = 31
- , CGEN_OPERAND_MACH, CGEN_OPERAND_END_NBOOLS
+ , CGEN_OPERAND_RELOC, CGEN_OPERAND_END_BOOLS, CGEN_OPERAND_START_NBOOLS = 31, CGEN_OPERAND_MACH
+ , CGEN_OPERAND_END_NBOOLS
 } CGEN_OPERAND_ATTR;
 
 /* Number of non-boolean elements in cgen_operand_attr.  */
@@ -214,7 +208,6 @@ typedef enum cgen_operand_attr {
 #define CGEN_ATTR_CGEN_OPERAND_RELAX_VALUE(attrs) (((attrs)->bool & (1 << CGEN_OPERAND_RELAX)) != 0)
 #define CGEN_ATTR_CGEN_OPERAND_SEM_ONLY_VALUE(attrs) (((attrs)->bool & (1 << CGEN_OPERAND_SEM_ONLY)) != 0)
 #define CGEN_ATTR_CGEN_OPERAND_RELOC_VALUE(attrs) (((attrs)->bool & (1 << CGEN_OPERAND_RELOC)) != 0)
-#define CGEN_ATTR_CGEN_OPERAND_HASH_PREFIX_VALUE(attrs) (((attrs)->bool & (1 << CGEN_OPERAND_HASH_PREFIX)) != 0)
 
 /* Enum declaration for m32r operand types.  */
 typedef enum cgen_operand_type {

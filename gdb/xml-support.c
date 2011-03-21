@@ -1,6 +1,6 @@
 /* Helper routines for parsing XML using Expat.
 
-   Copyright (C) 2006, 2007, 2008 Free Software Foundation, Inc.
+   Copyright (C) 2006, 2007, 2008, 2009, 2010 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -995,6 +995,105 @@ xml_escape_text (const char *text)
   result[i + special] = '\0';
 
   return result;
+}
+
+void
+obstack_xml_printf (struct obstack *obstack, const char *format, ...)
+{
+  va_list ap;
+  const char *f;
+  const char *prev;
+  int percent = 0;
+
+  va_start (ap, format);
+
+  prev = format;
+  for (f = format; *f; f++)
+    {
+      if (percent)
+       {
+         switch (*f)
+           {
+           case 's':
+             {
+               char *p;
+               char *a = va_arg (ap, char *);
+               obstack_grow (obstack, prev, f - prev - 1);
+               p = xml_escape_text (a);
+               obstack_grow_str (obstack, p);
+               xfree (p);
+               prev = f + 1;
+             }
+             break;
+           }
+         percent = 0;
+       }
+      else if (*f == '%')
+       percent = 1;
+    }
+
+  obstack_grow_str (obstack, prev);
+  va_end (ap);
+}
+
+char *
+xml_fetch_content_from_file (const char *filename, void *baton)
+{
+  const char *dirname = baton;
+  FILE *file;
+  struct cleanup *back_to;
+  char *text;
+  size_t len, offset;
+
+  if (dirname && *dirname)
+    {
+      char *fullname = concat (dirname, "/", filename, (char *) NULL);
+      if (fullname == NULL)
+	nomem (0);
+      file = fopen (fullname, FOPEN_RT);
+      xfree (fullname);
+    }
+  else
+    file = fopen (filename, FOPEN_RT);
+
+  if (file == NULL)
+    return NULL;
+
+  back_to = make_cleanup_fclose (file);
+
+  /* Read in the whole file, one chunk at a time.  */
+  len = 4096;
+  offset = 0;
+  text = xmalloc (len);
+  make_cleanup (free_current_contents, &text);
+  while (1)
+    {
+      size_t bytes_read;
+
+      /* Continue reading where the last read left off.  Leave at least
+	 one byte so that we can NUL-terminate the result.  */
+      bytes_read = fread (text + offset, 1, len - offset - 1, file);
+      if (ferror (file))
+	{
+	  warning (_("Read error from \"%s\""), filename);
+	  do_cleanups (back_to);
+	  return NULL;
+	}
+
+      offset += bytes_read;
+
+      if (feof (file))
+	break;
+
+      len = len * 2;
+      text = xrealloc (text, len);
+    }
+
+  fclose (file);
+  discard_cleanups (back_to);
+
+  text[offset] = '\0';
+  return text;
 }
 
 void _initialize_xml_support (void);

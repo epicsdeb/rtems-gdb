@@ -1,5 +1,6 @@
 /* Memory breakpoint interfaces for the remote server for GDB.
-   Copyright (C) 2002, 2005, 2007, 2008 Free Software Foundation, Inc.
+   Copyright (C) 2002, 2005, 2007, 2008, 2009, 2010
+   Free Software Foundation, Inc.
 
    Contributed by MontaVista Software.
 
@@ -74,5 +75,10 @@ void set_breakpoint_data (const unsigned char *bp_data, int bp_len);
 /* Delete all breakpoints.  */
 
 void delete_all_breakpoints (void);
+
+/* Delete all breakpoints, but do not try to un-insert them from the
+   inferior.  */
+
+void free_all_breakpoints (struct process_info *proc);
 
 #endif /* MEM_BREAK_H */

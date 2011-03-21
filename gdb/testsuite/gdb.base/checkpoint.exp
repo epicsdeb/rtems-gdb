@@ -1,4 +1,4 @@
-#   Copyright 2005, 2007, 2008 Free Software Foundation, Inc.
+#   Copyright 2005, 2007, 2008, 2009, 2010 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -12,9 +12,6 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
-
-# Please email any bugs, comments, and/or additions to this file to:
-# bug-gdb@prep.ai.mit.edu
 
 if $tracelevel then {
 	strace $tracelevel
@@ -331,7 +328,7 @@ gdb_test "restart 9" "Not found.*" "no more checkpoint 9"
 gdb_test "restart 10" "Not found.*" "no more checkpoint 10"
 
 #
-# Now let's try setting a large number of checkpoints (>1000)
+# Now let's try setting a large number of checkpoints (>600)
 #
 
 gdb_exit
@@ -354,6 +351,10 @@ gdb_expect {
     -re ".*$gdb_prompt $" { pass "set checkpoint breakpoint" }
     timeout { fail "(timeout) set checkpoint breakpoint" }
 }
+
+set prev_timeout $timeout
+set timeout [expr $timeout + 120]
+verbose "Timeout now $timeout sec."
 
 gdb_breakpoint $break2_loc
 gdb_test "continue" "breakpoint 2.*" "break2 with many checkpoints"
@@ -378,8 +379,12 @@ gdb_test_multiple "info checkpoints" $msg {
 # OK, kill 'em all...
 #
 
-gdb_test "kill" "" "kill all one" \
+gdb_test "kill" "" "kill all one with many checkpoints" \
     "Kill the program being debugged.*y or n. $" "y"
+
+# Restore old timeout
+set timeout $prev_timeout
+verbose "Timeout now $timeout sec."
 
 #
 # Finished: cleanup

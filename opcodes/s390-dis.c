@@ -1,5 +1,6 @@
 /* s390-dis.c -- Disassemble S390 instructions
-   Copyright 2000, 2001, 2002, 2003, 2005, 2007 Free Software Foundation, Inc.
+   Copyright 2000, 2001, 2002, 2003, 2005, 2007, 2008
+   Free Software Foundation, Inc.
    Contributed by Martin Schwidefsky (schwidefsky@de.ibm.com).
 
    This file is part of the GNU opcodes library.
@@ -23,6 +24,7 @@
 #include "ansidecl.h"
 #include "sysdep.h"
 #include "dis-asm.h"
+#include "opintl.h"
 #include "opcode/s390.h"
 
 static int init_flag = 0;
@@ -36,6 +38,7 @@ init_disasm (struct disassemble_info *info)
 {
   const struct s390_opcode *opcode;
   const struct s390_opcode *opcode_end;
+  const char *p;
 
   memset (opc_index, 0, sizeof (opc_index));
   opcode_end = s390_opcodes + s390_num_opcodes;
@@ -46,21 +49,42 @@ init_disasm (struct disassemble_info *info)
 	     (opcode[1].opcode[0] == opcode->opcode[0]))
 	opcode++;
     }
-  switch (info->mach)
+
+  for (p = info->disassembler_options; p != NULL; )
     {
-    case bfd_mach_s390_31:
-      current_arch_mask = 1 << S390_OPCODE_ESA;
-      break;
-    case bfd_mach_s390_64:
-      current_arch_mask = 1 << S390_OPCODE_ZARCH;
-      break;
-    default:
-      abort ();
+      if (CONST_STRNEQ (p, "esa"))
+	current_arch_mask = 1 << S390_OPCODE_ESA;
+      else if (CONST_STRNEQ (p, "zarch"))
+	current_arch_mask = 1 << S390_OPCODE_ZARCH;
+      else
+	fprintf (stderr, "Unknown S/390 disassembler option: %s\n", p);
+
+      p = strchr (p, ',');
+      if (p != NULL)
+	p++;
     }
+
+  if (!current_arch_mask)
+    switch (info->mach)
+      {
+      case bfd_mach_s390_31:
+	current_arch_mask = 1 << S390_OPCODE_ESA;
+	break;
+      case bfd_mach_s390_64:
+	current_arch_mask = 1 << S390_OPCODE_ZARCH;
+	break;
+      default:
+	abort ();
+      }
+
   init_flag = 1;
 }
 
 /* Extracts an operand value from an instruction.  */
+/* We do not perform the shift operation for larl-type address
+   operands here since that would lead to an overflow of the 32 bit
+   integer value.  Instead the shift operation is done when printing
+   the operand in print_insn_s390.  */
 
 static inline unsigned int
 s390_extract_operand (unsigned char *insn, const struct s390_operand *operand)
@@ -90,10 +114,6 @@ s390_extract_operand (unsigned char *insn, const struct s390_operand *operand)
   if ((operand->flags & (S390_OPERAND_SIGNED | S390_OPERAND_PCREL))
       && (val & (1U << (operand->bits - 1))))
     val |= (-1U << (operand->bits - 1)) << 1;
-
-  /* Double value if the operand is pc relative.  */
-  if (operand->flags & S390_OPERAND_PCREL)
-    val <<= 1;
 
   /* Length x in an instructions has real length x + 1.  */
   if (operand->flags & S390_OPERAND_LENGTH)
@@ -176,8 +196,6 @@ print_insn_s390 (bfd_vma memaddr, struct disassemble_info *info)
 	  separator = 0;
 	  for (opindex = opcode->operands; *opindex != 0; opindex++)
 	    {
-	      unsigned int value;
-
 	      operand = s390_operands + *opindex;
 	      value = s390_extract_operand (buffer, operand);
 
@@ -202,7 +220,8 @@ print_insn_s390 (bfd_vma memaddr, struct disassemble_info *info)
 	      else if (operand->flags & S390_OPERAND_CR)
 		(*info->fprintf_func) (info->stream, "%%c%i", value);
 	      else if (operand->flags & S390_OPERAND_PCREL)
-		(*info->print_address_func) (memaddr + (int) value, info);
+		(*info->print_address_func) (memaddr + (int)value + (int)value,
+					     info);
 	      else if (operand->flags & S390_OPERAND_SIGNED)
 		(*info->fprintf_func) (info->stream, "%i", (int) value);
 	      else
@@ -249,4 +268,15 @@ print_insn_s390 (bfd_vma memaddr, struct disassemble_info *info)
       (*info->fprintf_func) (info->stream, ".byte\t0x%02x", value);
       return 1;
     }
+}
+
+void
+print_s390_disassembler_options (FILE *stream)
+{
+  fprintf (stream, _("\n\
+The following S/390 specific disassembler options are supported for use\n\
+with the -M switch (multiple options should be separated by commas):\n"));
+
+  fprintf (stream, _("  esa         Disassemble in ESA architecture mode\n"));
+  fprintf (stream, _("  zarch       Disassemble in z/Architecture mode\n"));
 }

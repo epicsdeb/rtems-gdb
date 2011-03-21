@@ -1,4 +1,4 @@
-#   Copyright 2001, 2007, 2008 Free Software Foundation, Inc.
+#   Copyright 2001, 2007, 2008, 2009, 2010 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -12,9 +12,6 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
-
-# Please email any bugs, comments, and/or additions to this file to:
-# bug-gdb@prep.ai.mit.edu
 
 # This file was written by Michael Snyder. (msnyder@redhat.com)
 
@@ -67,12 +64,7 @@ set stop_addr 0
 
 send_gdb "x /2i \$pc\n"
 gdb_expect {
-    global hex
-    global nl
-    global bp_addr
-    global gdb_prompt
-
-    -re "$hex.*${nl}($hex).*$gdb_prompt $" {
+    -re "=> $hex.*${nl}   ($hex).*$gdb_prompt $" {
 	set bp_addr $expect_out(1,string)
 	pass "get breakpoint address for foo"
     }

@@ -1,7 +1,8 @@
 /* Fork a Unix child process, and set up to debug it, for GDB.
 
    Copyright (C) 1990, 1991, 1992, 1993, 1994, 1995, 1996, 1998, 1999, 2000,
-   2001, 2004, 2005, 2006, 2007, 2008 Free Software Foundation, Inc.
+   2001, 2004, 2005, 2006, 2007, 2008, 2009, 2010
+   Free Software Foundation, Inc.
 
    Contributed by Cygnus Support.
 
@@ -22,8 +23,8 @@
 
 #include "defs.h"
 #include "gdb_string.h"
-#include "frame.h"		/* required by inferior.h */
 #include "inferior.h"
+#include "terminal.h"
 #include "target.h"
 #include "gdb_wait.h"
 #include "gdb_vfork.h"
@@ -31,6 +32,7 @@
 #include "terminal.h"
 #include "gdbthread.h"
 #include "command.h" /* for dont_repeat () */
+#include "gdbcmd.h"
 #include "solib.h"
 
 #include <signal.h>
@@ -39,6 +41,8 @@
 #define SHELL_FILE "/bin/sh"
 
 extern char **environ;
+
+static char *exec_wrapper;
 
 /* Break up SCRATCH into an argument vector suitable for passing to
    execvp and store it in ARGV.  E.g., on "run a b c d" this routine
@@ -115,7 +119,7 @@ escape_bang_in_quoted_argument (const char *shell_file)
 /* This function is NOT reentrant.  Some of the variables have been
    made static to ensure that they survive the vfork call.  */
 
-void
+int
 fork_inferior (char *exec_file_arg, char *allargs, char **env,
 	       void (*traceme_fun) (void), void (*init_trace_fun) (int),
 	       void (*pre_trace_fun) (void), char *shell_file_arg)
@@ -135,6 +139,7 @@ fork_inferior (char *exec_file_arg, char *allargs, char **env,
   int shell = 0;
   static char **argv;
   const char *inferior_io_terminal = get_inferior_io_terminal ();
+  struct inferior *inf;
 
   /* If no exec file handed to us, get it from the exec-file command
      -- with a good, common error message if none is specified.  */
@@ -160,6 +165,9 @@ fork_inferior (char *exec_file_arg, char *allargs, char **env,
      fact that it may expand when quoted; it is a worst-case number
      based on every character being '.  */
   len = 5 + 4 * strlen (exec_file) + 1 + strlen (allargs) + 1 + /*slop */ 12;
+  if (exec_wrapper)
+    len += strlen (exec_wrapper) + 1;
+
   shell_command = (char *) alloca (len);
   shell_command[0] = '\0';
 
@@ -178,13 +186,21 @@ fork_inferior (char *exec_file_arg, char *allargs, char **env,
     {
       /* We're going to call a shell.  */
 
-      /* Now add exec_file, quoting as necessary.  */
-
       char *p;
       int need_to_quote;
       const int escape_bang = escape_bang_in_quoted_argument (shell_file);
 
       strcat (shell_command, "exec ");
+
+      /* Add any exec wrapper.  That may be a program name with arguments, so
+	 the user must handle quoting.  */
+      if (exec_wrapper)
+	{
+	  strcat (shell_command, exec_wrapper);
+	  strcat (shell_command, " ");
+	}
+
+      /* Now add exec_file, quoting as necessary.  */
 
       /* Quoting in this style is said to work with all shells.  But
          csh on IRIX 4.0.1 can't deal with it.  So we only quote it if
@@ -289,10 +305,16 @@ fork_inferior (char *exec_file_arg, char *allargs, char **env,
       if (debug_fork)
 	sleep (debug_fork);
 
-      /* Run inferior in a separate process group.  */
-      debug_setpgrp = gdb_setpgid ();
-      if (debug_setpgrp == -1)
-	perror ("setpgrp failed in child");
+      /* Create a new session for the inferior process, if necessary.
+         It will also place the inferior in a separate process group.  */
+      if (create_tty_session () <= 0)
+	{
+	  /* No session was created, but we still want to run the inferior
+	     in a separate process group.  */
+	  debug_setpgrp = gdb_setpgid ();
+	  if (debug_setpgrp == -1)
+	    perror ("setpgrp failed in child");
+	}
 
       /* Ask the tty subsystem to switch to the one we specified
          earlier (or to share the current terminal, if none was
@@ -372,19 +394,34 @@ fork_inferior (char *exec_file_arg, char *allargs, char **env,
   /* Restore our environment in case a vforked child clob'd it.  */
   environ = save_our_env;
 
-  init_thread_list ();
+  if (!have_inferiors ())
+    init_thread_list ();
+
+  inf = current_inferior ();
+
+  inferior_appeared (inf, pid);
 
   /* Needed for wait_for_inferior stuff below.  */
   inferior_ptid = pid_to_ptid (pid);
 
+  new_tty_postfork ();
+
+  /* We have something that executes now.  We'll be running through
+     the shell at this point, but the pid shouldn't change.  Targets
+     supporting MT should fill this task's ptid with more data as soon
+     as they can.  */
+  add_thread_silent (inferior_ptid);
+
   /* Now that we have a child process, make it our target, and
      initialize anything target-vector-specific that needs
      initializing.  */
-  (*init_trace_fun) (pid);
+  if (init_trace_fun)
+    (*init_trace_fun) (pid);
 
   /* We are now in the child process of interest, having exec'd the
      correct program, and are poised at the first instruction of the
      new program.  */
+  return pid;
 }
 
 /* Accept NTRAPS traps from the inferior.  */
@@ -394,29 +431,80 @@ startup_inferior (int ntraps)
 {
   int pending_execs = ntraps;
   int terminal_initted = 0;
+  ptid_t resume_ptid;
+
+  if (target_supports_multi_process ())
+    resume_ptid = pid_to_ptid (ptid_get_pid (inferior_ptid));
+  else
+    resume_ptid = minus_one_ptid;
 
   /* The process was started by the fork that created it, but it will
      have stopped one instruction after execing the shell.  Here we
      must get it up to actual execution of the real program.  */
 
-  clear_proceed_status ();
-
-  init_wait_for_inferior ();
-
-  inferior_ignoring_leading_exec_events =
-    target_reported_exec_events_per_exec_call () - 1;
+  if (exec_wrapper)
+    pending_execs++;
 
   while (1)
     {
-      /* Make wait_for_inferior be quiet. */
-      stop_soon = STOP_QUIETLY;
-      wait_for_inferior (1);
-      if (stop_signal != TARGET_SIGNAL_TRAP)
+      int resume_signal = TARGET_SIGNAL_0;
+      ptid_t event_ptid;
+
+      struct target_waitstatus ws;
+      memset (&ws, 0, sizeof (ws));
+      event_ptid = target_wait (resume_ptid, &ws, 0);
+
+      if (ws.kind == TARGET_WAITKIND_IGNORE)
+	/* The inferior didn't really stop, keep waiting.  */
+	continue;
+
+      switch (ws.kind)
 	{
-	  /* Let shell child handle its own signals in its own way.
-	     FIXME: what if child has exited?  Must exit loop
-	     somehow.  */
-	  resume (0, stop_signal);
+	  case TARGET_WAITKIND_SPURIOUS:
+	  case TARGET_WAITKIND_LOADED:
+	  case TARGET_WAITKIND_FORKED:
+	  case TARGET_WAITKIND_VFORKED:
+	  case TARGET_WAITKIND_SYSCALL_ENTRY:
+	  case TARGET_WAITKIND_SYSCALL_RETURN:
+	    /* Ignore gracefully during startup of the inferior.  */
+	    switch_to_thread (event_ptid);
+	    break;
+
+	  case TARGET_WAITKIND_SIGNALLED:
+	    target_terminal_ours ();
+	    target_mourn_inferior ();
+	    error (_("During startup program terminated with signal %s, %s."),
+		   target_signal_to_name (ws.value.sig),
+		   target_signal_to_string (ws.value.sig));
+	    return;
+
+	  case TARGET_WAITKIND_EXITED:
+	    target_terminal_ours ();
+	    target_mourn_inferior ();
+	    if (ws.value.integer)
+	      error (_("During startup program exited with code %d."),
+		     ws.value.integer);
+	    else
+	      error (_("During startup program exited normally."));
+	    return;
+
+	  case TARGET_WAITKIND_EXECD:
+	    /* Handle EXEC signals as if they were SIGTRAP signals.  */
+	    xfree (ws.value.execd_pathname);
+	    resume_signal = TARGET_SIGNAL_TRAP;
+	    switch_to_thread (event_ptid);
+	    break;
+
+	  case TARGET_WAITKIND_STOPPED:
+	    resume_signal = ws.value.sig;
+	    switch_to_thread (event_ptid);
+	    break;
+	}
+
+      if (resume_signal != TARGET_SIGNAL_TRAP)
+	{
+	  /* Let shell child handle its own signals in its own way.  */
+	  target_resume (resume_ptid, 0, resume_signal);
 	}
       else
 	{
@@ -441,8 +529,39 @@ startup_inferior (int ntraps)
 	  if (--pending_execs == 0)
 	    break;
 
-	  resume (0, TARGET_SIGNAL_0);	/* Just make it go on.  */
+	  /* Just make it go on.  */
+	  target_resume (resume_ptid, 0, TARGET_SIGNAL_0);
 	}
     }
-  stop_soon = NO_STOP_QUIETLY;
+
+  /* Mark all threads non-executing.  */
+  set_executing (resume_ptid, 0);
+}
+
+/* Implement the "unset exec-wrapper" command.  */
+
+static void
+unset_exec_wrapper_command (char *args, int from_tty)
+{
+  xfree (exec_wrapper);
+  exec_wrapper = NULL;
+}
+
+/* Provide a prototype to silence -Wmissing-prototypes.  */
+extern initialize_file_ftype _initialize_fork_child;
+
+void
+_initialize_fork_child (void)
+{
+  add_setshow_filename_cmd ("exec-wrapper", class_run, &exec_wrapper, _("\
+Set a wrapper for running programs.\n\
+The wrapper prepares the system and environment for the new program."),
+			    _("\
+Show the wrapper for running programs."), NULL,
+			    NULL, NULL,
+			    &setlist, &showlist);
+
+  add_cmd ("exec-wrapper", class_run, unset_exec_wrapper_command,
+           _("Disable use of an execution wrapper."),
+           &unsetlist);
 }

@@ -1,6 +1,7 @@
 /* Target-dependent code for the Xtensa port of GDB, the GNU debugger.
 
-   Copyright (C) 2003, 2005, 2006, 2007, 2008 Free Software Foundation, Inc.
+   Copyright (C) 2003, 2005, 2006, 2007, 2008, 2009, 2010
+   Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -19,6 +20,7 @@
 
 #include "defs.h"
 #include "frame.h"
+#include "solib-svr4.h"
 #include "symtab.h"
 #include "symfile.h"
 #include "objfiles.h"
@@ -33,7 +35,7 @@
 #include "regset.h"
 
 #include "dummy-frame.h"
-#include "elf/dwarf2.h"
+#include "dwarf2.h"
 #include "dwarf2-frame.h"
 #include "dwarf2loc.h"
 #include "frame.h"
@@ -114,18 +116,33 @@ static int xtensa_debug_level = 0;
 #define PS_WOE			(1<<18)
 #define PS_EXC			(1<<4)
 
-/* Convert a live Ax register number to the corresponding Areg number.  */
+/* Convert a live A-register number to the corresponding AR-register number.  */
 static int
-areg_number (struct gdbarch *gdbarch, int regnum, ULONGEST wb)
+arreg_number (struct gdbarch *gdbarch, int a_regnum, ULONGEST wb)
+{
+  struct gdbarch_tdep *tdep = gdbarch_tdep (gdbarch);
+  int arreg;
+
+  arreg = a_regnum - tdep->a0_base;
+  arreg += (wb & ((tdep->num_aregs - 1) >> 2)) << WB_SHIFT;
+  arreg &= tdep->num_aregs - 1;
+
+  return arreg + tdep->ar_base;
+}
+
+/* Convert a live AR-register number to the corresponding A-register order
+   number in a range [0..15].  Return -1, if AR_REGNUM is out of WB window.  */
+static int
+areg_number (struct gdbarch *gdbarch, int ar_regnum, unsigned int wb)
 {
   struct gdbarch_tdep *tdep = gdbarch_tdep (gdbarch);
   int areg;
 
-  areg = regnum - tdep->a0_base;
-  areg += (wb & ((tdep->num_aregs - 1) >> 2)) << WB_SHIFT;
-  areg &= tdep->num_aregs - 1;
-
-  return areg + tdep->ar_base;
+  areg = ar_regnum - tdep->ar_base;
+  if (areg < 0 || areg >= tdep->num_aregs)
+    return -1;
+  areg = (areg - wb * 4) & (tdep->num_aregs - 1);
+  return (areg > 15) ? -1 : areg;
 }
 
 static inline int
@@ -148,6 +165,7 @@ windowing_enabled (CORE_ADDR ps)
 static int
 extract_call_winsize (struct gdbarch *gdbarch, CORE_ADDR pc)
 {
+  enum bfd_endian byte_order = gdbarch_byte_order (gdbarch);
   int winsize = 4;
   int insn;
   gdb_byte buf[4];
@@ -156,7 +174,7 @@ extract_call_winsize (struct gdbarch *gdbarch, CORE_ADDR pc)
 
   /* Read the previous instruction (should be a call[x]{4|8|12}.  */
   read_memory (pc-3, buf, 3);
-  insn = extract_unsigned_integer (buf, 3);
+  insn = extract_unsigned_integer (buf, 3, byte_order);
 
   /* Decode call instruction:
      Little Endian
@@ -166,7 +184,7 @@ extract_call_winsize (struct gdbarch *gdbarch, CORE_ADDR pc)
        call{0,4,8,12}   0101 || {00,01,10,11} || OFFSET
        callx{0,4,8,12}  0000 || {00,01,10,11} || 11 || OFFSET.  */
 
-  if (gdbarch_byte_order (gdbarch) == BFD_ENDIAN_LITTLE)
+  if (byte_order == BFD_ENDIAN_LITTLE)
     {
       if (((insn & 0xf) == 0x5) || ((insn & 0xcf) == 0xc0))
 	winsize = (insn & 0x30) >> 2;   /* 0, 4, 8, 12.  */
@@ -195,44 +213,29 @@ xtensa_register_name (struct gdbarch *gdbarch, int regnum)
   return 0;
 }
 
-static unsigned long
-xtensa_read_register (int regnum)
-{
-  ULONGEST value;
-
-  regcache_raw_read_unsigned (get_current_regcache (), regnum, &value);
-  return (unsigned long) value;
-}
-
 /* Return the type of a register.  Create a new type, if necessary.  */
-
-static struct ctype_cache
-{
-  struct ctype_cache *next;
-  int size;
-  struct type *virtual_type;
-} *type_entries = NULL;
 
 static struct type *
 xtensa_register_type (struct gdbarch *gdbarch, int regnum)
 {
+  struct gdbarch_tdep *tdep = gdbarch_tdep (gdbarch);
+
   /* Return signed integer for ARx and Ax registers.  */
-  if ((regnum >= gdbarch_tdep (gdbarch)->ar_base
-      && regnum < gdbarch_tdep (gdbarch)->ar_base
-		    + gdbarch_tdep (gdbarch)->num_aregs)
-      || (regnum >= gdbarch_tdep (gdbarch)->a0_base
-      && regnum < gdbarch_tdep (gdbarch)->a0_base + 16))
-    return builtin_type_int;
+  if ((regnum >= tdep->ar_base
+       && regnum < tdep->ar_base + tdep->num_aregs)
+      || (regnum >= tdep->a0_base
+	  && regnum < tdep->a0_base + 16))
+    return builtin_type (gdbarch)->builtin_int;
 
   if (regnum == gdbarch_pc_regnum (gdbarch)
-      || regnum == gdbarch_tdep (gdbarch)->a0_base + 1)
-    return lookup_pointer_type (builtin_type_void);
+      || regnum == tdep->a0_base + 1)
+    return builtin_type (gdbarch)->builtin_data_ptr;
 
   /* Return the stored type for all other registers.  */
   else if (regnum >= 0 && regnum < gdbarch_num_regs (gdbarch)
 				   + gdbarch_num_pseudo_regs (gdbarch))
     {
-      xtensa_register_t* reg = &gdbarch_tdep (gdbarch)->regmap[regnum];
+      xtensa_register_t* reg = &tdep->regmap[regnum];
 
       /* Set ctype for this register (only the first time).  */
 
@@ -246,27 +249,27 @@ xtensa_register_type (struct gdbarch *gdbarch, int regnum)
 	  switch (size)
 	    {
 	    case 1:
-	      reg->ctype = builtin_type_uint8;
+	      reg->ctype = builtin_type (gdbarch)->builtin_uint8;
 	      break;
 
 	    case 2:
-	      reg->ctype = builtin_type_uint16;
+	      reg->ctype = builtin_type (gdbarch)->builtin_uint16;
 	      break;
 
 	    case 4:
-	      reg->ctype = builtin_type_uint32;
+	      reg->ctype = builtin_type (gdbarch)->builtin_uint32;
 	      break;
 
 	    case 8:
-	      reg->ctype = builtin_type_uint64;
+	      reg->ctype = builtin_type (gdbarch)->builtin_uint64;
 	      break;
 
 	    case 16:
-	      reg->ctype = builtin_type_uint128;
+	      reg->ctype = builtin_type (gdbarch)->builtin_uint128;
 	      break;
 
 	    default:
-	      for (tp = type_entries; tp != NULL; tp = tp->next)
+	      for (tp = tdep->type_entries; tp != NULL; tp = tp->next)
 		if (tp->size == size)
 		  break;
 
@@ -274,14 +277,13 @@ xtensa_register_type (struct gdbarch *gdbarch, int regnum)
 		{
 		  char *name = xmalloc (16);
 		  tp = xmalloc (sizeof (struct ctype_cache));
-		  tp->next = type_entries;
-		  type_entries = tp;
+		  tp->next = tdep->type_entries;
+		  tdep->type_entries = tp;
 		  tp->size = size;
 
 		  sprintf (name, "int%d", size * 8);
-		  tp->virtual_type = init_type (TYPE_CODE_INT, size,
-						TYPE_FLAG_UNSIGNED, name,
-						NULL);
+		  tp->virtual_type
+		    = arch_integer_type (gdbarch, size * 8, 1, xstrdup (name));
 		}
 
 	      reg->ctype = tp->virtual_type;
@@ -501,6 +503,8 @@ xtensa_pseudo_register_read (struct gdbarch *gdbarch,
 			     int regnum,
 			     gdb_byte *buffer)
 {
+  enum bfd_endian byte_order = gdbarch_byte_order (gdbarch);
+
   DEBUGTRACE ("xtensa_pseudo_register_read (... regnum = %d (%s) ...)\n",
 	      regnum, xtensa_register_name (gdbarch, regnum));
 
@@ -516,7 +520,8 @@ xtensa_pseudo_register_read (struct gdbarch *gdbarch,
       gdb_byte *buf = (gdb_byte *) alloca (MAX_REGISTER_SIZE);
 
       regcache_raw_read (regcache, gdbarch_tdep (gdbarch)->wb_regnum, buf);
-      regnum = areg_number (gdbarch, regnum, extract_unsigned_integer (buf, 4));
+      regnum = arreg_number (gdbarch, regnum,
+			     extract_unsigned_integer (buf, 4, byte_order));
     }
 
   /* We can always read non-pseudo registers.  */
@@ -596,6 +601,8 @@ xtensa_pseudo_register_write (struct gdbarch *gdbarch,
 			      int regnum,
 			      const gdb_byte *buffer)
 {
+  enum bfd_endian byte_order = gdbarch_byte_order (gdbarch);
+
   DEBUGTRACE ("xtensa_pseudo_register_write (... regnum = %d (%s) ...)\n",
 	      regnum, xtensa_register_name (gdbarch, regnum));
 
@@ -613,7 +620,8 @@ xtensa_pseudo_register_write (struct gdbarch *gdbarch,
 
       regcache_raw_read (regcache,
 			 gdbarch_tdep (gdbarch)->wb_regnum, buf);
-      regnum = areg_number (gdbarch, regnum, extract_unsigned_integer (buf, 4));
+      regnum = arreg_number (gdbarch, regnum,
+			     extract_unsigned_integer (buf, 4, byte_order));
     }
 
   /* We can always write 'core' registers.
@@ -880,9 +888,15 @@ xtensa_regset_from_core_section (struct gdbarch *core_arch,
 /* Frame cache part for Windowed ABI.  */
 typedef struct xtensa_windowed_frame_cache
 {
-  int wb;		/* Base for this frame; -1 if not in regfile.  */
-  int callsize;		/* Call size to next frame.  */
-  int ws;
+  int wb;		/* WINDOWBASE of the previous frame.  */
+  int callsize;		/* Call size of this frame.  */
+  int ws;		/* WINDOWSTART of the previous frame.  It keeps track of
+			   life windows only.  If there is no bit set for the
+			   window, that means it had been already spilled
+			   because of window overflow.  */
+
+  /* Spilled A-registers from the previous frame.
+     AREGS[i] == -1, if corresponding AR is alive.  */
   CORE_ADDR aregs[XTENSA_NUM_SAVED_AREGS];
 } xtensa_windowed_frame_cache_t;
 
@@ -932,11 +946,11 @@ typedef struct xtensa_call0_frame_cache
 
 typedef struct xtensa_frame_cache
 {
-  CORE_ADDR base;	/* Stack pointer of the next frame.  */
+  CORE_ADDR base;	/* Stack pointer of this frame.  */
   CORE_ADDR pc;		/* PC at the entry point to the function.  */
-  CORE_ADDR ra;		/* The raw return address.  */
-  CORE_ADDR ps;		/* The PS register of the frame.  */
-  CORE_ADDR prev_sp;	/* Stack Pointer of the frame.  */
+  CORE_ADDR ra;		/* The raw return address (without CALLINC).  */
+  CORE_ADDR ps;		/* The PS register of this frame.  */
+  CORE_ADDR prev_sp;	/* Stack Pointer of the previous frame.  */
   int call0;		/* It's a call0 framework (else windowed).  */
   union
     {
@@ -979,6 +993,7 @@ xtensa_alloc_frame_cache (int windowed)
   else
     {
       cache->wd.wb = 0;
+      cache->wd.ws = 0;
       cache->wd.callsize = -1;
 
       for (i = 0; i < XTENSA_NUM_SAVED_AREGS; i++)
@@ -999,120 +1014,247 @@ static CORE_ADDR
 xtensa_unwind_pc (struct gdbarch *gdbarch, struct frame_info *next_frame)
 {
   gdb_byte buf[8];
+  CORE_ADDR pc;
 
-  DEBUGTRACE ("xtensa_unwind_pc (next_frame = %p)\n", next_frame);
+  DEBUGTRACE ("xtensa_unwind_pc (next_frame = %s)\n", 
+		host_address_to_string (next_frame));
 
   frame_unwind_register (next_frame, gdbarch_pc_regnum (gdbarch), buf);
+  pc = extract_typed_address (buf, builtin_type (gdbarch)->builtin_func_ptr);
 
-  DEBUGINFO ("[xtensa_unwind_pc] pc = 0x%08x\n", (unsigned int)
-	     extract_typed_address (buf, builtin_type_void_func_ptr));
+  DEBUGINFO ("[xtensa_unwind_pc] pc = 0x%08x\n", (unsigned int) pc);
 
-  return extract_typed_address (buf, builtin_type_void_func_ptr);
+  return pc;
 }
 
 
 static struct frame_id
-xtensa_unwind_dummy_id (struct gdbarch *gdbarch, struct frame_info *next_frame)
+xtensa_dummy_id (struct gdbarch *gdbarch, struct frame_info *this_frame)
 {
   CORE_ADDR pc, fp;
 
-  /* next_frame->prev is a dummy frame.  Return a frame ID of that frame.  */
+  /* THIS-FRAME is a dummy frame.  Return a frame ID of that frame.  */
 
-  DEBUGTRACE ("xtensa_unwind_dummy_id ()\n");
-
-  pc = frame_pc_unwind (next_frame);
-  fp = frame_unwind_register_unsigned
-	 (next_frame, gdbarch_tdep (gdbarch)->a0_base + 1);
+  pc = get_frame_pc (this_frame);
+  fp = get_frame_register_unsigned
+	 (this_frame, gdbarch_tdep (gdbarch)->a0_base + 1);
 
   /* Make dummy frame ID unique by adding a constant.  */
   return frame_id_build (fp + SP_ALIGNMENT, pc);
 }
 
+/* Returns the best guess about which register is a frame pointer
+   for the function containing CURRENT_PC.  */
+
+#define XTENSA_ISA_BSZ		32		/* Instruction buffer size.  */
+#define XTENSA_ISA_BADPC	((CORE_ADDR)0)	/* Bad PC value.  */
+
+static unsigned int
+xtensa_scan_prologue (struct gdbarch *gdbarch, CORE_ADDR current_pc)
+{
+#define RETURN_FP goto done
+
+  unsigned int fp_regnum = gdbarch_tdep (gdbarch)->a0_base + 1;
+  CORE_ADDR start_addr;
+  xtensa_isa isa;
+  xtensa_insnbuf ins, slot;
+  char ibuf[XTENSA_ISA_BSZ];
+  CORE_ADDR ia, bt, ba;
+  xtensa_format ifmt;
+  int ilen, islots, is;
+  xtensa_opcode opc;
+  const char *opcname;
+
+  find_pc_partial_function (current_pc, NULL, &start_addr, NULL);
+  if (start_addr == 0)
+    return fp_regnum;
+
+  if (!xtensa_default_isa)
+    xtensa_default_isa = xtensa_isa_init (0, 0);
+  isa = xtensa_default_isa;
+  gdb_assert (XTENSA_ISA_BSZ >= xtensa_isa_maxlength (isa));
+  ins = xtensa_insnbuf_alloc (isa);
+  slot = xtensa_insnbuf_alloc (isa);
+  ba = 0;
+
+  for (ia = start_addr, bt = ia; ia < current_pc ; ia += ilen)
+    {
+      if (ia + xtensa_isa_maxlength (isa) > bt)
+        {
+	  ba = ia;
+	  bt = (ba + XTENSA_ISA_BSZ) < current_pc
+	    ? ba + XTENSA_ISA_BSZ : current_pc;
+	  if (target_read_memory (ba, ibuf, bt - ba) != 0)
+	    RETURN_FP;
+	}
+
+      xtensa_insnbuf_from_chars (isa, ins, &ibuf[ia-ba], 0);
+      ifmt = xtensa_format_decode (isa, ins);
+      if (ifmt == XTENSA_UNDEFINED)
+	RETURN_FP;
+      ilen = xtensa_format_length (isa, ifmt);
+      if (ilen == XTENSA_UNDEFINED)
+	RETURN_FP;
+      islots = xtensa_format_num_slots (isa, ifmt);
+      if (islots == XTENSA_UNDEFINED)
+	RETURN_FP;
+      
+      for (is = 0; is < islots; ++is)
+	{
+	  if (xtensa_format_get_slot (isa, ifmt, is, ins, slot))
+	    RETURN_FP;
+	  
+	  opc = xtensa_opcode_decode (isa, ifmt, is, slot);
+	  if (opc == XTENSA_UNDEFINED) 
+	    RETURN_FP;
+	  
+	  opcname = xtensa_opcode_name (isa, opc);
+
+	  if (strcasecmp (opcname, "mov.n") == 0
+	      || strcasecmp (opcname, "or") == 0)
+	    {
+	      unsigned int register_operand;
+
+	      /* Possible candidate for setting frame pointer
+		 from A1. This is what we are looking for.  */
+
+	      if (xtensa_operand_get_field (isa, opc, 1, ifmt, 
+					    is, slot, &register_operand) != 0)
+		RETURN_FP;
+	      if (xtensa_operand_decode (isa, opc, 1, &register_operand) != 0)
+		RETURN_FP;
+	      if (register_operand == 1)  /* Mov{.n} FP A1.  */
+		{
+		  if (xtensa_operand_get_field (isa, opc, 0, ifmt, is, slot, 
+						&register_operand) != 0)
+		    RETURN_FP;
+		  if (xtensa_operand_decode (isa, opc, 0,
+					     &register_operand) != 0)
+		    RETURN_FP;
+
+		  fp_regnum = gdbarch_tdep (gdbarch)->a0_base + register_operand;
+		  RETURN_FP;
+		}
+	    }
+
+	  if (
+	      /* We have problems decoding the memory.  */
+	      opcname == NULL 
+	      || strcasecmp (opcname, "ill") == 0
+	      || strcasecmp (opcname, "ill.n") == 0
+	      /* Hit planted breakpoint.  */
+	      || strcasecmp (opcname, "break") == 0
+	      || strcasecmp (opcname, "break.n") == 0
+	      /* Flow control instructions finish prologue.  */
+	      || xtensa_opcode_is_branch (isa, opc) > 0
+	      || xtensa_opcode_is_jump   (isa, opc) > 0
+	      || xtensa_opcode_is_loop   (isa, opc) > 0
+	      || xtensa_opcode_is_call   (isa, opc) > 0
+	      || strcasecmp (opcname, "simcall") == 0
+	      || strcasecmp (opcname, "syscall") == 0)
+	    /* Can not continue analysis.  */
+	    RETURN_FP;
+	}
+    }
+done:
+  xtensa_insnbuf_free(isa, slot);
+  xtensa_insnbuf_free(isa, ins);
+  return fp_regnum;
+}
+
 /* The key values to identify the frame using "cache" are 
 
-	cache->base    = SP of this frame;
+	cache->base    = SP (or best guess about FP) of this frame;
 	cache->pc      = entry-PC (entry point of the frame function);
 	cache->prev_sp = SP of the previous frame.
 */
 
 static void
-call0_frame_cache (struct frame_info *next_frame,
+call0_frame_cache (struct frame_info *this_frame,
 		   xtensa_frame_cache_t *cache,
-		   CORE_ADDR pc);
+		   CORE_ADDR pc, CORE_ADDR litbase);
 
 static struct xtensa_frame_cache *
-xtensa_frame_cache (struct frame_info *next_frame, void **this_cache)
+xtensa_frame_cache (struct frame_info *this_frame, void **this_cache)
 {
   xtensa_frame_cache_t *cache;
   CORE_ADDR ra, wb, ws, pc, sp, ps;
-  struct gdbarch *gdbarch = get_frame_arch (next_frame);
-  unsigned int ps_regnum = gdbarch_ps_regnum (gdbarch);
+  struct gdbarch *gdbarch = get_frame_arch (this_frame);
+  enum bfd_endian byte_order = gdbarch_byte_order (gdbarch);
+  unsigned int fp_regnum;
   char op1;
   int  windowed;
-
-  DEBUGTRACE ("xtensa_frame_cache (next_frame %p, *this_cache %p)\n",
-	      next_frame, this_cache ? *this_cache : (void*)0xdeadbeef);
 
   if (*this_cache)
     return *this_cache;
 
-  windowed = windowing_enabled (xtensa_read_register (ps_regnum));
+  ps = get_frame_register_unsigned (this_frame, gdbarch_ps_regnum (gdbarch));
+  windowed = windowing_enabled (ps);
 
   /* Get pristine xtensa-frame.  */
   cache = xtensa_alloc_frame_cache (windowed);
   *this_cache = cache;
 
-  pc = frame_unwind_register_unsigned (next_frame,
-				       gdbarch_pc_regnum (gdbarch));
+  pc = get_frame_register_unsigned (this_frame, gdbarch_pc_regnum (gdbarch));
 
   if (windowed)
     {
       /* Get WINDOWBASE, WINDOWSTART, and PS registers.  */
-      wb = frame_unwind_register_unsigned
-	     (next_frame, gdbarch_tdep (gdbarch)->wb_regnum);
-      ws = frame_unwind_register_unsigned
-	     (next_frame, gdbarch_tdep (gdbarch)->ws_regnum);
-      ps = frame_unwind_register_unsigned (next_frame, ps_regnum);
+      wb = get_frame_register_unsigned (this_frame, 
+					gdbarch_tdep (gdbarch)->wb_regnum);
+      ws = get_frame_register_unsigned (this_frame,
+					gdbarch_tdep (gdbarch)->ws_regnum);
 
-      op1 = read_memory_integer (pc, 1);
+      op1 = read_memory_integer (pc, 1, byte_order);
       if (XTENSA_IS_ENTRY (gdbarch, op1))
 	{
 	  int callinc = CALLINC (ps);
-	  ra = frame_unwind_register_unsigned
-	    (next_frame, gdbarch_tdep (gdbarch)->a0_base + callinc * 4);
-	  
-	  DEBUGINFO("[xtensa_frame_cache] 'entry' at 0x%08x\n (callinc = %d)",
-		    (int)pc, callinc);
+	  ra = get_frame_register_unsigned
+	    (this_frame, gdbarch_tdep (gdbarch)->a0_base + callinc * 4);
 	  
 	  /* ENTRY hasn't been executed yet, therefore callsize is still 0.  */
 	  cache->wd.callsize = 0;
 	  cache->wd.wb = wb;
 	  cache->wd.ws = ws;
-	  cache->prev_sp = frame_unwind_register_unsigned
-			     (next_frame, gdbarch_tdep (gdbarch)->a0_base + 1);
+	  cache->prev_sp = get_frame_register_unsigned
+			     (this_frame, gdbarch_tdep (gdbarch)->a0_base + 1);
+
+	  /* This only can be the outermost frame since we are
+	     just about to execute ENTRY.  SP hasn't been set yet.
+	     We can assume any frame size, because it does not
+	     matter, and, let's fake frame base in cache.  */
+	  cache->base = cache->prev_sp + 16;
+
+	  cache->pc = pc;
+	  cache->ra = (cache->pc & 0xc0000000) | (ra & 0x3fffffff);
+	  cache->ps = (ps & ~PS_CALLINC_MASK)
+	    | ((WINSIZE(ra)/4) << PS_CALLINC_SHIFT);
+
+	  return cache;
 	}
       else
 	{
-	  ra = frame_unwind_register_unsigned
-		 (next_frame, gdbarch_tdep (gdbarch)->a0_base);
+	  fp_regnum = xtensa_scan_prologue (gdbarch, pc);
+	  ra = get_frame_register_unsigned (this_frame,
+					    gdbarch_tdep (gdbarch)->a0_base);
 	  cache->wd.callsize = WINSIZE (ra);
 	  cache->wd.wb = (wb - cache->wd.callsize / 4)
 			  & (gdbarch_tdep (gdbarch)->num_aregs / 4 - 1);
 	  cache->wd.ws = ws & ~(1 << wb);
-	}
 
-      cache->pc = frame_func_unwind (next_frame, NORMAL_FRAME);
-      cache->ra = (cache->pc & 0xc0000000) | (ra & 0x3fffffff);
-      cache->ps = (ps & ~PS_CALLINC_MASK)
-	| ((WINSIZE(ra)/4) << PS_CALLINC_SHIFT);
+	  cache->pc = get_frame_func (this_frame);
+	  cache->ra = (pc & 0xc0000000) | (ra & 0x3fffffff);
+	  cache->ps = (ps & ~PS_CALLINC_MASK)
+	    | ((WINSIZE(ra)/4) << PS_CALLINC_SHIFT);
+	}
 
       if (cache->wd.ws == 0)
 	{
 	  int i;
 
 	  /* Set A0...A3.  */
-	  sp = frame_unwind_register_unsigned
-		 (next_frame, gdbarch_tdep (gdbarch)->a0_base + 1) - 16;
+	  sp = get_frame_register_unsigned
+	    (this_frame, gdbarch_tdep (gdbarch)->a0_base + 1) - 16;
 	  
 	  for (i = 0; i < 4; i++, sp += 4)
 	    {
@@ -1122,12 +1264,13 @@ xtensa_frame_cache (struct frame_info *next_frame, void **this_cache)
 	  if (cache->wd.callsize > 4)
 	    {
 	      /* Set A4...A7/A11.  */
-	      /* Read an SP of the previous frame.  */
-	      sp = (CORE_ADDR) read_memory_integer (sp - 12, 4);
-	      sp = (CORE_ADDR) read_memory_integer (sp - 12, 4);
+	      /* Get the SP of the frame previous to the previous one.
+	         To achieve this, we have to dereference SP twice.  */
+	      sp = (CORE_ADDR) read_memory_integer (sp - 12, 4, byte_order);
+	      sp = (CORE_ADDR) read_memory_integer (sp - 12, 4, byte_order);
 	      sp -= cache->wd.callsize * 4;
 
-	      for ( /* i=4  */ ; i < cache->wd.callsize; i++, sp += 4)
+	      for ( i = 4; i < cache->wd.callsize; i++, sp += 4)
 		{
 		  cache->wd.aregs[i] = sp;
 		}
@@ -1138,132 +1281,67 @@ xtensa_frame_cache (struct frame_info *next_frame, void **this_cache)
 	/* If RA is equal to 0 this frame is an outermost frame.  Leave
 	   cache->prev_sp unchanged marking the boundary of the frame stack.  */
 	{
-	  if (cache->wd.ws == 0)
+	  if ((cache->wd.ws & (1 << cache->wd.wb)) == 0)
 	    {
 	      /* Register window overflow already happened.
 		 We can read caller's SP from the proper spill loction.  */
-	      cache->prev_sp =
-		read_memory_integer (cache->wd.aregs[1],
-				     register_size (gdbarch,
-				       gdbarch_tdep (gdbarch)->a0_base + 1));
+	      sp = get_frame_register_unsigned
+		(this_frame, gdbarch_tdep (gdbarch)->a0_base + 1);
+	      cache->prev_sp = read_memory_integer (sp - 12, 4, byte_order);
 	    }
 	  else
 	    {
 	      /* Read caller's frame SP directly from the previous window.  */
-	      int regnum = areg_number
+	      int regnum = arreg_number
 			     (gdbarch, gdbarch_tdep (gdbarch)->a0_base + 1,
 			      cache->wd.wb);
 
-	      cache->prev_sp = xtensa_read_register (regnum);
+	      cache->prev_sp = get_frame_register_unsigned (this_frame, regnum);
 	    }
 	}
     }
   else	/* Call0 framework.  */
     {
-      call0_frame_cache (next_frame, cache, pc);
+      unsigned int litbase_regnum = gdbarch_tdep (gdbarch)->litbase_regnum;
+      CORE_ADDR litbase = (litbase_regnum == -1)
+	? 0 : get_frame_register_unsigned (this_frame, litbase_regnum);
+
+      call0_frame_cache (this_frame, cache, pc, litbase);
+      fp_regnum = cache->c0.fp_regnum;
     }
 
-  cache->base = frame_unwind_register_unsigned
-		  (next_frame, gdbarch_tdep (gdbarch)->a0_base + 1);
+  cache->base = get_frame_register_unsigned (this_frame, fp_regnum);
 
   return cache;
 }
 
 static void
-xtensa_frame_this_id (struct frame_info *next_frame,
+xtensa_frame_this_id (struct frame_info *this_frame,
 		      void **this_cache,
 		      struct frame_id *this_id)
 {
   struct xtensa_frame_cache *cache =
-    xtensa_frame_cache (next_frame, this_cache);
-  struct frame_id id;
-
-  DEBUGTRACE ("xtensa_frame_this_id (next 0x%lx, *this 0x%lx)\n",
-	      (unsigned long) next_frame, (unsigned long) *this_cache);
+    xtensa_frame_cache (this_frame, this_cache);
 
   if (cache->prev_sp == 0)
     return;
 
-  id = frame_id_build (cache->prev_sp, cache->pc);
-  if (frame_id_eq (id, get_frame_id(next_frame)))
-    {
-      warning(_("\
-Frame stack is corrupted. That could happen because of \
-setting register(s) from GDB or stopping execution \
-inside exception handler. Frame backtracing has stopped. \
-It can make some GDB commands work inappropriately.\n"));
-      cache->prev_sp = 0;
-      return;
-    }
-  (*this_id) = id;
+  (*this_id) = frame_id_build (cache->prev_sp, cache->pc);
 }
 
-static int
-call0_frame_get_reg_at_entry (struct frame_info *next_frame,
-			      struct xtensa_frame_cache *cache,
-			      int regnum, 
-			      CORE_ADDR *addrp,
-			      enum lval_type *lval,
-			      gdb_byte *valuep)
-{
-  CORE_ADDR fp, spe;
-  int stkofs;
-  struct gdbarch *gdbarch = get_frame_arch (next_frame);
-  int reg = (regnum >= gdbarch_tdep (gdbarch)->ar_base
-	    && regnum <= (gdbarch_tdep (gdbarch)->ar_base + C0_NREGS))
-	      ? regnum - gdbarch_tdep (gdbarch)->ar_base : regnum;
-
-  /* Determine stack pointer on entry to this function, based on FP.  */
-  spe = cache->c0.c0_fp - cache->c0.c0_rt[cache->c0.fp_regnum].fr_ofs;
-
-  /* If register was saved to the stack frame in the prologue, retrieve it.  */
-  stkofs = cache->c0.c0_rt[reg].to_stk;
-  if (stkofs != C0_NOSTK)
-    {
-      *lval = lval_memory;
-      *addrp = spe + stkofs;
-
-      if (valuep)
-	read_memory (*addrp, valuep, register_size (gdbarch, regnum));
-
-      return 1;
-    }
-
-  /* If not callee-saved or if known to have been overwritten, give up.  */
-  if (reg < C0_CLESV 
-      || cache->c0.c0_rt[reg].fr_reg != reg
-      || cache->c0.c0_rt[reg].fr_ofs != 0)
-    return 0;
-
-  if (get_frame_type (next_frame) != NORMAL_FRAME)
-    /* TODO: Do we need a special case for DUMMY_FRAME here?  */
-    return 0;
-
-  return call0_frame_get_reg_at_entry (get_next_frame(next_frame),
-				       cache, regnum, addrp, lval, valuep);
-}
-
-static void
-xtensa_frame_prev_register (struct frame_info *next_frame,
+static struct value *
+xtensa_frame_prev_register (struct frame_info *this_frame,
 			    void **this_cache,
-			    int regnum,
-			    int *optimizedp,
-			    enum lval_type *lvalp,
-			    CORE_ADDR *addrp,
-			    int *realnump,
-			    gdb_byte *valuep)
+			    int regnum)
 {
-  struct gdbarch *gdbarch = get_frame_arch (next_frame);
-  struct xtensa_frame_cache *cache =
-    xtensa_frame_cache (next_frame, this_cache);
-  CORE_ADDR saved_reg = 0;
+  struct gdbarch *gdbarch = get_frame_arch (this_frame);
+  struct xtensa_frame_cache *cache;
+  ULONGEST saved_reg = 0;
   int done = 1;
 
-  DEBUGTRACE ("xtensa_frame_prev_register (next 0x%lx, "
-	      "*this 0x%lx, regnum %d (%s), ...)\n",
-	      (unsigned long) next_frame,
-	      *this_cache ? (unsigned long) *this_cache : 0, regnum,
-	      xtensa_register_name (gdbarch, regnum));
+  if (*this_cache == NULL)
+    *this_cache = xtensa_frame_cache (this_frame, this_cache);
+  cache = *this_cache;
 
   if (regnum ==gdbarch_pc_regnum (gdbarch))
     saved_reg = cache->ra;
@@ -1272,12 +1350,7 @@ xtensa_frame_prev_register (struct frame_info *next_frame,
   else if (!cache->call0)
     {
       if (regnum == gdbarch_tdep (gdbarch)->ws_regnum)
-	{
-	  if (cache->wd.ws != 0)
-	    saved_reg = cache->wd.ws;
-	  else
-	    saved_reg = 1 << cache->wd.wb;
-	}
+	saved_reg = cache->wd.ws;
       else if (regnum == gdbarch_tdep (gdbarch)->wb_regnum)
 	saved_reg = cache->wd.wb;
       else if (regnum == gdbarch_ps_regnum (gdbarch))
@@ -1289,48 +1362,28 @@ xtensa_frame_prev_register (struct frame_info *next_frame,
     done = 0;
 
   if (done)
-    {
-      *optimizedp = 0;
-      *lvalp = not_lval;
-      *addrp = 0;
-      *realnump = -1;
-      if (valuep)
-	store_unsigned_integer (valuep, 4, saved_reg);
-
-      return;
-    }
+    return frame_unwind_got_constant (this_frame, regnum, saved_reg);
 
   if (!cache->call0) /* Windowed ABI.  */
     {
-      /* Convert A-register numbers to AR-register numbers.  */
+      /* Convert A-register numbers to AR-register numbers,
+	 if we deal with A-register.  */
       if (regnum >= gdbarch_tdep (gdbarch)->a0_base
           && regnum <= gdbarch_tdep (gdbarch)->a0_base + 15)
-	regnum = areg_number (gdbarch, regnum, cache->wd.wb);
+	regnum = arreg_number (gdbarch, regnum, cache->wd.wb);
 
-      /* Check if AR-register has been saved to stack.  */
+      /* Check, if we deal with AR-register saved on stack.  */
       if (regnum >= gdbarch_tdep (gdbarch)->ar_base
 	  && regnum <= (gdbarch_tdep (gdbarch)->ar_base
 			 + gdbarch_tdep (gdbarch)->num_aregs))
 	{
-	  int areg = regnum - gdbarch_tdep (gdbarch)->ar_base
-		       - (cache->wd.wb * 4);
+	  int areg = areg_number (gdbarch, regnum, cache->wd.wb);
 
 	  if (areg >= 0
 	      && areg < XTENSA_NUM_SAVED_AREGS
 	      && cache->wd.aregs[areg] != -1)
-	    {
-	      *optimizedp = 0;
-	      *lvalp = lval_memory;
-	      *addrp = cache->wd.aregs[areg];
-	      *realnump = -1;
-
-	      if (valuep)
-		read_memory (*addrp, valuep,
-			     register_size (gdbarch, regnum));
-
-	      DEBUGINFO ("[xtensa_frame_prev_register] register on stack\n");
-	      return;
-	    }
+	    return frame_unwind_got_memory (this_frame, regnum,
+					    cache->wd.aregs[areg]);
 	}
     }
   else /* Call0 ABI.  */
@@ -1352,17 +1405,8 @@ xtensa_frame_prev_register (struct frame_info *next_frame,
 	      /* Determine SP on entry based on FP.  */
 	      spe = cache->c0.c0_fp
 		- cache->c0.c0_rt[cache->c0.fp_regnum].fr_ofs;
-	      *optimizedp = 0;
-	      *lvalp = lval_memory;
-	      *addrp = spe + stkofs;
-	      *realnump = -1;
-	  
-	      if (valuep)
-		read_memory (*addrp, valuep,
-			     register_size (gdbarch, regnum));
-	  
-	      DEBUGINFO ("[xtensa_frame_prev_register] register on stack\n");
-	      return;
+
+	      return frame_unwind_got_memory (this_frame, regnum, spe + stkofs);
 	    }
 	}
     }
@@ -1370,34 +1414,25 @@ xtensa_frame_prev_register (struct frame_info *next_frame,
   /* All other registers have been either saved to
      the stack or are still alive in the processor.  */
 
-  *optimizedp = 0;
-  *lvalp = lval_register;
-  *addrp = 0;
-  *realnump = regnum;
-  if (valuep)
-    frame_unwind_register (next_frame, (*realnump), valuep);
+  return frame_unwind_got_register (this_frame, regnum, regnum);
 }
 
 
 static const struct frame_unwind
-xtensa_frame_unwind =
+xtensa_unwind =
 {
   NORMAL_FRAME,
   xtensa_frame_this_id,
-  xtensa_frame_prev_register
+  xtensa_frame_prev_register,
+  NULL,
+  default_frame_sniffer
 };
 
-static const struct frame_unwind *
-xtensa_frame_sniffer (struct frame_info *next_frame)
-{
-  return &xtensa_frame_unwind;
-}
-
 static CORE_ADDR
-xtensa_frame_base_address (struct frame_info *next_frame, void **this_cache)
+xtensa_frame_base_address (struct frame_info *this_frame, void **this_cache)
 {
   struct xtensa_frame_cache *cache =
-    xtensa_frame_cache (next_frame, this_cache);
+    xtensa_frame_cache (this_frame, this_cache);
 
   return cache->base;
 }
@@ -1405,7 +1440,7 @@ xtensa_frame_base_address (struct frame_info *next_frame, void **this_cache)
 static const struct frame_base
 xtensa_frame_base =
 {
-  &xtensa_frame_unwind,
+  &xtensa_unwind,
   xtensa_frame_base_address,
   xtensa_frame_base_address,
   xtensa_frame_base_address
@@ -1443,7 +1478,7 @@ xtensa_extract_return_value (struct type *type,
 	 register (A2) in the caller window.  */
       regcache_raw_read_unsigned
 	(regcache, gdbarch_tdep (gdbarch)->wb_regnum, &wb);
-      areg = areg_number (gdbarch,
+      areg = arreg_number (gdbarch,
 			  gdbarch_tdep (gdbarch)->a0_base + 2 + callsize, wb);
     }
   else
@@ -1493,8 +1528,8 @@ xtensa_store_return_value (struct type *type,
 	internal_error (__FILE__, __LINE__,
 			_("unimplemented for this length: %d"),
 			TYPE_LENGTH (type));
-      areg = areg_number (gdbarch,
-			  gdbarch_tdep (gdbarch)->a0_base + 2 + callsize, wb);
+      areg = arreg_number (gdbarch,
+			   gdbarch_tdep (gdbarch)->a0_base + 2 + callsize, wb);
 
       DEBUGTRACE ("[xtensa_store_return_value] callsize %d wb %d\n",
               callsize, (int) wb);
@@ -1519,6 +1554,7 @@ xtensa_store_return_value (struct type *type,
 
 static enum return_value_convention
 xtensa_return_value (struct gdbarch *gdbarch,
+		     struct type *func_type,
 		     struct type *valtype,
 		     struct regcache *regcache,
 		     gdb_byte *readbuf,
@@ -1563,6 +1599,7 @@ xtensa_push_dummy_call (struct gdbarch *gdbarch,
 			int struct_return,
 			CORE_ADDR struct_addr)
 {
+  enum bfd_endian byte_order = gdbarch_byte_order (gdbarch);
   int i;
   int size, onstack_size;
   gdb_byte *buf = (gdb_byte *) alloca (16);
@@ -1645,9 +1682,10 @@ xtensa_push_dummy_call (struct gdbarch *gdbarch,
 	case TYPE_CODE_ENUM:
 
 	  /* Cast argument to long if necessary as the mask does it too.  */
-	  if (TYPE_LENGTH (arg_type) < TYPE_LENGTH (builtin_type_long))
+	  if (TYPE_LENGTH (arg_type)
+	      < TYPE_LENGTH (builtin_type (gdbarch)->builtin_long))
 	    {
-	      arg_type = builtin_type_long;
+	      arg_type = builtin_type (gdbarch)->builtin_long;
 	      arg = value_cast (arg_type, arg);
 	    }
 	  /* Aligment is equal to the type length for the basic types.  */
@@ -1657,15 +1695,16 @@ xtensa_push_dummy_call (struct gdbarch *gdbarch,
 	case TYPE_CODE_FLT:
 
 	  /* Align doubles correctly.  */
-	  if (TYPE_LENGTH (arg_type) == TYPE_LENGTH (builtin_type_double))
-	    info->align = TYPE_LENGTH (builtin_type_double);
+	  if (TYPE_LENGTH (arg_type)
+	      == TYPE_LENGTH (builtin_type (gdbarch)->builtin_double))
+	    info->align = TYPE_LENGTH (builtin_type (gdbarch)->builtin_double);
 	  else
-	    info->align = TYPE_LENGTH (builtin_type_long);
+	    info->align = TYPE_LENGTH (builtin_type (gdbarch)->builtin_long);
 	  break;
 
 	case TYPE_CODE_STRUCT:
 	default:
-	  info->align = TYPE_LENGTH (builtin_type_long);
+	  info->align = TYPE_LENGTH (builtin_type (gdbarch)->builtin_long);
 	  break;
 	}
       info->length = TYPE_LENGTH (arg_type);
@@ -1704,7 +1743,7 @@ xtensa_push_dummy_call (struct gdbarch *gdbarch,
 
   if (struct_return)
     {
-      store_unsigned_integer (buf, REGISTER_SIZE, struct_addr);
+      store_unsigned_integer (buf, REGISTER_SIZE, byte_order, struct_addr);
       regcache_cooked_write (regcache, ARG_1ST (gdbarch), buf);
     }
 
@@ -1740,13 +1779,13 @@ xtensa_push_dummy_call (struct gdbarch *gdbarch,
 	     than REGISTER_SIZE; for larger odd-sized structures the excess
 	     will be left-aligned in the register on both endiannesses.  */
 
-	  if (n < REGISTER_SIZE
-	      && gdbarch_byte_order (gdbarch) == BFD_ENDIAN_BIG)
+	  if (n < REGISTER_SIZE && byte_order == BFD_ENDIAN_BIG)
 	    {
-	      ULONGEST v = extract_unsigned_integer (cp, REGISTER_SIZE);
+	      ULONGEST v;
+	      v = extract_unsigned_integer (cp, REGISTER_SIZE, byte_order);
 	      v = v >> ((REGISTER_SIZE - n) * TARGET_CHAR_BIT);
 
-	      store_unsigned_integer (buf, REGISTER_SIZE, v);
+	      store_unsigned_integer (buf, REGISTER_SIZE, byte_order, v);
 	      regcache_cooked_write (regcache, r, buf);
 
 	      cp += REGISTER_SIZE;
@@ -1773,7 +1812,7 @@ xtensa_push_dummy_call (struct gdbarch *gdbarch,
     {
       ra = (bp_addr & 0x3fffffff) | 0x40000000;
       regcache_raw_read (regcache, gdbarch_ps_regnum (gdbarch), buf);
-      ps = extract_unsigned_integer (buf, 4) & ~0x00030000;
+      ps = extract_unsigned_integer (buf, 4, byte_order) & ~0x00030000;
       regcache_cooked_write_unsigned
 	(regcache, gdbarch_tdep (gdbarch)->a0_base + 4, ra);
       regcache_cooked_write_unsigned (regcache,
@@ -1786,9 +1825,9 @@ xtensa_push_dummy_call (struct gdbarch *gdbarch,
 	 is only one register window corresponding to WINDOWEBASE.  */
 
       regcache_raw_read (regcache, gdbarch_tdep (gdbarch)->wb_regnum, buf);
-      regcache_cooked_write_unsigned (regcache,
-				      gdbarch_tdep (gdbarch)->ws_regnum,
-				      1 << extract_unsigned_integer (buf, 4));
+      regcache_cooked_write_unsigned
+	(regcache, gdbarch_tdep (gdbarch)->ws_regnum,
+	 1 << extract_unsigned_integer (buf, 4, byte_order));
     }
   else
     {
@@ -1940,11 +1979,13 @@ call0_classify_opcode (xtensa_isa isa, xtensa_opcode opc)
    the stack frame.  */
 
 static void
-call0_track_op (xtensa_c0reg_t dst[], xtensa_c0reg_t src[],
+call0_track_op (struct gdbarch *gdbarch,
+		xtensa_c0reg_t dst[], xtensa_c0reg_t src[],
 		xtensa_insn_kind opclass, int nods, unsigned odv[],
-		CORE_ADDR pc, int spreg)
+		CORE_ADDR pc, CORE_ADDR litbase, int spreg)
 {
-  unsigned litbase, litaddr, litval;
+  enum bfd_endian byte_order = gdbarch_byte_order (gdbarch);
+  unsigned litaddr, litval;
 
   switch (opclass)
     {
@@ -1994,14 +2035,10 @@ call0_track_op (xtensa_c0reg_t dst[], xtensa_c0reg_t src[],
     case c0opc_l32r:
       /* 2 operands: dst, literal offset.  */
       gdb_assert (nods == 2);
-      /* litbase = xtensa_get_litbase (pc); can be also used.  */
-      litbase = (gdbarch_tdep (current_gdbarch)->litbase_regnum == -1)
-	? 0 : xtensa_read_register
-		(gdbarch_tdep (current_gdbarch)->litbase_regnum);
       litaddr = litbase & 1
 		  ? (litbase & ~1) + (signed)odv[1]
 		  : (pc + 3  + (signed)odv[1]) & ~3;
-      litval = read_memory_integer(litaddr, 4);
+      litval = read_memory_integer (litaddr, 4, byte_order);
       dst[odv[0]].fr_reg = C0_CONST;
       dst[odv[0]].fr_ofs = litval;
       break;
@@ -2054,14 +2091,14 @@ call0_track_op (xtensa_c0reg_t dst[], xtensa_c0reg_t src[],
       because they begin with default assumptions that analysis may change.  */
 
 static CORE_ADDR
-call0_analyze_prologue (CORE_ADDR start, CORE_ADDR pc,
+call0_analyze_prologue (struct gdbarch *gdbarch,
+			CORE_ADDR start, CORE_ADDR pc, CORE_ADDR litbase,
 			int nregs, xtensa_c0reg_t rt[], int *call0)
 {
   CORE_ADDR ia;		    /* Current insn address in prologue.  */
   CORE_ADDR ba = 0;	    /* Current address at base of insn buffer.  */
   CORE_ADDR bt;		    /* Current address at top+1 of insn buffer.  */
-  #define BSZ 32	    /* Instruction buffer size.  */
-  char ibuf[BSZ];	    /* Instruction buffer for decoding prologue.  */
+  char ibuf[XTENSA_ISA_BSZ];/* Instruction buffer for decoding prologue.  */
   xtensa_isa isa;	    /* libisa ISA handle.  */
   xtensa_insnbuf ins, slot; /* libisa handle to decoded insn, slot.  */
   xtensa_format ifmt;	    /* libisa instruction format.  */
@@ -2090,7 +2127,7 @@ call0_analyze_prologue (CORE_ADDR start, CORE_ADDR pc,
      Assume we may be in the prologue until we hit a flow control instr.  */
 
   rtmp = NULL;
-  body_pc = INT_MAX;
+  body_pc = UINT_MAX;
   end_pc = 0;
 
   /* Find out, if we have an information about the prologue from DWARF.  */
@@ -2121,7 +2158,7 @@ call0_analyze_prologue (CORE_ADDR start, CORE_ADDR pc,
   if (!xtensa_default_isa)
     xtensa_default_isa = xtensa_isa_init (0, 0);
   isa = xtensa_default_isa;
-  gdb_assert (BSZ >= xtensa_isa_maxlength (isa));
+  gdb_assert (XTENSA_ISA_BSZ >= xtensa_isa_maxlength (isa));
   ins = xtensa_insnbuf_alloc (isa);
   slot = xtensa_insnbuf_alloc (isa);
 
@@ -2134,8 +2171,10 @@ call0_analyze_prologue (CORE_ADDR start, CORE_ADDR pc,
       if (ia + xtensa_isa_maxlength (isa) > bt)
         {
 	  ba = ia;
-	  bt = (ba + BSZ) < body_pc ? ba + BSZ : body_pc;
+	  bt = (ba + XTENSA_ISA_BSZ) < body_pc ? ba + XTENSA_ISA_BSZ : body_pc;
 	  read_memory (ba, ibuf, bt - ba);
+	  /* If there is a memory reading error read_memory () will report it
+	     and then throw an exception, stopping command execution.  */
 	}
 
       /* Decode format information.  */
@@ -2246,7 +2285,8 @@ call0_analyze_prologue (CORE_ADDR start, CORE_ADDR pc,
 	    }
 
 	  /* Track register movement and modification for this operation.  */
-	  call0_track_op (rt, rtmp, opclass, nods, odv, ia, 1);
+	  call0_track_op (gdbarch, rt, rtmp, opclass,
+			  nods, odv, ia, litbase, 1);
 	}
     }
 done:
@@ -2254,18 +2294,17 @@ done:
 	     (unsigned)ia, fail ? "failed" : "succeeded");
   xtensa_insnbuf_free(isa, slot);
   xtensa_insnbuf_free(isa, ins);
-  return fail ? 0 : ia;
+  return fail ? XTENSA_ISA_BADPC : ia;
 }
 
-/* Initialize frame cache for the current frame.  The "next_frame" is the next
-   one relative to current frame.  "cache" is the pointer to the data structure
-   we have to initialize.  "pc" is curretnt PC.  */
+/* Initialize frame cache for the current frame in CALL0 ABI.  */
 
 static void
-call0_frame_cache (struct frame_info *next_frame,
-		   xtensa_frame_cache_t *cache, CORE_ADDR pc)
+call0_frame_cache (struct frame_info *this_frame,
+		   xtensa_frame_cache_t *cache, CORE_ADDR pc, CORE_ADDR litbase)
 {
-  struct gdbarch *gdbarch = get_frame_arch (next_frame);
+  struct gdbarch *gdbarch = get_frame_arch (this_frame);
+  enum bfd_endian byte_order = gdbarch_byte_order (gdbarch);
   CORE_ADDR start_pc;		/* The beginning of the function.  */
   CORE_ADDR body_pc=UINT_MAX;	/* PC, where prologue analysis stopped.  */
   CORE_ADDR sp, fp, ra;
@@ -2276,13 +2315,18 @@ call0_frame_cache (struct frame_info *next_frame,
 
   if (find_pc_partial_function (pc, NULL, &start_pc, NULL))
     {
-      body_pc = call0_analyze_prologue (start_pc, pc, C0_NREGS,
+      body_pc = call0_analyze_prologue (gdbarch, start_pc, pc, litbase,
+					C0_NREGS,
 					&cache->c0.c0_rt[0],
 					&cache->call0);
+
+      if (body_pc == XTENSA_ISA_BADPC)
+	error (_("Xtensa-specific internal error: CALL0 prologue \
+analysis failed in this frame. GDB command execution stopped."));
     }
   
-  sp = frame_unwind_register_unsigned
-	 (next_frame, gdbarch_tdep (gdbarch)->a0_base + 1);
+  sp = get_frame_register_unsigned
+    (this_frame, gdbarch_tdep (gdbarch)->a0_base + 1);
   fp = sp; /* Assume FP == SP until proven otherwise.  */
 
   /* Get the frame information and FP (if used) at the current PC.
@@ -2317,7 +2361,7 @@ call0_frame_cache (struct frame_info *next_frame,
      alloca() and other dynamic allocations.  Adjust frame size by FP - SP.  */
   if (c0_hasfp)
     {
-      fp = frame_unwind_register_unsigned (next_frame, fp_regnum);
+      fp = get_frame_register_unsigned (this_frame, fp_regnum);
 
       /* Recalculate previous SP.  */
       prev_sp = fp + c0_frmsz;
@@ -2331,7 +2375,8 @@ call0_frame_cache (struct frame_info *next_frame,
   to_stk = cache->c0.c0_rt[C0_RA].to_stk;
   if (to_stk != C0_NOSTK)
     ra = (CORE_ADDR) 
-      read_memory_integer (sp + c0_frmsz + cache->c0.c0_rt[C0_RA].to_stk, 4);
+      read_memory_integer (sp + c0_frmsz + cache->c0.c0_rt[C0_RA].to_stk,
+			   4, byte_order);
 
   else if (cache->c0.c0_rt[C0_RA].fr_reg == C0_CONST
 	   && cache->c0.c0_rt[C0_RA].fr_ofs == 0)
@@ -2359,11 +2404,11 @@ call0_frame_cache (struct frame_info *next_frame,
 	   ++i);
       if (i >= C0_NREGS && cache->c0.c0_rt[C0_RA].fr_reg == C0_RA)
 	i = C0_RA;
-      if (i < C0_NREGS) /* Read from the next_frame.  */
+      if (i < C0_NREGS)
 	{
-	  ra = frame_unwind_register_unsigned
-		 (next_frame,
-		  gdbarch_tdep (gdbarch)->a0_base + cache->c0.c0_rt[i].fr_reg);
+	  ra = get_frame_register_unsigned
+	    (this_frame,
+	     gdbarch_tdep (gdbarch)->a0_base + cache->c0.c0_rt[i].fr_reg);
 	}
       else ra = 0;
     }
@@ -2416,7 +2461,7 @@ call0_frame_cache (struct frame_info *next_frame,
 
 /* #define DONT_SKIP_PROLOGUE  */
 
-CORE_ADDR
+static CORE_ADDR
 xtensa_skip_prologue (struct gdbarch *gdbarch, CORE_ADDR start_pc)
 {
   struct symtab_and_line prologue_sal;
@@ -2450,7 +2495,7 @@ xtensa_skip_prologue (struct gdbarch *gdbarch, CORE_ADDR start_pc)
     }
 
   /* No debug line info.  Analyze prologue for Call0 or simply skip ENTRY.  */
-  body_pc = call0_analyze_prologue(start_pc, 0, 0, NULL, NULL);
+  body_pc = call0_analyze_prologue (gdbarch, start_pc, 0, 0, 0, NULL, NULL);
   return body_pc != 0 ? body_pc : start_pc;
 }
 
@@ -2461,7 +2506,7 @@ xtensa_verify_config (struct gdbarch *gdbarch)
   struct ui_file *log;
   struct cleanup *cleanups;
   struct gdbarch_tdep *tdep;
-  long dummy;
+  long length;
   char *buf;
 
   tdep = gdbarch_tdep (gdbarch);
@@ -2494,9 +2539,9 @@ xtensa_verify_config (struct gdbarch *gdbarch)
   if (tdep->a0_base == -1)
     fprintf_unfiltered (log, _("\n\ta0_base: No Ax registers"));
 
-  buf = ui_file_xstrdup (log, &dummy);
+  buf = ui_file_xstrdup (log, &length);
   make_cleanup (xfree, buf);
-  if (strlen (buf) > 0)
+  if (length > 0)
     internal_error (__FILE__, __LINE__,
 		    _("the following are invalid: %s"), buf);
   do_cleanups (cleanups);
@@ -2505,7 +2550,7 @@ xtensa_verify_config (struct gdbarch *gdbarch)
 
 /* Derive specific register numbers from the array of registers.  */
 
-void
+static void
 xtensa_derive_tdep (struct gdbarch_tdep *tdep)
 {
   xtensa_register_t* rmap;
@@ -2613,9 +2658,8 @@ xtensa_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
   set_gdbarch_pc_regnum (gdbarch, tdep->pc_regnum);
   set_gdbarch_ps_regnum (gdbarch, tdep->ps_regnum);
 
-  /* Renumber registers for known formats (stab, dwarf, and dwarf2).  */
+  /* Renumber registers for known formats (stabs and dwarf2).  */
   set_gdbarch_stab_reg_to_regnum (gdbarch, xtensa_reg_to_regnum);
-  set_gdbarch_dwarf_reg_to_regnum (gdbarch, xtensa_reg_to_regnum);
   set_gdbarch_dwarf2_reg_to_regnum (gdbarch, xtensa_reg_to_regnum);
 
   /* We provide our own function to get register information.  */
@@ -2649,11 +2693,12 @@ xtensa_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
 
   set_gdbarch_frame_align (gdbarch, xtensa_frame_align);
 
-  set_gdbarch_unwind_dummy_id (gdbarch, xtensa_unwind_dummy_id);
+  set_gdbarch_dummy_id (gdbarch, xtensa_dummy_id);
 
   /* Frame handling.  */
   frame_base_set_default (gdbarch, &xtensa_frame_base);
-  frame_unwind_append_sniffer (gdbarch, xtensa_frame_sniffer);
+  frame_unwind_append_unwinder (gdbarch, &xtensa_unwind);
+  dwarf2_append_unwinders (gdbarch);
 
   set_gdbarch_print_insn (gdbarch, print_insn_xtensa);
 
@@ -2665,6 +2710,9 @@ xtensa_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
   set_gdbarch_regset_from_core_section (gdbarch,
 					xtensa_regset_from_core_section);
 
+  set_solib_svr4_fetch_link_map_offsets
+    (gdbarch, svr4_ilp32_fetch_link_map_offsets);
+
   return gdbarch;
 }
 
@@ -2673,6 +2721,9 @@ xtensa_dump_tdep (struct gdbarch *gdbarch, struct ui_file *file)
 {
   error (_("xtensa_dump_tdep(): not implemented"));
 }
+
+/* Provide a prototype to silence -Wmissing-prototypes.  */
+extern initialize_file_ftype _initialize_xtensa_tdep;
 
 void
 _initialize_xtensa_tdep (void)

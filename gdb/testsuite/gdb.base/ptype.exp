@@ -1,5 +1,5 @@
 # Copyright 1988, 1990, 1991, 1992, 1994, 1995, 1996, 1997, 1999, 2000, 2002,
-# 2003, 2007, 2008 Free Software Foundation, Inc.
+# 2003, 2007, 2008, 2009, 2010 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -13,9 +13,6 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
-
-# Please email any bugs, comments, and/or additions to this file to:
-# bug-gdb@prep.ai.mit.edu
 
 # This file was written by Rob Savoye. (rob@cygnus.com)
 
@@ -629,7 +626,8 @@ if [runto_main] then {
 
   # We need to up this because this can be really slow on some boards.
   # (malloc() is called as part of the test).
-  set timeout 60;
+  set prev_timeout $timeout
+  set timeout 60
 
   gdb_test "ptype \"abc\""	"type = char \\\[4\\\]"
   gdb_test "ptype {'a','b','c'}"	"type = char \\\[3\\\]"
@@ -638,7 +636,9 @@ if [runto_main] then {
   gdb_test "ptype {(float)0,(float)1,(float)2}" "type = float \\\[3\\\]"
   gdb_test "ptype {{0,1,2},{3,4,5}}"	"type = int \\\[2\\\]\\\[3\\\]"
   gdb_test "ptype {4,5,6}\[2\]"	"type = int"
-  gdb_test "ptype *&{4,5,6}\[1\]"	"type = int"
+  gdb_test "ptype *&{4,5,6}\[1\]"	"Attempt to take address of value not located in memory."
+
+  set timeout $prev_timeout
 
   # Test ptype of user register
   gdb_test "ptype \$pc" "void \\(\\*\\)\\(\\)" "ptype \$pc"

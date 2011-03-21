@@ -1,6 +1,6 @@
 /* Scheme/Guile language support routines for GDB, the GNU debugger.
 
-   Copyright (C) 1995, 1996, 2000, 2003, 2005, 2008
+   Copyright (C) 1995, 1996, 2000, 2003, 2005, 2008, 2009, 2010
    Free Software Foundation, Inc.
 
    This file is part of GDB.
@@ -312,7 +312,8 @@ tryagain:
 	  if (!is_scmvalue_type (value_type (val)))
 	    error ("quoted scm form yields non-SCM value");
 	  svalue = extract_signed_integer (value_contents (val),
-					   TYPE_LENGTH (value_type (val)));
+					   TYPE_LENGTH (value_type (val)),
+					   gdbarch_byte_order (parse_gdbarch));
 	  goto handle_immediate;
 	}
       return;
@@ -470,7 +471,7 @@ handle_immediate:
   if (!skipping)
     {
       write_exp_elt_opcode (OP_LONG);
-      write_exp_elt_type (builtin_type_scm);
+      write_exp_elt_type (builtin_scm_type (parse_gdbarch)->builtin_scm);
       write_exp_elt_longcst (svalue);
       write_exp_elt_opcode (OP_LONG);
     }

@@ -1,5 +1,6 @@
 /* Target-dependent code for GNU/Linux on Alpha.
-   Copyright (C) 2002, 2003, 2007, 2008 Free Software Foundation, Inc.
+   Copyright (C) 2002, 2003, 2007, 2008, 2009, 2010
+   Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -44,9 +45,9 @@
 */
 
 static long
-alpha_linux_sigtramp_offset_1 (CORE_ADDR pc)
+alpha_linux_sigtramp_offset_1 (struct gdbarch *gdbarch, CORE_ADDR pc)
 {
-  switch (alpha_read_insn (pc))
+  switch (alpha_read_insn (gdbarch, pc))
     {
     case 0x47de0410:		/* bis $30,$30,$16 */
     case 0x47fe0410:		/* bis $31,$30,$16 */
@@ -66,7 +67,7 @@ alpha_linux_sigtramp_offset_1 (CORE_ADDR pc)
 }
 
 static LONGEST
-alpha_linux_sigtramp_offset (CORE_ADDR pc)
+alpha_linux_sigtramp_offset (struct gdbarch *gdbarch, CORE_ADDR pc)
 {
   long i, off;
 
@@ -74,7 +75,7 @@ alpha_linux_sigtramp_offset (CORE_ADDR pc)
     return -1;
 
   /* Guess where we might be in the sequence.  */
-  off = alpha_linux_sigtramp_offset_1 (pc);
+  off = alpha_linux_sigtramp_offset_1 (gdbarch, pc);
   if (off < 0)
     return -1;
 
@@ -84,7 +85,7 @@ alpha_linux_sigtramp_offset (CORE_ADDR pc)
     {
       if (i == off)
 	continue;
-      if (alpha_linux_sigtramp_offset_1 (pc + i) != i)
+      if (alpha_linux_sigtramp_offset_1 (gdbarch, pc + i) != i)
 	return -1;
     }
 
@@ -92,22 +93,24 @@ alpha_linux_sigtramp_offset (CORE_ADDR pc)
 }
 
 static int
-alpha_linux_pc_in_sigtramp (CORE_ADDR pc, char *func_name)
+alpha_linux_pc_in_sigtramp (struct gdbarch *gdbarch,
+			    CORE_ADDR pc, char *func_name)
 {
-  return alpha_linux_sigtramp_offset (pc) >= 0;
+  return alpha_linux_sigtramp_offset (gdbarch, pc) >= 0;
 }
 
 static CORE_ADDR
-alpha_linux_sigcontext_addr (struct frame_info *next_frame)
+alpha_linux_sigcontext_addr (struct frame_info *this_frame)
 {
+  struct gdbarch *gdbarch = get_frame_arch (this_frame);
   CORE_ADDR pc;
   ULONGEST sp;
   long off;
 
-  pc = frame_pc_unwind (next_frame);
-  sp = frame_unwind_register_unsigned (next_frame, ALPHA_SP_REGNUM);
+  pc = get_frame_pc (this_frame);
+  sp = get_frame_register_unsigned (this_frame, ALPHA_SP_REGNUM);
 
-  off = alpha_linux_sigtramp_offset (pc);
+  off = alpha_linux_sigtramp_offset (gdbarch, pc);
   gdb_assert (off >= 0);
 
   /* __NR_rt_sigreturn has a couple of structures on the stack.  This is:
@@ -119,7 +122,7 @@ alpha_linux_sigcontext_addr (struct frame_info *next_frame)
 
 	offsetof (struct rt_sigframe, uc.uc_mcontext);
   */
-  if (alpha_read_insn (pc - off + 4) == 0x201f015f)
+  if (alpha_read_insn (gdbarch, pc - off + 4) == 0x201f015f)
     return sp + 176;
 
   /* __NR_sigreturn has the sigcontext structure at the top of the stack.  */
@@ -191,7 +194,7 @@ static struct regset alpha_linux_fpregset =
 /* Return the appropriate register set for the core section identified
    by SECT_NAME and SECT_SIZE.  */
 
-const struct regset *
+static const struct regset *
 alpha_linux_regset_from_core_section (struct gdbarch *gdbarch,
 				      const char *sect_name, size_t sect_size)
 {
@@ -234,6 +237,9 @@ alpha_linux_init_abi (struct gdbarch_info info, struct gdbarch *gdbarch)
   set_gdbarch_regset_from_core_section
     (gdbarch, alpha_linux_regset_from_core_section);
 }
+
+/* Provide a prototype to silence -Wmissing-prototypes.  */
+extern initialize_file_ftype _initialize_alpha_linux_tdep;
 
 void
 _initialize_alpha_linux_tdep (void)

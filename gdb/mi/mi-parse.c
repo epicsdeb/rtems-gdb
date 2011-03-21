@@ -1,6 +1,7 @@
 /* MI Command Set - MI parser.
 
-   Copyright (C) 2000, 2001, 2002, 2007, 2008 Free Software Foundation, Inc.
+   Copyright (C) 2000, 2001, 2002, 2007, 2008, 2009, 2010
+   Free Software Foundation, Inc.
 
    Contributed by Cygnus Solutions (a Red Hat company).
 
@@ -150,6 +151,8 @@ mi_parse (char *cmd)
   char *chp;
   struct mi_parse *parse = XMALLOC (struct mi_parse);
   memset (parse, 0, sizeof (*parse));
+  parse->thread = -1;
+  parse->frame = -1;
 
   /* Before starting, skip leading white space. */
   while (isspace (*cmd))
@@ -199,6 +202,40 @@ mi_parse (char *cmd)
   while (isspace (*chp))
     chp++;
 
+  /* Parse the --thread and --frame options, if present.  At present,
+     some important commands, like '-break-*' are implemented by forwarding
+     to the CLI layer directly.  We want to parse --thread and --frame
+     here, so as not to leave those option in the string that will be passed
+     to CLI.  */
+  for (;;)
+    {
+      char *start = chp;
+      size_t ts = sizeof ("--thread ") - 1;
+      size_t fs = sizeof ("--frame ") - 1;
+      if (strncmp (chp, "--thread ", ts) == 0)
+	{
+	  if (parse->thread != -1)
+	    error ("Duplicate '--thread' option");
+	  chp += ts;
+	  parse->thread = strtol (chp, &chp, 10);
+	}
+      else if (strncmp (chp, "--frame ", fs) == 0)
+	{
+	  if (parse->frame != -1)
+	    error ("Duplicate '--frame' option");
+	  chp += fs;
+	  parse->frame = strtol (chp, &chp, 10);
+	}
+      else
+	break;
+
+      if (*chp != '\0' && !isspace (*chp))
+	error ("Invalid value for the '%s' option",
+	       start[2] == 't' ? "--thread" : "--frame");
+      while (isspace (*chp))
+	chp++;
+    }
+
   /* For new argv commands, attempt to return the parsed argument
      list. */
   if (parse->cmd->argv_func != NULL)
@@ -217,13 +254,10 @@ mi_parse (char *cmd)
     }
 
   /* FIXME: DELETE THIS */
-  /* For CLI and old ARGS commands, also return the remainder of the
+  /* For CLI commands, also return the remainder of the
      command line as a single string. */
-  if (parse->cmd->args_func != NULL
-      || parse->cmd->cli.cmd != NULL)
-    {
-      parse->args = xstrdup (chp);
-    }
+  if (parse->cmd->cli.cmd != NULL)
+    parse->args = xstrdup (chp);
 
   /* Fully parsed. */
   parse->op = MI_COMMAND;

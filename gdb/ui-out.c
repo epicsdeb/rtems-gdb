@@ -1,6 +1,6 @@
 /* Output generating routines for GDB.
 
-   Copyright (C) 1999, 2000, 2001, 2002, 2004, 2005, 2007, 2008
+   Copyright (C) 1999, 2000, 2001, 2002, 2004, 2005, 2007, 2008, 2009, 2010
    Free Software Foundation, Inc.
 
    Contributed by Cygnus Solutions.
@@ -44,7 +44,7 @@ struct ui_out_hdr
    is always available.  Stack/nested level 0 is reserved for the
    top-level result. */
 
-enum { MAX_UI_OUT_LEVELS = 6 };
+enum { MAX_UI_OUT_LEVELS = 8 };
 
 struct ui_out_level
   {
@@ -488,10 +488,11 @@ ui_out_field_fmt_int (struct ui_out *uiout,
 void
 ui_out_field_core_addr (struct ui_out *uiout,
 			const char *fldname,
+			struct gdbarch *gdbarch,
 			CORE_ADDR address)
 {
   char addstr[20];
-  int addr_bit = gdbarch_addr_bit (current_gdbarch);
+  int addr_bit = gdbarch_addr_bit (gdbarch);
 
   if (addr_bit < (sizeof (CORE_ADDR) * HOST_CHAR_BIT))
     address &= ((CORE_ADDR) 1 << addr_bit) - 1;

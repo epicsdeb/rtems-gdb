@@ -1,5 +1,5 @@
 /* SPU target-dependent code for GDB, the GNU debugger.
-   Copyright (C) 2006, 2007, 2008 Free Software Foundation, Inc.
+   Copyright (C) 2006, 2007, 2008, 2009, 2010 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -49,5 +49,15 @@ enum spu_regnum
 
 /* Local store.  */
 #define SPU_LS_SIZE          0x40000
+
+/* Address conversions.  */
+#define SPUADDR(spu, addr) \
+  ((spu) != -1? (ULONGEST)1 << 63 | (ULONGEST)(spu) << 32 | (addr) : (addr))
+#define SPUADDR_SPU(addr) \
+  (((addr) & (ULONGEST)1 << 63) \
+   ? (int) ((ULONGEST)(addr) >> 32 & 0x7fffffff) \
+   : -1)
+#define SPUADDR_ADDR(addr) \
+  (((addr) & (ULONGEST)1 << 63)? (ULONGEST)(addr) & 0xffffffff : (addr))
 
 #endif

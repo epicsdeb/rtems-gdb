@@ -1,6 +1,6 @@
 /* Objective-C language support routines for GDB, the GNU debugger.
 
-   Copyright (C) 2002, 2003, 2004, 2005, 2007, 2008
+   Copyright (C) 2002, 2003, 2004, 2005, 2007, 2008, 2009, 2010
    Free Software Foundation, Inc.
 
    Contributed by Apple Computer, Inc.
@@ -76,6 +76,8 @@ struct objc_method {
   CORE_ADDR imp;
 };
 
+static const struct objfile_data *objc_objfile_data;
+
 /* Lookup a structure type named "struct NAME", visible in lexical
    block BLOCK.  If NOERR is nonzero, return zero if NAME is not
    suitably defined.  */
@@ -85,8 +87,7 @@ lookup_struct_typedef (char *name, struct block *block, int noerr)
 {
   struct symbol *sym;
 
-  sym = lookup_symbol (name, block, STRUCT_DOMAIN, 0, 
-		       (struct symtab **) NULL);
+  sym = lookup_symbol (name, block, STRUCT_DOMAIN, 0);
 
   if (sym == NULL)
     {
@@ -107,8 +108,9 @@ lookup_struct_typedef (char *name, struct block *block, int noerr)
 }
 
 CORE_ADDR 
-lookup_objc_class (char *classname)
+lookup_objc_class (struct gdbarch *gdbarch, char *classname)
 {
+  struct type *char_type = builtin_type (gdbarch)->builtin_char;
   struct value * function, *classval;
 
   if (! target_has_execution)
@@ -118,24 +120,25 @@ lookup_objc_class (char *classname)
     }
 
   if (lookup_minimal_symbol("objc_lookUpClass", 0, 0))
-    function = find_function_in_inferior("objc_lookUpClass");
+    function = find_function_in_inferior("objc_lookUpClass", NULL);
   else if (lookup_minimal_symbol ("objc_lookup_class", 0, 0))
-    function = find_function_in_inferior("objc_lookup_class");
+    function = find_function_in_inferior("objc_lookup_class", NULL);
   else
     {
       complaint (&symfile_complaints, _("no way to lookup Objective-C classes"));
       return 0;
     }
 
-  classval = value_string (classname, strlen (classname) + 1);
+  classval = value_string (classname, strlen (classname) + 1, char_type);
   classval = value_coerce_array (classval);
   return (CORE_ADDR) value_as_long (call_function_by_hand (function, 
 							   1, &classval));
 }
 
 CORE_ADDR
-lookup_child_selector (char *selname)
+lookup_child_selector (struct gdbarch *gdbarch, char *selname)
 {
+  struct type *char_type = builtin_type (gdbarch)->builtin_char;
   struct value * function, *selstring;
 
   if (! target_has_execution)
@@ -145,9 +148,9 @@ lookup_child_selector (char *selname)
     }
 
   if (lookup_minimal_symbol("sel_getUid", 0, 0))
-    function = find_function_in_inferior("sel_getUid");
+    function = find_function_in_inferior("sel_getUid", NULL);
   else if (lookup_minimal_symbol ("sel_get_any_uid", 0, 0))
-    function = find_function_in_inferior("sel_get_any_uid");
+    function = find_function_in_inferior("sel_get_any_uid", NULL);
   else
     {
       complaint (&symfile_complaints, _("no way to lookup Objective-C selectors"));
@@ -155,13 +158,14 @@ lookup_child_selector (char *selname)
     }
 
   selstring = value_coerce_array (value_string (selname, 
-						strlen (selname) + 1));
+						strlen (selname) + 1, char_type));
   return value_as_long (call_function_by_hand (function, 1, &selstring));
 }
 
 struct value * 
-value_nsstring (char *ptr, int len)
+value_nsstring (struct gdbarch *gdbarch, char *ptr, int len)
 {
+  struct type *char_type = builtin_type (gdbarch)->builtin_char;
   struct value *stringValue[3];
   struct value *function, *nsstringValue;
   struct symbol *sym;
@@ -170,38 +174,41 @@ value_nsstring (char *ptr, int len)
   if (!target_has_execution)
     return 0;		/* Can't call into inferior to create NSString.  */
 
-  sym = lookup_struct_typedef("NSString", 0, 1);
-  if (sym == NULL)
-    sym = lookup_struct_typedef("NXString", 0, 1);
-  if (sym == NULL)
-    type = lookup_pointer_type(builtin_type_void);
-  else
-    type = lookup_pointer_type(SYMBOL_TYPE (sym));
-
-  stringValue[2] = value_string(ptr, len);
+  stringValue[2] = value_string(ptr, len, char_type);
   stringValue[2] = value_coerce_array(stringValue[2]);
   /* _NSNewStringFromCString replaces "istr" after Lantern2A.  */
   if (lookup_minimal_symbol("_NSNewStringFromCString", 0, 0))
     {
-      function = find_function_in_inferior("_NSNewStringFromCString");
+      function = find_function_in_inferior("_NSNewStringFromCString", NULL);
       nsstringValue = call_function_by_hand(function, 1, &stringValue[2]);
     }
   else if (lookup_minimal_symbol("istr", 0, 0))
     {
-      function = find_function_in_inferior("istr");
+      function = find_function_in_inferior("istr", NULL);
       nsstringValue = call_function_by_hand(function, 1, &stringValue[2]);
     }
   else if (lookup_minimal_symbol("+[NSString stringWithCString:]", 0, 0))
     {
-      function = find_function_in_inferior("+[NSString stringWithCString:]");
+      function
+	= find_function_in_inferior("+[NSString stringWithCString:]", NULL);
+      type = builtin_type (gdbarch)->builtin_long;
+
       stringValue[0] = value_from_longest 
-	(builtin_type_long, lookup_objc_class ("NSString"));
+	(type, lookup_objc_class (gdbarch, "NSString"));
       stringValue[1] = value_from_longest 
-	(builtin_type_long, lookup_child_selector ("stringWithCString:"));
+	(type, lookup_child_selector (gdbarch, "stringWithCString:"));
       nsstringValue = call_function_by_hand(function, 3, &stringValue[0]);
     }
   else
     error (_("NSString: internal error -- no way to create new NSString"));
+
+  sym = lookup_struct_typedef("NSString", 0, 1);
+  if (sym == NULL)
+    sym = lookup_struct_typedef("NXString", 0, 1);
+  if (sym == NULL)
+    type = builtin_type (gdbarch)->builtin_data_ptr;
+  else
+    type = lookup_pointer_type(SYMBOL_TYPE (sym));
 
   deprecated_set_value_type (nsstringValue, type);
   return nsstringValue;
@@ -274,7 +281,7 @@ objc_demangle (const char *mangled, int options)
    for printing characters and strings is language specific.  */
 
 static void
-objc_emit_char (int c, struct ui_file *stream, int quoter)
+objc_emit_char (int c, struct type *type, struct ui_file *stream, int quoter)
 {
 
   c &= 0xFF;			/* Avoid sign bit follies.  */
@@ -320,10 +327,10 @@ objc_emit_char (int c, struct ui_file *stream, int quoter)
 }
 
 static void
-objc_printchar (int c, struct ui_file *stream)
+objc_printchar (int c, struct type *type, struct ui_file *stream)
 {
   fputs_filtered ("'", stream);
-  objc_emit_char (c, stream, '\'');
+  objc_emit_char (c, type, stream, '\'');
   fputs_filtered ("'", stream);
 }
 
@@ -334,13 +341,16 @@ objc_printchar (int c, struct ui_file *stream)
    FORCE_ELLIPSES.  */
 
 static void
-objc_printstr (struct ui_file *stream, const gdb_byte *string, 
-	       unsigned int length, int width, int force_ellipses)
+objc_printstr (struct ui_file *stream, struct type *type,
+	       const gdb_byte *string, unsigned int length,
+	       const char *encoding, int force_ellipses,
+	       const struct value_print_options *options)
 {
   unsigned int i;
   unsigned int things_printed = 0;
   int in_quotes = 0;
   int need_comma = 0;
+  int width = TYPE_LENGTH (type);
 
   /* If the string was not truncated due to `set print elements', and
      the last byte of it is a null, we don't print that, in
@@ -354,7 +364,7 @@ objc_printstr (struct ui_file *stream, const gdb_byte *string,
       return;
     }
 
-  for (i = 0; i < length && things_printed < print_max; ++i)
+  for (i = 0; i < length && things_printed < options->print_max; ++i)
     {
       /* Position of the character we are examining to see whether it
 	 is repeated.  */
@@ -378,33 +388,33 @@ objc_printstr (struct ui_file *stream, const gdb_byte *string,
 	  ++reps;
 	}
 
-      if (reps > repeat_count_threshold)
+      if (reps > options->repeat_count_threshold)
 	{
 	  if (in_quotes)
 	    {
-	      if (inspect_it)
+	      if (options->inspect_it)
 		fputs_filtered ("\\\", ", stream);
 	      else
 		fputs_filtered ("\", ", stream);
 	      in_quotes = 0;
 	    }
-	  objc_printchar (string[i], stream);
+	  objc_printchar (string[i], type, stream);
 	  fprintf_filtered (stream, " <repeats %u times>", reps);
 	  i = rep1 - 1;
-	  things_printed += repeat_count_threshold;
+	  things_printed += options->repeat_count_threshold;
 	  need_comma = 1;
 	}
       else
 	{
 	  if (!in_quotes)
 	    {
-	      if (inspect_it)
+	      if (options->inspect_it)
 		fputs_filtered ("\\\"", stream);
 	      else
 		fputs_filtered ("\"", stream);
 	      in_quotes = 1;
 	    }
-	  objc_emit_char (string[i], stream, '"');
+	  objc_emit_char (string[i], type, stream, '"');
 	  ++things_printed;
 	}
     }
@@ -412,7 +422,7 @@ objc_printstr (struct ui_file *stream, const gdb_byte *string,
   /* Terminate the quotes if necessary.  */
   if (in_quotes)
     {
-      if (inspect_it)
+      if (options->inspect_it)
 	fputs_filtered ("\\\"", stream);
       else
 	fputs_filtered ("\"", stream);
@@ -431,11 +441,11 @@ objc_printstr (struct ui_file *stream, const gdb_byte *string,
 static CORE_ADDR 
 objc_skip_trampoline (struct frame_info *frame, CORE_ADDR stop_pc)
 {
+  struct gdbarch *gdbarch = get_frame_arch (frame);
   CORE_ADDR real_stop_pc;
   CORE_ADDR method_stop_pc;
   
-  real_stop_pc = gdbarch_skip_trampoline_code
-		   (current_gdbarch, frame, stop_pc);
+  real_stop_pc = gdbarch_skip_trampoline_code (gdbarch, frame, stop_pc);
 
   if (real_stop_pc != 0)
     find_objc_msgcall (real_stop_pc, &method_stop_pc);
@@ -445,7 +455,7 @@ objc_skip_trampoline (struct frame_info *frame, CORE_ADDR stop_pc)
   if (method_stop_pc)
     {
       real_stop_pc = gdbarch_skip_trampoline_code
-		       (current_gdbarch, frame, method_stop_pc);
+		       (gdbarch, frame, method_stop_pc);
       if (real_stop_pc == 0)
 	real_stop_pc = method_stop_pc;
     }
@@ -498,6 +508,7 @@ const struct language_defn objc_language_defn = {
   type_check_off,
   case_sensitive_on,
   array_row_major,
+  macro_expansion_c,
   &exp_descriptor_standard,
   objc_parse,
   objc_error,
@@ -506,10 +517,11 @@ const struct language_defn objc_language_defn = {
   objc_printstr,		/* Function to print string constant */
   objc_emit_char,
   c_print_type,			/* Print a type using appropriate syntax */
+  c_print_typedef,		/* Print a typedef using appropriate syntax */
   c_val_print,			/* Print a value using appropriate syntax */
   c_value_print,		/* Print a top-level value */
   objc_skip_trampoline, 	/* Language specific skip_trampoline */
-  value_of_this,		/* value_of_this */
+  "self",		        /* name_of_this */
   basic_lookup_symbol_nonlocal,	/* lookup_symbol_nonlocal */
   basic_lookup_transparent_type,/* lookup_transparent_type */
   objc_demangle,		/* Language specific symbol demangler */
@@ -522,6 +534,7 @@ const struct language_defn objc_language_defn = {
   c_language_arch_info,
   default_print_array_index,
   default_pass_by_reference,
+  default_get_string,
   LANG_MAGIC
 };
 
@@ -598,7 +611,7 @@ end_msglist(void)
   selname_chain = sel->next;
   msglist_len = sel->msglist_len;
   msglist_sel = sel->msglist_sel;
-  selid = lookup_child_selector(p);
+  selid = lookup_child_selector (parse_gdbarch, p);
   if (!selid)
     error (_("Can't find selector \"%s\""), p);
   write_exp_elt_longcst (selid);
@@ -1142,87 +1155,119 @@ find_methods (struct symtab *symtab, char type,
   if (symtab)
     block = BLOCKVECTOR_BLOCK (BLOCKVECTOR (symtab), STATIC_BLOCK);
 
-  ALL_MSYMBOLS (objfile, msymbol)
+  ALL_OBJFILES (objfile)
     {
-      QUIT;
+      unsigned int *objc_csym;
 
-      if ((msymbol->type != mst_text) && (msymbol->type != mst_file_text))
-	/* Not a function or method.  */
+      /* The objfile_csym variable counts the number of ObjC methods
+	 that this objfile defines.  We save that count as a private
+	 objfile data.	If we have already determined that this objfile
+	 provides no ObjC methods, we can skip it entirely.  */
+
+      unsigned int objfile_csym = 0;
+
+      objc_csym = objfile_data (objfile, objc_objfile_data);
+      if (objc_csym != NULL && *objc_csym == 0)
+	/* There are no ObjC symbols in this objfile.  Skip it entirely.  */
 	continue;
 
-      if (symtab)
-	if ((SYMBOL_VALUE_ADDRESS (msymbol) <  BLOCK_START (block)) ||
-	    (SYMBOL_VALUE_ADDRESS (msymbol) >= BLOCK_END (block)))
-	  /* Not in the specified symtab.  */
-	  continue;
-
-      symname = SYMBOL_NATURAL_NAME (msymbol);
-      if (symname == NULL)
-	continue;
-
-      if ((symname[0] != '-' && symname[0] != '+') || (symname[1] != '['))
-	/* Not a method name.  */
-	continue;
-      
-      while ((strlen (symname) + 1) >= tmplen)
+      ALL_OBJFILE_MSYMBOLS (objfile, msymbol)
 	{
-	  tmplen = (tmplen == 0) ? 1024 : tmplen * 2;
-	  tmp = xrealloc (tmp, tmplen);
-	}
-      strcpy (tmp, symname);
+	  struct gdbarch *gdbarch = get_objfile_arch (objfile);
+	  CORE_ADDR pc = SYMBOL_VALUE_ADDRESS (msymbol);
 
-      if (parse_method (tmp, &ntype, &nclass, &ncategory, &nselector) == NULL)
-	continue;
+	  QUIT;
+
+	  /* The minimal symbol might point to a function descriptor;
+	     resolve it to the actual code address instead.  */
+	  pc = gdbarch_convert_from_func_ptr_addr (gdbarch, pc,
+						   &current_target);
+
+	  if (symtab)
+	    if (pc < BLOCK_START (block) || pc >= BLOCK_END (block))
+	      /* Not in the specified symtab.  */
+	      continue;
+
+	  symname = SYMBOL_NATURAL_NAME (msymbol);
+	  if (symname == NULL)
+	    continue;
+
+	  if ((symname[0] != '-' && symname[0] != '+') || (symname[1] != '['))
+	    /* Not a method name.  */
+	    continue;
       
-      if ((type != '\0') && (ntype != type))
-	continue;
+	  while ((strlen (symname) + 1) >= tmplen)
+	    {
+	      tmplen = (tmplen == 0) ? 1024 : tmplen * 2;
+	      tmp = xrealloc (tmp, tmplen);
+	    }
+	  strcpy (tmp, symname);
 
-      if ((class != NULL) 
-	  && ((nclass == NULL) || (strcmp (class, nclass) != 0)))
-	continue;
+	  if (parse_method (tmp, &ntype, &nclass, &ncategory, &nselector) == NULL)
+	    continue;
+      
+	  objfile_csym++;
 
-      if ((category != NULL) && 
-	  ((ncategory == NULL) || (strcmp (category, ncategory) != 0)))
-	continue;
+	  if ((type != '\0') && (ntype != type))
+	    continue;
 
-      if ((selector != NULL) && 
-	  ((nselector == NULL) || (strcmp (selector, nselector) != 0)))
-	continue;
+	  if ((class != NULL) 
+	      && ((nclass == NULL) || (strcmp (class, nclass) != 0)))
+	    continue;
 
-      sym = find_pc_function (SYMBOL_VALUE_ADDRESS (msymbol));
-      if (sym != NULL)
-        {
-          const char *newsymname = SYMBOL_NATURAL_NAME (sym);
+	  if ((category != NULL) && 
+	      ((ncategory == NULL) || (strcmp (category, ncategory) != 0)))
+	    continue;
+
+	  if ((selector != NULL) && 
+	      ((nselector == NULL) || (strcmp (selector, nselector) != 0)))
+	    continue;
+
+	  sym = find_pc_function (pc);
+	  if (sym != NULL)
+	    {
+	      const char *newsymname = SYMBOL_NATURAL_NAME (sym);
 	  
-          if (strcmp (symname, newsymname) == 0)
-            {
-              /* Found a high-level method sym: swap it into the
-                 lower part of sym_arr (below num_debuggable).  */
-              if (syms != NULL)
-                {
-                  syms[csym] = syms[cdebug];
-                  syms[cdebug] = sym;
-                }
-              csym++;
-              cdebug++;
-            }
-          else
-            {
-              warning (
+	      if (strcmp (symname, newsymname) == 0)
+		{
+		  /* Found a high-level method sym: swap it into the
+		     lower part of sym_arr (below num_debuggable).  */
+		  if (syms != NULL)
+		    {
+		      syms[csym] = syms[cdebug];
+		      syms[cdebug] = sym;
+		    }
+		  csym++;
+		  cdebug++;
+		}
+	      else
+		{
+		  warning (
 "debugging symbol \"%s\" does not match minimal symbol (\"%s\"); ignoring",
-                       newsymname, symname);
-              if (syms != NULL)
-                syms[csym] = (struct symbol *) msymbol;
-              csym++;
-            }
-        }
-      else 
-	{
-	  /* Found a non-debuggable method symbol.  */
-	  if (syms != NULL)
-	    syms[csym] = (struct symbol *) msymbol;
-	  csym++;
+                           newsymname, symname);
+		  if (syms != NULL)
+		    syms[csym] = (struct symbol *) msymbol;
+		  csym++;
+		}
+	    }
+	  else
+	    {
+	      /* Found a non-debuggable method symbol.  */
+	      if (syms != NULL)
+		syms[csym] = (struct symbol *) msymbol;
+	      csym++;
+	    }
 	}
+      if (objc_csym == NULL)
+	{
+	  objc_csym = obstack_alloc (&objfile->objfile_obstack,
+				     sizeof (*objc_csym));
+	  *objc_csym = objfile_csym;
+	  set_objfile_data (objfile, objc_objfile_data, objc_csym);
+	}
+      else
+	/* Count of ObjC methods in this objfile should be constant.  */
+	gdb_assert (*objc_csym == objfile_csym);
     }
 
   if (nsym != NULL)
@@ -1272,7 +1317,7 @@ char *find_imps (struct symtab *symtab, struct block *block,
     if (tmp == NULL)
       return NULL;
     
-    sym = lookup_symbol (selector, block, VAR_DOMAIN, 0, NULL);
+    sym = lookup_symbol (selector, block, VAR_DOMAIN, 0);
     if (sym != NULL) 
       {
 	if (syms)
@@ -1378,8 +1423,8 @@ print_object_command (char *args, int from_tty)
       make_cleanup (free_current_contents, &expr);
     int pc = 0;
 
-    object = expr->language_defn->la_exp_desc->evaluate_exp 
-      (builtin_type_void_data_ptr, expr, &pc, EVAL_NORMAL);
+    object = evaluate_subexp (builtin_type (expr->gdbarch)->builtin_data_ptr,
+			      expr, &pc, EVAL_NORMAL);
     do_cleanups (old_chain);
   }
 
@@ -1387,7 +1432,7 @@ print_object_command (char *args, int from_tty)
   object_addr = value_as_long (object);
   read_memory (object_addr, &c, 1);
 
-  function = find_function_in_inferior ("_NSPrintForDebugger");
+  function = find_function_in_inferior ("_NSPrintForDebugger", NULL);
   if (function == NULL)
     error (_("Unable to locate _NSPrintForDebugger in child process"));
 
@@ -1567,58 +1612,69 @@ _initialize_objc_language (void)
 }
 
 static void 
-read_objc_method (CORE_ADDR addr, struct objc_method *method)
+read_objc_method (struct gdbarch *gdbarch, CORE_ADDR addr,
+		  struct objc_method *method)
 {
-  method->name  = read_memory_unsigned_integer (addr + 0, 4);
-  method->types = read_memory_unsigned_integer (addr + 4, 4);
-  method->imp   = read_memory_unsigned_integer (addr + 8, 4);
+  enum bfd_endian byte_order = gdbarch_byte_order (gdbarch);
+  method->name  = read_memory_unsigned_integer (addr + 0, 4, byte_order);
+  method->types = read_memory_unsigned_integer (addr + 4, 4, byte_order);
+  method->imp   = read_memory_unsigned_integer (addr + 8, 4, byte_order);
 }
 
-static 
-unsigned long read_objc_methlist_nmethods (CORE_ADDR addr)
+static unsigned long
+read_objc_methlist_nmethods (struct gdbarch *gdbarch, CORE_ADDR addr)
 {
-  return read_memory_unsigned_integer (addr + 4, 4);
+  enum bfd_endian byte_order = gdbarch_byte_order (gdbarch);
+  return read_memory_unsigned_integer (addr + 4, 4, byte_order);
 }
 
 static void 
-read_objc_methlist_method (CORE_ADDR addr, unsigned long num, 
-			   struct objc_method *method)
+read_objc_methlist_method (struct gdbarch *gdbarch, CORE_ADDR addr,
+			   unsigned long num, struct objc_method *method)
 {
-  gdb_assert (num < read_objc_methlist_nmethods (addr));
-  read_objc_method (addr + 8 + (12 * num), method);
+  gdb_assert (num < read_objc_methlist_nmethods (gdbarch, addr));
+  read_objc_method (gdbarch, addr + 8 + (12 * num), method);
 }
   
 static void 
-read_objc_object (CORE_ADDR addr, struct objc_object *object)
+read_objc_object (struct gdbarch *gdbarch, CORE_ADDR addr,
+		  struct objc_object *object)
 {
-  object->isa = read_memory_unsigned_integer (addr, 4);
+  enum bfd_endian byte_order = gdbarch_byte_order (gdbarch);
+  object->isa = read_memory_unsigned_integer (addr, 4, byte_order);
 }
 
 static void 
-read_objc_super (CORE_ADDR addr, struct objc_super *super)
+read_objc_super (struct gdbarch *gdbarch, CORE_ADDR addr,
+		 struct objc_super *super)
 {
-  super->receiver = read_memory_unsigned_integer (addr, 4);
-  super->class = read_memory_unsigned_integer (addr + 4, 4);
+  enum bfd_endian byte_order = gdbarch_byte_order (gdbarch);
+  super->receiver = read_memory_unsigned_integer (addr, 4, byte_order);
+  super->class = read_memory_unsigned_integer (addr + 4, 4, byte_order);
 };
 
 static void 
-read_objc_class (CORE_ADDR addr, struct objc_class *class)
+read_objc_class (struct gdbarch *gdbarch, CORE_ADDR addr,
+		 struct objc_class *class)
 {
-  class->isa = read_memory_unsigned_integer (addr, 4);
-  class->super_class = read_memory_unsigned_integer (addr + 4, 4);
-  class->name = read_memory_unsigned_integer (addr + 8, 4);
-  class->version = read_memory_unsigned_integer (addr + 12, 4);
-  class->info = read_memory_unsigned_integer (addr + 16, 4);
-  class->instance_size = read_memory_unsigned_integer (addr + 18, 4);
-  class->ivars = read_memory_unsigned_integer (addr + 24, 4);
-  class->methods = read_memory_unsigned_integer (addr + 28, 4);
-  class->cache = read_memory_unsigned_integer (addr + 32, 4);
-  class->protocols = read_memory_unsigned_integer (addr + 36, 4);
+  enum bfd_endian byte_order = gdbarch_byte_order (gdbarch);
+  class->isa = read_memory_unsigned_integer (addr, 4, byte_order);
+  class->super_class = read_memory_unsigned_integer (addr + 4, 4, byte_order);
+  class->name = read_memory_unsigned_integer (addr + 8, 4, byte_order);
+  class->version = read_memory_unsigned_integer (addr + 12, 4, byte_order);
+  class->info = read_memory_unsigned_integer (addr + 16, 4, byte_order);
+  class->instance_size = read_memory_unsigned_integer (addr + 18, 4, byte_order);
+  class->ivars = read_memory_unsigned_integer (addr + 24, 4, byte_order);
+  class->methods = read_memory_unsigned_integer (addr + 28, 4, byte_order);
+  class->cache = read_memory_unsigned_integer (addr + 32, 4, byte_order);
+  class->protocols = read_memory_unsigned_integer (addr + 36, 4, byte_order);
 }
 
 static CORE_ADDR
-find_implementation_from_class (CORE_ADDR class, CORE_ADDR sel)
+find_implementation_from_class (struct gdbarch *gdbarch,
+				CORE_ADDR class, CORE_ADDR sel)
 {
+  enum bfd_endian byte_order = gdbarch_byte_order (gdbarch);
   CORE_ADDR subclass = class;
 
   while (subclass != 0) 
@@ -1627,7 +1683,7 @@ find_implementation_from_class (CORE_ADDR class, CORE_ADDR sel)
       struct objc_class class_str;
       unsigned mlistnum = 0;
 
-      read_objc_class (subclass, &class_str);
+      read_objc_class (gdbarch, subclass, &class_str);
 
       for (;;) 
 	{
@@ -1636,16 +1692,17 @@ find_implementation_from_class (CORE_ADDR class, CORE_ADDR sel)
 	  unsigned long i;
       
 	  mlist = read_memory_unsigned_integer (class_str.methods + 
-						(4 * mlistnum), 4);
+						(4 * mlistnum),
+						4, byte_order);
 	  if (mlist == 0) 
 	    break;
 
-	  nmethods = read_objc_methlist_nmethods (mlist);
+	  nmethods = read_objc_methlist_nmethods (gdbarch, mlist);
 
 	  for (i = 0; i < nmethods; i++) 
 	    {
 	      struct objc_method meth_str;
-	      read_objc_methlist_method (mlist, i, &meth_str);
+	      read_objc_methlist_method (gdbarch, mlist, i, &meth_str);
 
 #if 0
 	      fprintf (stderr, 
@@ -1667,34 +1724,35 @@ find_implementation_from_class (CORE_ADDR class, CORE_ADDR sel)
 }
 
 static CORE_ADDR
-find_implementation (CORE_ADDR object, CORE_ADDR sel)
+find_implementation (struct gdbarch *gdbarch,
+		     CORE_ADDR object, CORE_ADDR sel)
 {
   struct objc_object ostr;
 
   if (object == 0)
     return 0;
-  read_objc_object (object, &ostr);
+  read_objc_object (gdbarch, object, &ostr);
   if (ostr.isa == 0)
     return 0;
 
-  return find_implementation_from_class (ostr.isa, sel);
+  return find_implementation_from_class (gdbarch, ostr.isa, sel);
 }
-
-#define OBJC_FETCH_POINTER_ARGUMENT(argi) \
-  gdbarch_fetch_pointer_argument (current_gdbarch, get_current_frame (), \
-				  argi, builtin_type_void_func_ptr)
 
 static int
 resolve_msgsend (CORE_ADDR pc, CORE_ADDR *new_pc)
 {
+  struct frame_info *frame = get_current_frame ();
+  struct gdbarch *gdbarch = get_frame_arch (frame);
+  struct type *ptr_type = builtin_type (gdbarch)->builtin_func_ptr;
+
   CORE_ADDR object;
   CORE_ADDR sel;
   CORE_ADDR res;
 
-  object = OBJC_FETCH_POINTER_ARGUMENT (0);
-  sel = OBJC_FETCH_POINTER_ARGUMENT (1);
+  object = gdbarch_fetch_pointer_argument (gdbarch, frame, 0, ptr_type);
+  sel = gdbarch_fetch_pointer_argument (gdbarch, frame, 1, ptr_type);
 
-  res = find_implementation (object, sel);
+  res = find_implementation (gdbarch, object, sel);
   if (new_pc != 0)
     *new_pc = res;
   if (res == 0)
@@ -1705,14 +1763,18 @@ resolve_msgsend (CORE_ADDR pc, CORE_ADDR *new_pc)
 static int
 resolve_msgsend_stret (CORE_ADDR pc, CORE_ADDR *new_pc)
 {
+  struct frame_info *frame = get_current_frame ();
+  struct gdbarch *gdbarch = get_frame_arch (frame);
+  struct type *ptr_type = builtin_type (gdbarch)->builtin_func_ptr;
+
   CORE_ADDR object;
   CORE_ADDR sel;
   CORE_ADDR res;
 
-  object = OBJC_FETCH_POINTER_ARGUMENT (1);
-  sel = OBJC_FETCH_POINTER_ARGUMENT (2);
+  object = gdbarch_fetch_pointer_argument (gdbarch, frame, 1, ptr_type);
+  sel = gdbarch_fetch_pointer_argument (gdbarch, frame, 2, ptr_type);
 
-  res = find_implementation (object, sel);
+  res = find_implementation (gdbarch, object, sel);
   if (new_pc != 0)
     *new_pc = res;
   if (res == 0)
@@ -1723,20 +1785,24 @@ resolve_msgsend_stret (CORE_ADDR pc, CORE_ADDR *new_pc)
 static int
 resolve_msgsend_super (CORE_ADDR pc, CORE_ADDR *new_pc)
 {
+  struct frame_info *frame = get_current_frame ();
+  struct gdbarch *gdbarch = get_frame_arch (frame);
+  struct type *ptr_type = builtin_type (gdbarch)->builtin_func_ptr;
+
   struct objc_super sstr;
 
   CORE_ADDR super;
   CORE_ADDR sel;
   CORE_ADDR res;
 
-  super = OBJC_FETCH_POINTER_ARGUMENT (0);
-  sel = OBJC_FETCH_POINTER_ARGUMENT (1);
+  super = gdbarch_fetch_pointer_argument (gdbarch, frame, 0, ptr_type);
+  sel = gdbarch_fetch_pointer_argument (gdbarch, frame, 1, ptr_type);
 
-  read_objc_super (super, &sstr);
+  read_objc_super (gdbarch, super, &sstr);
   if (sstr.class == 0)
     return 0;
   
-  res = find_implementation_from_class (sstr.class, sel);
+  res = find_implementation_from_class (gdbarch, sstr.class, sel);
   if (new_pc != 0)
     *new_pc = res;
   if (res == 0)
@@ -1747,23 +1813,33 @@ resolve_msgsend_super (CORE_ADDR pc, CORE_ADDR *new_pc)
 static int
 resolve_msgsend_super_stret (CORE_ADDR pc, CORE_ADDR *new_pc)
 {
+  struct frame_info *frame = get_current_frame ();
+  struct gdbarch *gdbarch = get_frame_arch (frame);
+  struct type *ptr_type = builtin_type (gdbarch)->builtin_func_ptr;
+
   struct objc_super sstr;
 
   CORE_ADDR super;
   CORE_ADDR sel;
   CORE_ADDR res;
 
-  super = OBJC_FETCH_POINTER_ARGUMENT (1);
-  sel = OBJC_FETCH_POINTER_ARGUMENT (2);
+  super = gdbarch_fetch_pointer_argument (gdbarch, frame, 1, ptr_type);
+  sel = gdbarch_fetch_pointer_argument (gdbarch, frame, 2, ptr_type);
 
-  read_objc_super (super, &sstr);
+  read_objc_super (gdbarch, super, &sstr);
   if (sstr.class == 0)
     return 0;
   
-  res = find_implementation_from_class (sstr.class, sel);
+  res = find_implementation_from_class (gdbarch, sstr.class, sel);
   if (new_pc != 0)
     *new_pc = res;
   if (res == 0)
     return 1;
   return 0;
+}
+
+void
+_initialize_objc_lang (void)
+{
+  objc_objfile_data = register_objfile_data ();
 }

@@ -2,8 +2,8 @@
    functions and pc values.
 
    Copyright (C) 1986, 1987, 1988, 1989, 1990, 1991, 1992, 1993, 1994, 1995,
-   1996, 1997, 1998, 1999, 2000, 2001, 2002, 2003, 2004, 2007, 2008
-   Free Software Foundation, Inc.
+   1996, 1997, 1998, 1999, 2000, 2001, 2002, 2003, 2004, 2007, 2008, 2009,
+   2010 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -36,10 +36,7 @@
 #include "command.h"
 #include "gdbcmd.h"
 #include "block.h"
-
-/* Prototypes for exported functions. */
-
-void _initialize_blockframe (void);
+#include "inline-frame.h"
 
 /* Return the innermost lexical block in execution
    in a specified stack frame.  The frame address is assumed valid.
@@ -61,11 +58,29 @@ struct block *
 get_frame_block (struct frame_info *frame, CORE_ADDR *addr_in_block)
 {
   const CORE_ADDR pc = get_frame_address_in_block (frame);
+  struct frame_info *next_frame;
+  struct block *bl;
+  int inline_count;
 
   if (addr_in_block)
     *addr_in_block = pc;
 
-  return block_for_pc (pc);
+  bl = block_for_pc (pc);
+  if (bl == NULL)
+    return NULL;
+
+  inline_count = frame_inlined_callees (frame);
+
+  while (inline_count > 0)
+    {
+      if (block_inlined_p (bl))
+	inline_count--;
+
+      bl = BLOCK_SUPERBLOCK (bl);
+      gdb_assert (bl != NULL);
+    }
+
+  return bl;
 }
 
 CORE_ADDR
@@ -77,7 +92,7 @@ get_pc_function_start (CORE_ADDR pc)
   bl = block_for_pc (pc);
   if (bl)
     {
-      struct symbol *symbol = block_function (bl);
+      struct symbol *symbol = block_linkage_function (bl);
 
       if (symbol)
 	{
@@ -104,9 +119,14 @@ struct symbol *
 get_frame_function (struct frame_info *frame)
 {
   struct block *bl = get_frame_block (frame, 0);
-  if (bl == 0)
-    return 0;
-  return block_function (bl);
+
+  if (bl == NULL)
+    return NULL;
+
+  while (BLOCK_FUNCTION (bl) == NULL && BLOCK_SUPERBLOCK (bl) != NULL)
+    bl = BLOCK_SUPERBLOCK (bl);
+
+  return BLOCK_FUNCTION (bl);
 }
 
 
@@ -114,12 +134,12 @@ get_frame_function (struct frame_info *frame)
    Returns 0 if function is not known.  */
 
 struct symbol *
-find_pc_sect_function (CORE_ADDR pc, struct bfd_section *section)
+find_pc_sect_function (CORE_ADDR pc, struct obj_section *section)
 {
   struct block *b = block_for_pc_sect (pc, section);
   if (b == 0)
     return 0;
-  return block_function (b);
+  return block_linkage_function (b);
 }
 
 /* Return the function containing pc value PC.
@@ -137,7 +157,7 @@ find_pc_function (CORE_ADDR pc)
 static CORE_ADDR cache_pc_function_low = 0;
 static CORE_ADDR cache_pc_function_high = 0;
 static char *cache_pc_function_name = 0;
-static struct bfd_section *cache_pc_function_section = NULL;
+static struct obj_section *cache_pc_function_section = NULL;
 
 /* Clear cache, e.g. when symbol table is discarded. */
 
@@ -167,12 +187,11 @@ int
 find_pc_partial_function (CORE_ADDR pc, char **name, CORE_ADDR *address,
 			  CORE_ADDR *endaddr)
 {
-  struct bfd_section *section;
+  struct obj_section *section;
   struct partial_symtab *pst;
   struct symbol *f;
   struct minimal_symbol *msymbol;
   struct partial_symbol *psb;
-  struct obj_section *osect;
   int i;
   CORE_ADDR mapped_pc;
 
@@ -183,13 +202,7 @@ find_pc_partial_function (CORE_ADDR pc, char **name, CORE_ADDR *address,
      the normal section code (which almost always succeeds).  */
   section = find_pc_overlay (pc);
   if (section == NULL)
-    {
-      struct obj_section *obj_section = find_pc_section (pc);
-      if (obj_section == NULL)
-	section = NULL;
-      else
-	section = obj_section->the_bfd_section;
-    }
+    section = find_pc_section (pc);
 
   mapped_pc = overlay_mapped_address (pc, section);
 
@@ -223,7 +236,7 @@ find_pc_partial_function (CORE_ADDR pc, char **name, CORE_ADDR *address,
 	    {
 	      cache_pc_function_low = BLOCK_START (SYMBOL_BLOCK_VALUE (f));
 	      cache_pc_function_high = BLOCK_END (SYMBOL_BLOCK_VALUE (f));
-	      cache_pc_function_name = DEPRECATED_SYMBOL_NAME (f);
+	      cache_pc_function_name = SYMBOL_LINKAGE_NAME (f);
 	      cache_pc_function_section = section;
 	      goto return_cached_value;
 	    }
@@ -236,15 +249,15 @@ find_pc_partial_function (CORE_ADDR pc, char **name, CORE_ADDR *address,
 	  psb = find_pc_sect_psymbol (pst, mapped_pc, section);
 
 	  if (psb
-	      && (msymbol == NULL ||
-		  (SYMBOL_VALUE_ADDRESS (psb)
-		   >= SYMBOL_VALUE_ADDRESS (msymbol))))
+	      && (msymbol == NULL
+		  || (SYMBOL_VALUE_ADDRESS (psb)
+		      >= SYMBOL_VALUE_ADDRESS (msymbol))))
 	    {
 	      /* This case isn't being cached currently. */
 	      if (address)
 		*address = SYMBOL_VALUE_ADDRESS (psb);
 	      if (name)
-		*name = DEPRECATED_SYMBOL_NAME (psb);
+		*name = SYMBOL_LINKAGE_NAME (psb);
 	      /* endaddr non-NULL can't happen here.  */
 	      return 1;
 	    }
@@ -256,9 +269,7 @@ find_pc_partial_function (CORE_ADDR pc, char **name, CORE_ADDR *address,
      of the text seg doesn't appear to be part of the last function in the
      text segment.  */
 
-  osect = find_pc_sect_section (mapped_pc, section);
-
-  if (!osect)
+  if (!section)
     msymbol = NULL;
 
   /* Must be in the minimal symbol table.  */
@@ -275,7 +286,7 @@ find_pc_partial_function (CORE_ADDR pc, char **name, CORE_ADDR *address,
     }
 
   cache_pc_function_low = SYMBOL_VALUE_ADDRESS (msymbol);
-  cache_pc_function_name = DEPRECATED_SYMBOL_NAME (msymbol);
+  cache_pc_function_name = SYMBOL_LINKAGE_NAME (msymbol);
   cache_pc_function_section = section;
 
   /* If the minimal symbol has a size, use it for the cache.
@@ -291,20 +302,20 @@ find_pc_partial_function (CORE_ADDR pc, char **name, CORE_ADDR *address,
 	 other sections, to find the next symbol in this section with
 	 a different address.  */
 
-      for (i = 1; DEPRECATED_SYMBOL_NAME (msymbol + i) != NULL; i++)
+      for (i = 1; SYMBOL_LINKAGE_NAME (msymbol + i) != NULL; i++)
 	{
 	  if (SYMBOL_VALUE_ADDRESS (msymbol + i) != SYMBOL_VALUE_ADDRESS (msymbol)
-	      && SYMBOL_BFD_SECTION (msymbol + i) == SYMBOL_BFD_SECTION (msymbol))
+	      && SYMBOL_OBJ_SECTION (msymbol + i) == SYMBOL_OBJ_SECTION (msymbol))
 	    break;
 	}
 
-      if (DEPRECATED_SYMBOL_NAME (msymbol + i) != NULL
-	  && SYMBOL_VALUE_ADDRESS (msymbol + i) < osect->endaddr)
+      if (SYMBOL_LINKAGE_NAME (msymbol + i) != NULL
+	  && SYMBOL_VALUE_ADDRESS (msymbol + i) < obj_section_endaddr (section))
 	cache_pc_function_high = SYMBOL_VALUE_ADDRESS (msymbol + i);
       else
 	/* We got the start address from the last msymbol in the objfile.
 	   So the end address is the end of the section.  */
-	cache_pc_function_high = osect->endaddr;
+	cache_pc_function_high = obj_section_endaddr (section);
     }
 
  return_cached_value:
@@ -348,7 +359,6 @@ block_innermost_frame (struct block *block)
   struct frame_info *frame;
   CORE_ADDR start;
   CORE_ADDR end;
-  CORE_ADDR calling_pc;
 
   if (block == NULL)
     return NULL;
@@ -359,8 +369,8 @@ block_innermost_frame (struct block *block)
   frame = get_current_frame ();
   while (frame != NULL)
     {
-      calling_pc = get_frame_address_in_block (frame);
-      if (calling_pc >= start && calling_pc < end)
+      struct block *frame_block = get_frame_block (frame, NULL);
+      if (frame_block != NULL && contained_in (frame_block, block))
 	return frame;
 
       frame = get_prev_frame (frame);

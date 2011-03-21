@@ -1,5 +1,6 @@
 /* Native support for i386 running Solaris 2.
-   Copyright 1998, 1999, 2000, 2007, 2008 Free Software Foundation, Inc.
+   Copyright 1998, 1999, 2000, 2007, 2008, 2009, 2010
+   Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -18,19 +19,6 @@
 
 #ifdef NEW_PROC_API	/* Solaris 6 and above can do HW watchpoints */
 
-#define TARGET_HAS_HARDWARE_WATCHPOINTS
-
-/* The man page for proc4 on solaris 6 and 7 says that the system
-   can support "thousands" of hardware watchpoints, but gives no
-   method for finding out how many.  So just tell GDB 'yes'.  */
-#define TARGET_CAN_USE_HARDWARE_WATCHPOINT(TYPE, CNT, OT) 1
-#define TARGET_REGION_SIZE_OK_FOR_HW_WATCHPOINT(SIZE) 1
-
-/* When a hardware watchpoint fires off the PC will be left at the
-   instruction following the one which caused the watchpoint.  
-   It will *NOT* be necessary for GDB to step over the watchpoint. */
-#define HAVE_CONTINUABLE_WATCHPOINT 1
-
 /* Solaris x86 2.6 and 2.7 targets have a kernel bug when stepping
    over an instruction that causes a page fault without triggering
    a hardware watchpoint. The kernel properly notices that it shouldn't
@@ -40,18 +28,5 @@
    requested, GDB will check for a hardware watchpoint trigger after the
    step anyway.  */
 #define CANNOT_STEP_HW_WATCHPOINTS
-
-extern int procfs_stopped_by_watchpoint (ptid_t);
-#define STOPPED_BY_WATCHPOINT(W) \
-  procfs_stopped_by_watchpoint(inferior_ptid)
-
-/* Use these macros for watchpoint insertion/deletion.  */
-/* type can be 0: write watch, 1: read watch, 2: access watch (read/write) */
-
-extern int procfs_set_watchpoint (ptid_t, CORE_ADDR, int, int, int);
-#define target_insert_watchpoint(ADDR, LEN, TYPE) \
-        procfs_set_watchpoint (inferior_ptid, ADDR, LEN, TYPE, 1)
-#define target_remove_watchpoint(ADDR, LEN, TYPE) \
-        procfs_set_watchpoint (inferior_ptid, ADDR, 0, 0, 0)
 
 #endif /* NEW_PROC_API */

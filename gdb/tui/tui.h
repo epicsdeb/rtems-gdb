@@ -1,6 +1,6 @@
 /* External/Public TUI Header File.
 
-   Copyright (C) 1998, 1999, 2000, 2001, 2004, 2007, 2008
+   Copyright (C) 1998, 1999, 2000, 2001, 2004, 2007, 2008, 2009, 2010
    Free Software Foundation, Inc.
 
    Contributed by Hewlett-Packard Company.
@@ -54,9 +54,9 @@ enum tui_win_type
 
 /* GENERAL TUI FUNCTIONS */
 /* tui.c */
-extern CORE_ADDR tui_get_low_disassembly_address (CORE_ADDR, 
-						  CORE_ADDR);
-extern void tui_show_assembly (CORE_ADDR addr);
+extern CORE_ADDR tui_get_low_disassembly_address (struct gdbarch *,
+						  CORE_ADDR, CORE_ADDR);
+extern void tui_show_assembly (struct gdbarch *gdbarch, CORE_ADDR addr);
 extern int tui_is_window_visible (enum tui_win_type type);
 extern int tui_get_command_dimension (unsigned int *width,
 				      unsigned int *height);

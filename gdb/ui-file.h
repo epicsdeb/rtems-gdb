@@ -1,5 +1,6 @@
 /* UI_FILE - a generic STDIO like output stream.
-   Copyright (C) 1999, 2000, 2007, 2008 Free Software Foundation, Inc.
+   Copyright (C) 1999, 2000, 2007, 2008, 2009, 2010
+   Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -73,8 +74,8 @@ extern void ui_file_put (struct ui_file *src, ui_file_put_method_ftype *write, v
 
 /* Returns a freshly allocated buffer containing the entire contents
    of FILE (as determined by ui_file_put()) with a NUL character
-   appended.  LENGTH is set to the size of the buffer minus that
-   appended NUL. */
+   appended.  LENGTH, if not NULL, is set to the size of the buffer
+   minus that appended NUL. */
 extern char *ui_file_xstrdup (struct ui_file *file, long *length);
 
 

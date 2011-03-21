@@ -1,5 +1,6 @@
 #   Copyright 1988, 1990, 1991, 1992, 1994, 1995, 1996, 1997, 1998, 1999,
-#   2000, 2002, 2003, 2004, 2007, 2008 Free Software Foundation, Inc.
+#   2000, 2002, 2003, 2004, 2007, 2008, 2009, 2010
+#   Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -13,9 +14,6 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
-
-# Please email any bugs, comments, and/or additions to this file to:
-# bug-gdb@prep.ai.mit.edu
 
 # Based on break.exp, written by Rob Savoye. (rob@cygnus.com)
 # Modified to test gdb's handling of separate debug info files.
@@ -64,6 +62,9 @@ gdb_exit
 gdb_start
 gdb_reinitialize_dir $srcdir/$subdir
 gdb_load ${binfile}
+if { $gdb_file_cmd_debug_info != "debug" } then {
+    fail "No debug information found."
+}
 
 if [target_info exists gdb_stub] {
     gdb_step_for_stub;
@@ -261,13 +262,13 @@ delete_breakpoints
 # test temporary breakpoint at function
 #
 
-gdb_test "tbreak main" "Breakpoint.*at.* file .*$srcfile, line.*" "Temporary breakpoint function"
+gdb_test "tbreak main" "Temporary breakpoint.*at.* file .*$srcfile, line.*" "Temporary breakpoint function"
 
 #
 # test break at function in file
 #
 
-gdb_test "tbreak $srcfile:factorial" "Breakpoint.*at.* file .*$srcfile, line.*" \
+gdb_test "tbreak $srcfile:factorial" "Temporary breakpoint.*at.* file .*$srcfile, line.*" \
 	"Temporary breakpoint function in file"
 
 #
@@ -275,25 +276,25 @@ gdb_test "tbreak $srcfile:factorial" "Breakpoint.*at.* file .*$srcfile, line.*" 
 #
 send_gdb "tbreak $bp_location1\n"
 gdb_expect {
-    -re "Breakpoint.*at.* file .*$srcfile, line $bp_location1.*$gdb_prompt $" { pass "Temporary breakpoint line number #1" }
+    -re "Temporary breakpoint.*at.* file .*$srcfile, line $bp_location1.*$gdb_prompt $" { pass "Temporary breakpoint line number #1" }
 	-re ".*$gdb_prompt $"   { pass "Temporary breakpoint line number #1" }
 	timeout	    { fail "breakpoint line number #1 (timeout)" }
 }
 
-gdb_test "tbreak $bp_location6" "Breakpoint.*at.* file .*$srcfile, line $bp_location6.*" "Temporary breakpoint line number #2"
+gdb_test "tbreak $bp_location6" "Temporary breakpoint.*at.* file .*$srcfile, line $bp_location6.*" "Temporary breakpoint line number #2"
 
 #
 # test break at line number in file
 #
 send_gdb "tbreak $srcfile:$bp_location2\n"
 gdb_expect {
-    -re "Breakpoint.*at.* file .*$srcfile, line $bp_location2.*$gdb_prompt $" { pass "Temporary breakpoint line number in file #1" }
+    -re "Temporary breakpoint.*at.* file .*$srcfile, line $bp_location2.*$gdb_prompt $" { pass "Temporary breakpoint line number in file #1" }
 	-re ".*$gdb_prompt $"   { pass "Temporary breakpoint line number in file #1" }
 	timeout	    { fail "Temporary breakpoint line number in file #1 (timeout)" }
 }
 
 set bp_location11 [gdb_get_line_number "set breakpoint 11 here"]
-gdb_test  "tbreak $srcfile:$bp_location11" "Breakpoint.*at.* file .*$srcfile, line $bp_location11.*" "Temporary breakpoint line number in file #2"
+gdb_test  "tbreak $srcfile:$bp_location11" "Temporary breakpoint.*at.* file .*$srcfile, line $bp_location11.*" "Temporary breakpoint line number in file #2"
 
 #
 # check to see what breakpoints are set (temporary this time)
@@ -602,7 +603,7 @@ gdb_expect {
 }
 send_gdb "print marker2(99)\n"
 gdb_expect {
-  -re "The program being debugged stopped while in a function called from GDB.\r\nWhen the function .marker2. is done executing, GDB will silently\r\nstop .instead of continuing to evaluate the expression containing\r\nthe function call...*$gdb_prompt $"\
+  -re "The program being debugged stopped while in a function called from GDB.\r\nEvaluation of the expression containing the function\r\n.marker2. will be abandoned.\r\nWhen the function is done executing, GDB will silently stop..*$gdb_prompt $"\
           {pass "hit breakpoint on called function"}
   -re "$gdb_prompt $"\
           {fail "hit breakpoint on called function"}
@@ -952,6 +953,23 @@ set debugfile "${objdir}/${subdir}/${testfile}.debug"
 test_different_dir debuglink "${objdir}/${subdir}" 0
 
 
+# Test CRC mismatch is reported.
+
+if {[build_executable sepdebug.exp sepdebug2 sepdebug2.c debug] != -1
+    && ![gdb_gnu_strip_debug ${objdir}/${subdir}/sepdebug2]} {
+
+    remote_exec build "cp ${debugfile} ${objdir}/${subdir}/.debug/sepdebug2.debug"
+
+    gdb_exit
+    gdb_start
+    gdb_reinitialize_dir $srcdir/$subdir
+
+    set escapedobjdirsubdir [string_to_regexp ${objdir}/${subdir}]
+
+    gdb_test "file ${objdir}/${subdir}/sepdebug2" "warning: the debug information found in \"${escapedobjdirsubdir}/\\.debug/sepdebug2\\.debug\" does not match \"${escapedobjdirsubdir}/sepdebug2\" \\(CRC mismatch\\)\\..*\\(no debugging symbols found\\).*" "CRC mismatch is reported"
+}
+
+
 # NT_GNU_BUILD_ID / .note.gnu.build-id test:
 
 set build_id_debug_filename [build_id_debug_filename_get $binfile]
@@ -977,6 +995,12 @@ if ![string compare $build_id_debug_filename ""] then {
     remote_exec build "mv $debugfile ${objdir}/${subdir}/${build_id_debug_filename}"
 
     test_different_dir build-id "${objdir}/${subdir}" $xfail
+
+    # Test also multiple directories can be specified.  Without the build-id
+    # reference GDB would find the separate debug info just at the same
+    # location as the executable file.
+
+    test_different_dir multiple-dirs "/doesnotexist:${objdir}/${subdir}" $xfail
 
     # Spare debug files may confuse testsuite runs in the future.
     remote_exec build "rm -f ${objdir}/${subdir}/${build_id_debug_filename}"

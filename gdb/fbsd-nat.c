@@ -1,6 +1,7 @@
 /* Native-dependent code for FreeBSD.
 
-   Copyright (C) 2002, 2003, 2004, 2007, 2008 Free Software Foundation, Inc.
+   Copyright (C) 2002, 2003, 2004, 2007, 2008, 2009, 2010
+   Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -22,6 +23,7 @@
 #include "inferior.h"
 #include "regcache.h"
 #include "regset.h"
+#include "gdbthread.h"
 
 #include "gdb_assert.h"
 #include "gdb_string.h"
@@ -100,11 +102,14 @@ fbsd_find_memory_regions (int (*func) (CORE_ADDR, unsigned long,
   unsigned long start, end, size;
   char protection[4];
   int read, write, exec;
+  struct cleanup *cleanup;
 
   mapfilename = xstrprintf ("/proc/%ld/map", (long) pid);
+  cleanup = make_cleanup (xfree, mapfilename);
   mapfile = fopen (mapfilename, "r");
   if (mapfile == NULL)
     error (_("Couldn't open %s."), mapfilename);
+  make_cleanup_fclose (mapfile);
 
   if (info_verbose)
     fprintf_filtered (gdb_stdout, 
@@ -122,8 +127,8 @@ fbsd_find_memory_regions (int (*func) (CORE_ADDR, unsigned long,
       if (info_verbose)
 	{
 	  fprintf_filtered (gdb_stdout, 
-			    "Save segment, %ld bytes at 0x%s (%c%c%c)\n", 
-			    size, paddr_nz (start),
+			    "Save segment, %ld bytes at %s (%c%c%c)\n",
+			    size, paddress (target_gdbarch, start),
 			    read ? 'r' : '-',
 			    write ? 'w' : '-',
 			    exec ? 'x' : '-');
@@ -133,8 +138,30 @@ fbsd_find_memory_regions (int (*func) (CORE_ADDR, unsigned long,
       func (start, size, read, write, exec, obfd);
     }
 
-  fclose (mapfile);
+  do_cleanups (cleanup);
   return 0;
+}
+
+static int
+find_signalled_thread (struct thread_info *info, void *data)
+{
+  if (info->stop_signal != TARGET_SIGNAL_0
+      && ptid_get_pid (info->ptid) == ptid_get_pid (inferior_ptid))
+    return 1;
+
+  return 0;
+}
+
+static enum target_signal
+find_stop_signal (void)
+{
+  struct thread_info *info =
+    iterate_over_threads (find_signalled_thread, NULL);
+
+  if (info)
+    return info->stop_signal;
+  else
+    return TARGET_SIGNAL_0;
 }
 
 /* Create appropriate note sections for a corefile, returning them in
@@ -165,7 +192,7 @@ fbsd_make_corefile_notes (bfd *obfd, int *note_size)
 
   note_data = elfcore_write_prstatus (obfd, note_data, note_size,
 				      ptid_get_pid (inferior_ptid),
-				      stop_signal, &gregs);
+				      find_stop_signal (), &gregs);
 
   size = sizeof fpregs;
   regset = gdbarch_regset_from_core_section (gdbarch, ".reg2", size);

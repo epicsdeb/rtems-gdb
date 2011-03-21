@@ -1,6 +1,7 @@
 /* Functions specific to running GDB native on HPPA running GNU/Linux.
 
-   Copyright (C) 2004, 2005, 2006, 2007, 2008 Free Software Foundation, Inc.
+   Copyright (C) 2004, 2005, 2006, 2007, 2008, 2009, 2010
+   Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -269,7 +270,8 @@ store_register (const struct regcache *regcache, int regno)
    point registers depending upon the value of regno.  */
 
 static void
-hppa_linux_fetch_inferior_registers (struct regcache *regcache, int regno)
+hppa_linux_fetch_inferior_registers (struct target_ops *ops,
+				     struct regcache *regcache, int regno)
 {
   if (-1 == regno)
     {
@@ -289,7 +291,8 @@ hppa_linux_fetch_inferior_registers (struct regcache *regcache, int regno)
    point registers depending upon the value of regno.  */
 
 static void
-hppa_linux_store_inferior_registers (struct regcache *regcache, int regno)
+hppa_linux_store_inferior_registers (struct target_ops *ops,
+				     struct regcache *regcache, int regno)
 {
   if (-1 == regno)
     {

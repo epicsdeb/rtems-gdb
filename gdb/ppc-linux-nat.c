@@ -1,7 +1,7 @@
 /* PPC GNU/Linux native support.
 
    Copyright (C) 1988, 1989, 1991, 1992, 1994, 1996, 2000, 2001, 2002, 2003,
-   2004, 2005, 2006, 2007, 2008 Free Software Foundation, Inc.
+   2004, 2005, 2006, 2007, 2008, 2009, 2010 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -42,6 +42,33 @@
 /* Prototypes for supply_gregset etc. */
 #include "gregset.h"
 #include "ppc-tdep.h"
+#include "ppc-linux-tdep.h"
+
+/* Required when using the AUXV.  */
+#include "elf/common.h"
+#include "auxv.h"
+
+/* This sometimes isn't defined.  */
+#ifndef PT_ORIG_R3
+#define PT_ORIG_R3 34
+#endif
+#ifndef PT_TRAP
+#define PT_TRAP 40
+#endif
+
+/* The PPC_FEATURE_* defines should be provided by <asm/cputable.h>.
+   If they aren't, we can provide them ourselves (their values are fixed
+   because they are part of the kernel ABI).  They are used in the AT_HWCAP
+   entry of the AUXV.  */
+#ifndef PPC_FEATURE_CELL
+#define PPC_FEATURE_CELL 0x00010000
+#endif
+#ifndef PPC_FEATURE_BOOKE
+#define PPC_FEATURE_BOOKE 0x00008000
+#endif
+#ifndef PPC_FEATURE_HAS_DFP
+#define PPC_FEATURE_HAS_DFP	0x00000400  /* Decimal Floating Point.  */
+#endif
 
 /* Glibc's headers don't define PTRACE_GETVRREGS so we cannot use a
    configure time check.  Some older glibc's (for instance 2.2.1)
@@ -59,6 +86,11 @@
 #define PTRACE_SETVRREGS 19
 #endif
 
+/* PTRACE requests for POWER7 VSX registers.  */
+#ifndef PTRACE_GETVSXREGS
+#define PTRACE_GETVSXREGS 27
+#define PTRACE_SETVSXREGS 28
+#endif
 
 /* Similarly for the ptrace requests for getting / setting the SPE
    registers (ev0 -- ev31, acc, and spefscr).  See the description of
@@ -77,6 +109,21 @@
 #endif
 #ifndef PTRACE_GETSIGINFO
 #define PTRACE_GETSIGINFO    0x4202
+#endif
+
+/* Similarly for the general-purpose (gp0 -- gp31)
+   and floating-point registers (fp0 -- fp31).  */
+#ifndef PTRACE_GETREGS
+#define PTRACE_GETREGS 12
+#endif
+#ifndef PTRACE_SETREGS
+#define PTRACE_SETREGS 13
+#endif
+#ifndef PTRACE_GETFPREGS
+#define PTRACE_GETFPREGS 14
+#endif
+#ifndef PTRACE_SETFPREGS
+#define PTRACE_SETFPREGS 15
 #endif
 
 /* This oddity is because the Linux kernel defines elf_vrregset_t as
@@ -110,6 +157,41 @@
 
 typedef char gdb_vrregset_t[SIZEOF_VRREGS];
 
+/* This is the layout of the POWER7 VSX registers and the way they overlap
+   with the existing FPR and VMX registers.
+
+                    VSR doubleword 0               VSR doubleword 1
+           ----------------------------------------------------------------
+   VSR[0]  |             FPR[0]            |                              |
+           ----------------------------------------------------------------
+   VSR[1]  |             FPR[1]            |                              |
+           ----------------------------------------------------------------
+           |              ...              |                              |
+           |              ...              |                              |
+           ----------------------------------------------------------------
+   VSR[30] |             FPR[30]           |                              |
+           ----------------------------------------------------------------
+   VSR[31] |             FPR[31]           |                              |
+           ----------------------------------------------------------------
+   VSR[32] |                             VR[0]                            |
+           ----------------------------------------------------------------
+   VSR[33] |                             VR[1]                            |
+           ----------------------------------------------------------------
+           |                              ...                             |
+           |                              ...                             |
+           ----------------------------------------------------------------
+   VSR[62] |                             VR[30]                           |
+           ----------------------------------------------------------------
+   VSR[63] |                             VR[31]                           |
+          ----------------------------------------------------------------
+
+   VSX has 64 128bit registers.  The first 32 registers overlap with
+   the FP registers (doubleword 0) and hence extend them with additional
+   64 bits (doubleword 1).  The other 32 regs overlap with the VMX
+   registers.  */
+#define SIZEOF_VSXREGS 32*8
+
+typedef char gdb_vsxregset_t[SIZEOF_VSXREGS];
 
 /* On PPC processors that support the the Signal Processing Extension
    (SPE) APU, the general-purpose registers are 64 bits long.
@@ -135,6 +217,12 @@ struct gdb_evrregset_t
   unsigned long spefscr;
 };
 
+/* Non-zero if our kernel may support the PTRACE_GETVSXREGS and
+   PTRACE_SETVSXREGS requests, for reading and writing the VSX
+   POWER7 registers 0 through 31.  Zero if we've tried one of them and
+   gotten an error.  Note that VSX registers 32 through 63 overlap
+   with VR registers 0 through 31.  */
+int have_ptrace_getsetvsxregs = 1;
 
 /* Non-zero if our kernel may support the PTRACE_GETVRREGS and
    PTRACE_SETVRREGS requests, for reading and writing the Altivec
@@ -147,6 +235,18 @@ int have_ptrace_getvrregs = 1;
    registers.  Zero if we've tried one of them and gotten an
    error.  */
 int have_ptrace_getsetevrregs = 1;
+
+/* Non-zero if our kernel may support the PTRACE_GETREGS and
+   PTRACE_SETREGS requests, for reading and writing the
+   general-purpose registers.  Zero if we've tried one of
+   them and gotten an error.  */
+int have_ptrace_getsetregs = 1;
+
+/* Non-zero if our kernel may support the PTRACE_GETFPREGS and
+   PTRACE_SETFPREGS requests, for reading and writing the
+   floating-pointers registers.  Zero if we've tried one of
+   them and gotten an error.  */
+int have_ptrace_getsetfpregs = 1;
 
 /* *INDENT-OFF* */
 /* registers layout, as presented by the ptrace interface:
@@ -200,6 +300,10 @@ ppc_register_u_addr (struct gdbarch *gdbarch, int regno)
 #endif
   if (regno == tdep->ppc_ps_regnum)
     u_addr = PT_MSR * wordsize;
+  if (regno == PPC_ORIG_R3_REGNUM)
+    u_addr = PT_ORIG_R3 * wordsize;
+  if (regno == PPC_TRAP_REGNUM)
+    u_addr = PT_TRAP * wordsize;
   if (tdep->ppc_fpscr_regnum >= 0
       && regno == tdep->ppc_fpscr_regnum)
     {
@@ -207,15 +311,49 @@ ppc_register_u_addr (struct gdbarch *gdbarch, int regno)
 	 kernel headers incorrectly contained the 32-bit definition of
 	 PT_FPSCR.  For the 32-bit definition, floating-point
 	 registers occupy two 32-bit "slots", and the FPSCR lives in
-	 the secondhalf of such a slot-pair (hence +1).  For 64-bit,
+	 the second half of such a slot-pair (hence +1).  For 64-bit,
 	 the FPSCR instead occupies the full 64-bit 2-word-slot and
 	 hence no adjustment is necessary.  Hack around this.  */
       if (wordsize == 8 && PT_FPSCR == (48 + 32 + 1))
 	u_addr = (48 + 32) * wordsize;
+      /* If the FPSCR is 64-bit wide, we need to fetch the whole 64-bit
+	 slot and not just its second word.  The PT_FPSCR supplied when
+	 GDB is compiled as a 32-bit app doesn't reflect this.  */
+      else if (wordsize == 4 && register_size (gdbarch, regno) == 8
+	       && PT_FPSCR == (48 + 2*32 + 1))
+	u_addr = (48 + 2*32) * wordsize;
       else
 	u_addr = PT_FPSCR * wordsize;
     }
   return u_addr;
+}
+
+/* The Linux kernel ptrace interface for POWER7 VSX registers uses the
+   registers set mechanism, as opposed to the interface for all the
+   other registers, that stores/fetches each register individually.  */
+static void
+fetch_vsx_register (struct regcache *regcache, int tid, int regno)
+{
+  int ret;
+  gdb_vsxregset_t regs;
+  struct gdbarch *gdbarch = get_regcache_arch (regcache);
+  struct gdbarch_tdep *tdep = gdbarch_tdep (gdbarch);
+  int vsxregsize = register_size (gdbarch, tdep->ppc_vsr0_upper_regnum);
+
+  ret = ptrace (PTRACE_GETVSXREGS, tid, 0, &regs);
+  if (ret < 0)
+    {
+      if (errno == EIO)
+	{
+	  have_ptrace_getsetvsxregs = 0;
+	  return;
+	}
+      perror_with_name (_("Unable to fetch VSX register"));
+    }
+
+  regcache_raw_supply (regcache, regno,
+		       regs + (regno - tdep->ppc_vsr0_upper_regnum)
+		       * vsxregsize);
 }
 
 /* The Linux kernel ptrace interface for AltiVec registers uses the
@@ -352,6 +490,14 @@ fetch_register (struct regcache *regcache, int tid, int regno)
         AltiVec registers, fall through and return zeroes, because
         regaddr will be -1 in this case.  */
     }
+  if (vsx_register_p (gdbarch, regno))
+    {
+      if (have_ptrace_getsetvsxregs)
+	{
+	  fetch_vsx_register (regcache, tid, regno);
+	  return;
+	}
+    }
   else if (spe_register_p (gdbarch, regno))
     {
       fetch_spe_register (regcache, tid, regno);
@@ -408,6 +554,21 @@ fetch_register (struct regcache *regcache, int tid, int regno)
 }
 
 static void
+supply_vsxregset (struct regcache *regcache, gdb_vsxregset_t *vsxregsetp)
+{
+  int i;
+  struct gdbarch *gdbarch = get_regcache_arch (regcache);
+  struct gdbarch_tdep *tdep = gdbarch_tdep (gdbarch);
+  int vsxregsize = register_size (gdbarch, tdep->ppc_vsr0_upper_regnum);
+
+  for (i = 0; i < ppc_num_vshrs; i++)
+    {
+	regcache_raw_supply (regcache, tdep->ppc_vsr0_upper_regnum + i,
+			     *vsxregsetp + i * vsxregsize);
+    }
+}
+
+static void
 supply_vrregset (struct regcache *regcache, gdb_vrregset_t *vrregsetp)
 {
   int i;
@@ -433,6 +594,25 @@ supply_vrregset (struct regcache *regcache, gdb_vrregset_t *vrregsetp)
 }
 
 static void
+fetch_vsx_registers (struct regcache *regcache, int tid)
+{
+  int ret;
+  gdb_vsxregset_t regs;
+
+  ret = ptrace (PTRACE_GETVSXREGS, tid, 0, &regs);
+  if (ret < 0)
+    {
+      if (errno == EIO)
+	{
+	  have_ptrace_getsetvsxregs = 0;
+	  return;
+	}
+      perror_with_name (_("Unable to fetch VSX registers"));
+    }
+  supply_vsxregset (regcache, &regs);
+}
+
+static void
 fetch_altivec_registers (struct regcache *regcache, int tid)
 {
   int ret;
@@ -451,6 +631,112 @@ fetch_altivec_registers (struct regcache *regcache, int tid)
   supply_vrregset (regcache, &regs);
 }
 
+/* This function actually issues the request to ptrace, telling
+   it to get all general-purpose registers and put them into the
+   specified regset.
+   
+   If the ptrace request does not exist, this function returns 0
+   and properly sets the have_ptrace_* flag.  If the request fails,
+   this function calls perror_with_name.  Otherwise, if the request
+   succeeds, then the regcache gets filled and 1 is returned.  */
+static int
+fetch_all_gp_regs (struct regcache *regcache, int tid)
+{
+  struct gdbarch *gdbarch = get_regcache_arch (regcache);
+  struct gdbarch_tdep *tdep = gdbarch_tdep (gdbarch);
+  gdb_gregset_t gregset;
+
+  if (ptrace (PTRACE_GETREGS, tid, 0, (void *) &gregset) < 0)
+    {
+      if (errno == EIO)
+        {
+          have_ptrace_getsetregs = 0;
+          return 0;
+        }
+      perror_with_name (_("Couldn't get general-purpose registers."));
+    }
+
+  supply_gregset (regcache, (const gdb_gregset_t *) &gregset);
+
+  return 1;
+}
+
+/* This is a wrapper for the fetch_all_gp_regs function.  It is
+   responsible for verifying if this target has the ptrace request
+   that can be used to fetch all general-purpose registers at one
+   shot.  If it doesn't, then we should fetch them using the
+   old-fashioned way, which is to iterate over the registers and
+   request them one by one.  */
+static void
+fetch_gp_regs (struct regcache *regcache, int tid)
+{
+  struct gdbarch *gdbarch = get_regcache_arch (regcache);
+  struct gdbarch_tdep *tdep = gdbarch_tdep (gdbarch);
+  int i;
+
+  if (have_ptrace_getsetregs)
+    if (fetch_all_gp_regs (regcache, tid))
+      return;
+
+  /* If we've hit this point, it doesn't really matter which
+     architecture we are using.  We just need to read the
+     registers in the "old-fashioned way".  */
+  for (i = 0; i < ppc_num_gprs; i++)
+    fetch_register (regcache, tid, tdep->ppc_gp0_regnum + i);
+}
+
+/* This function actually issues the request to ptrace, telling
+   it to get all floating-point registers and put them into the
+   specified regset.
+   
+   If the ptrace request does not exist, this function returns 0
+   and properly sets the have_ptrace_* flag.  If the request fails,
+   this function calls perror_with_name.  Otherwise, if the request
+   succeeds, then the regcache gets filled and 1 is returned.  */
+static int
+fetch_all_fp_regs (struct regcache *regcache, int tid)
+{
+  gdb_fpregset_t fpregs;
+
+  if (ptrace (PTRACE_GETFPREGS, tid, 0, (void *) &fpregs) < 0)
+    {
+      if (errno == EIO)
+        {
+          have_ptrace_getsetfpregs = 0;
+          return 0;
+        }
+      perror_with_name (_("Couldn't get floating-point registers."));
+    }
+
+  supply_fpregset (regcache, (const gdb_fpregset_t *) &fpregs);
+
+  return 1;
+}
+
+/* This is a wrapper for the fetch_all_fp_regs function.  It is
+   responsible for verifying if this target has the ptrace request
+   that can be used to fetch all floating-point registers at one
+   shot.  If it doesn't, then we should fetch them using the
+   old-fashioned way, which is to iterate over the registers and
+   request them one by one.  */
+static void
+fetch_fp_regs (struct regcache *regcache, int tid)
+{
+  struct gdbarch *gdbarch = get_regcache_arch (regcache);
+  struct gdbarch_tdep *tdep = gdbarch_tdep (gdbarch);
+  int i;
+
+  if (have_ptrace_getsetfpregs)
+    if (fetch_all_fp_regs (regcache, tid))
+      return;
+ 
+  /* If we've hit this point, it doesn't really matter which
+     architecture we are using.  We just need to read the
+     registers in the "old-fashioned way".  */
+  for (i = 0; i < ppc_num_fprs; i++)
+    fetch_register (regcache, tid, tdep->ppc_fp0_regnum + i);
+}
+
 static void 
 fetch_ppc_registers (struct regcache *regcache, int tid)
 {
@@ -458,11 +744,9 @@ fetch_ppc_registers (struct regcache *regcache, int tid)
   struct gdbarch *gdbarch = get_regcache_arch (regcache);
   struct gdbarch_tdep *tdep = gdbarch_tdep (gdbarch);
 
-  for (i = 0; i < ppc_num_gprs; i++)
-    fetch_register (regcache, tid, tdep->ppc_gp0_regnum + i);
+  fetch_gp_regs (regcache, tid);
   if (tdep->ppc_fp0_regnum >= 0)
-    for (i = 0; i < ppc_num_fprs; i++)
-      fetch_register (regcache, tid, tdep->ppc_fp0_regnum + i);
+    fetch_fp_regs (regcache, tid);
   fetch_register (regcache, tid, gdbarch_pc_regnum (gdbarch));
   if (tdep->ppc_ps_regnum != -1)
     fetch_register (regcache, tid, tdep->ppc_ps_regnum);
@@ -476,11 +760,19 @@ fetch_ppc_registers (struct regcache *regcache, int tid)
     fetch_register (regcache, tid, tdep->ppc_xer_regnum);
   if (tdep->ppc_mq_regnum != -1)
     fetch_register (regcache, tid, tdep->ppc_mq_regnum);
+  if (ppc_linux_trap_reg_p (gdbarch))
+    {
+      fetch_register (regcache, tid, PPC_ORIG_R3_REGNUM);
+      fetch_register (regcache, tid, PPC_TRAP_REGNUM);
+    }
   if (tdep->ppc_fpscr_regnum != -1)
     fetch_register (regcache, tid, tdep->ppc_fpscr_regnum);
   if (have_ptrace_getvrregs)
     if (tdep->ppc_vr0_regnum != -1 && tdep->ppc_vrsave_regnum != -1)
       fetch_altivec_registers (regcache, tid);
+  if (have_ptrace_getsetvsxregs)
+    if (tdep->ppc_vsr0_upper_regnum != -1)
+      fetch_vsx_registers (regcache, tid);
   if (tdep->ppc_ev0_upper_regnum >= 0)
     fetch_spe_register (regcache, tid, -1);
 }
@@ -489,7 +781,8 @@ fetch_ppc_registers (struct regcache *regcache, int tid)
    regno == -1, otherwise fetch all general registers or all floating
    point registers depending upon the value of regno.  */
 static void
-ppc_linux_fetch_inferior_registers (struct regcache *regcache, int regno)
+ppc_linux_fetch_inferior_registers (struct target_ops *ops,
+				    struct regcache *regcache, int regno)
 {
   /* Overload thread id onto process id */
   int tid = TIDGET (inferior_ptid);
@@ -502,6 +795,35 @@ ppc_linux_fetch_inferior_registers (struct regcache *regcache, int regno)
     fetch_ppc_registers (regcache, tid);
   else 
     fetch_register (regcache, tid, regno);
+}
+
+/* Store one VSX register. */
+static void
+store_vsx_register (const struct regcache *regcache, int tid, int regno)
+{
+  int ret;
+  gdb_vsxregset_t regs;
+  struct gdbarch *gdbarch = get_regcache_arch (regcache);
+  struct gdbarch_tdep *tdep = gdbarch_tdep (gdbarch);
+  int vsxregsize = register_size (gdbarch, tdep->ppc_vsr0_upper_regnum);
+
+  ret = ptrace (PTRACE_SETVSXREGS, tid, 0, &regs);
+  if (ret < 0)
+    {
+      if (errno == EIO)
+	{
+	  have_ptrace_getsetvsxregs = 0;
+	  return;
+	}
+      perror_with_name (_("Unable to fetch VSX register"));
+    }
+
+  regcache_raw_collect (regcache, regno, regs +
+			(regno - tdep->ppc_vsr0_upper_regnum) * vsxregsize);
+
+  ret = ptrace (PTRACE_SETVSXREGS, tid, 0, &regs);
+  if (ret < 0)
+    perror_with_name (_("Unable to store VSX register"));
 }
 
 /* Store one register. */
@@ -642,6 +964,11 @@ store_register (const struct regcache *regcache, int tid, int regno)
       store_altivec_register (regcache, tid, regno);
       return;
     }
+  if (vsx_register_p (gdbarch, regno))
+    {
+      store_vsx_register (regcache, tid, regno);
+      return;
+    }
   else if (spe_register_p (gdbarch, regno))
     {
       store_spe_register (regcache, tid, regno);
@@ -676,9 +1003,12 @@ store_register (const struct regcache *regcache, int tid, int regno)
       regaddr += sizeof (long);
 
       if (errno == EIO 
-          && regno == tdep->ppc_fpscr_regnum)
+          && (regno == tdep->ppc_fpscr_regnum
+	      || regno == PPC_ORIG_R3_REGNUM
+	      || regno == PPC_TRAP_REGNUM))
 	{
-	  /* Some older kernel versions don't allow fpscr to be written.  */
+	  /* Some older kernel versions don't allow fpscr, orig_r3
+	     or trap to be written.  */
 	  continue;
 	}
 
@@ -690,6 +1020,19 @@ store_register (const struct regcache *regcache, int tid, int regno)
 	  perror_with_name (message);
 	}
     }
+}
+
+static void
+fill_vsxregset (const struct regcache *regcache, gdb_vsxregset_t *vsxregsetp)
+{
+  int i;
+  struct gdbarch *gdbarch = get_regcache_arch (regcache);
+  struct gdbarch_tdep *tdep = gdbarch_tdep (gdbarch);
+  int vsxregsize = register_size (gdbarch, tdep->ppc_vsr0_upper_regnum);
+
+  for (i = 0; i < ppc_num_vshrs; i++)
+    regcache_raw_collect (regcache, tdep->ppc_vsr0_upper_regnum + i,
+			  *vsxregsetp + i * vsxregsize);
 }
 
 static void
@@ -716,6 +1059,29 @@ fill_vrregset (const struct regcache *regcache, gdb_vrregset_t *vrregsetp)
 }
 
 static void
+store_vsx_registers (const struct regcache *regcache, int tid)
+{
+  int ret;
+  gdb_vsxregset_t regs;
+
+  ret = ptrace (PTRACE_GETVSXREGS, tid, 0, &regs);
+  if (ret < 0)
+    {
+      if (errno == EIO)
+	{
+	  have_ptrace_getsetvsxregs = 0;
+	  return;
+	}
+      perror_with_name (_("Couldn't get VSX registers"));
+    }
+
+  fill_vsxregset (regcache, &regs);
+
+  if (ptrace (PTRACE_SETVSXREGS, tid, 0, &regs) < 0)
+    perror_with_name (_("Couldn't write VSX registers"));
+}
+
+static void
 store_altivec_registers (const struct regcache *regcache, int tid)
 {
   int ret;
@@ -738,18 +1104,142 @@ store_altivec_registers (const struct regcache *regcache, int tid)
     perror_with_name (_("Couldn't write AltiVec registers"));
 }
 
+/* This function actually issues the request to ptrace, telling
+   it to store all general-purpose registers present in the specified
+   regset.
+   
+   If the ptrace request does not exist, this function returns 0
+   and properly sets the have_ptrace_* flag.  If the request fails,
+   this function calls perror_with_name.  Otherwise, if the request
+   succeeds, then the regcache is stored and 1 is returned.  */
+static int
+store_all_gp_regs (const struct regcache *regcache, int tid, int regno)
+{
+  struct gdbarch *gdbarch = get_regcache_arch (regcache);
+  struct gdbarch_tdep *tdep = gdbarch_tdep (gdbarch);
+  gdb_gregset_t gregset;
+
+  if (ptrace (PTRACE_GETREGS, tid, 0, (void *) &gregset) < 0)
+    {
+      if (errno == EIO)
+        {
+          have_ptrace_getsetregs = 0;
+          return 0;
+        }
+      perror_with_name (_("Couldn't get general-purpose registers."));
+    }
+
+  fill_gregset (regcache, &gregset, regno);
+
+  if (ptrace (PTRACE_SETREGS, tid, 0, (void *) &gregset) < 0)
+    {
+      if (errno == EIO)
+        {
+          have_ptrace_getsetregs = 0;
+          return 0;
+        }
+      perror_with_name (_("Couldn't set general-purpose registers."));
+    }
+
+  return 1;
+}
+
+/* This is a wrapper for the store_all_gp_regs function.  It is
+   responsible for verifying if this target has the ptrace request
+   that can be used to store all general-purpose registers at one
+   shot.  If it doesn't, then we should store them using the
+   old-fashioned way, which is to iterate over the registers and
+   store them one by one.  */
+static void
+store_gp_regs (const struct regcache *regcache, int tid, int regno)
+{
+  struct gdbarch *gdbarch = get_regcache_arch (regcache);
+  struct gdbarch_tdep *tdep = gdbarch_tdep (gdbarch);
+  int i;
+
+  if (have_ptrace_getsetregs)
+    if (store_all_gp_regs (regcache, tid, regno))
+      return;
+
+  /* If we hit this point, it doesn't really matter which
+     architecture we are using.  We just need to store the
+     registers in the "old-fashioned way".  */
+  for (i = 0; i < ppc_num_gprs; i++)
+    store_register (regcache, tid, tdep->ppc_gp0_regnum + i);
+}
+
+/* This function actually issues the request to ptrace, telling
+   it to store all floating-point registers present in the specified
+   regset.
+   
+   If the ptrace request does not exist, this function returns 0
+   and properly sets the have_ptrace_* flag.  If the request fails,
+   this function calls perror_with_name.  Otherwise, if the request
+   succeeds, then the regcache is stored and 1 is returned.  */
+static int
+store_all_fp_regs (const struct regcache *regcache, int tid, int regno)
+{
+  gdb_fpregset_t fpregs;
+
+  if (ptrace (PTRACE_GETFPREGS, tid, 0, (void *) &fpregs) < 0)
+    {
+      if (errno == EIO)
+        {
+          have_ptrace_getsetfpregs = 0;
+          return 0;
+        }
+      perror_with_name (_("Couldn't get floating-point registers."));
+    }
+
+  fill_fpregset (regcache, &fpregs, regno);
+
+  if (ptrace (PTRACE_SETFPREGS, tid, 0, (void *) &fpregs) < 0)
+    {
+      if (errno == EIO)
+        {
+          have_ptrace_getsetfpregs = 0;
+          return 0;
+        }
+      perror_with_name (_("Couldn't set floating-point registers."));
+    }
+
+  return 1;
+}
+
+/* This is a wrapper for the store_all_fp_regs function.  It is
+   responsible for verifying if this target has the ptrace request
+   that can be used to store all floating-point registers at one
+   shot.  If it doesn't, then we should store them using the
+   old-fashioned way, which is to iterate over the registers and
+   store them one by one.  */
+static void
+store_fp_regs (const struct regcache *regcache, int tid, int regno)
+{
+  struct gdbarch *gdbarch = get_regcache_arch (regcache);
+  struct gdbarch_tdep *tdep = gdbarch_tdep (gdbarch);
+  int i;
+
+  if (have_ptrace_getsetfpregs)
+    if (store_all_fp_regs (regcache, tid, regno))
+      return;
+
+  /* If we hit this point, it doesn't really matter which
+     architecture we are using.  We just need to store the
+     registers in the "old-fashioned way".  */
+  for (i = 0; i < ppc_num_fprs; i++)
+    store_register (regcache, tid, tdep->ppc_fp0_regnum + i);
+}
+
 static void
 store_ppc_registers (const struct regcache *regcache, int tid)
 {
   int i;
   struct gdbarch *gdbarch = get_regcache_arch (regcache);
   struct gdbarch_tdep *tdep = gdbarch_tdep (gdbarch);
-  
-  for (i = 0; i < ppc_num_gprs; i++)
-    store_register (regcache, tid, tdep->ppc_gp0_regnum + i);
+ 
+  store_gp_regs (regcache, tid, -1);
   if (tdep->ppc_fp0_regnum >= 0)
-    for (i = 0; i < ppc_num_fprs; i++)
-      store_register (regcache, tid, tdep->ppc_fp0_regnum + i);
+    store_fp_regs (regcache, tid, -1);
   store_register (regcache, tid, gdbarch_pc_regnum (gdbarch));
   if (tdep->ppc_ps_regnum != -1)
     store_register (regcache, tid, tdep->ppc_ps_regnum);
@@ -765,9 +1255,17 @@ store_ppc_registers (const struct regcache *regcache, int tid)
     store_register (regcache, tid, tdep->ppc_mq_regnum);
   if (tdep->ppc_fpscr_regnum != -1)
     store_register (regcache, tid, tdep->ppc_fpscr_regnum);
+  if (ppc_linux_trap_reg_p (gdbarch))
+    {
+      store_register (regcache, tid, PPC_ORIG_R3_REGNUM);
+      store_register (regcache, tid, PPC_TRAP_REGNUM);
+    }
   if (have_ptrace_getvrregs)
     if (tdep->ppc_vr0_regnum != -1 && tdep->ppc_vrsave_regnum != -1)
       store_altivec_registers (regcache, tid);
+  if (have_ptrace_getsetvsxregs)
+    if (tdep->ppc_vsr0_upper_regnum != -1)
+      store_vsx_registers (regcache, tid);
   if (tdep->ppc_ev0_upper_regnum >= 0)
     store_spe_register (regcache, tid, -1);
 }
@@ -796,6 +1294,17 @@ ppc_linux_check_watch_resources (int type, int cnt, int ot)
   return 1;
 }
 
+/* Fetch the AT_HWCAP entry from the aux vector.  */
+unsigned long ppc_linux_get_hwcap (void)
+{
+  CORE_ADDR field;
+
+  if (target_auxv_search (&current_target, AT_HWCAP, &field))
+    return (unsigned long) field;
+
+  return 0;
+}
+
 static int
 ppc_linux_region_ok_for_hw_watchpoint (CORE_ADDR addr, int len)
 {
@@ -803,8 +1312,13 @@ ppc_linux_region_ok_for_hw_watchpoint (CORE_ADDR addr, int len)
   if (len <= 0)
     return 0;
 
-  /* addr+len must fall in the 8 byte watchable region.  */
-  if ((addr + len) > (addr & ~7) + 8)
+  /* addr+len must fall in the 8 byte watchable region for DABR-based
+     processors.  DAC-based processors, like the PowerPC 440, will use
+     addresses aligned to 4-bytes due to the way the read/write flags are
+     passed at the moment.  */
+  if (((ppc_linux_get_hwcap () & PPC_FEATURE_BOOKE)
+      && (addr + len) > (addr & ~3) + 4)
+      || (addr + len) > (addr & ~7) + 8)
     return 0;
 
   return 1;
@@ -820,21 +1334,37 @@ ppc_linux_insert_watchpoint (CORE_ADDR addr, int len, int rw)
   struct lwp_info *lp;
   ptid_t ptid;
   long dabr_value;
+  long read_mode, write_mode;
 
-  dabr_value = addr & ~7;
+  if (ppc_linux_get_hwcap () & PPC_FEATURE_BOOKE)
+  {
+  /* PowerPC 440 requires only the read/write flags to be passed
+     to the kernel.  */
+    read_mode  = 1;
+    write_mode = 2;
+  }
+  else
+  {
+  /* PowerPC 970 and other DABR-based processors are required to pass
+     the Breakpoint Translation bit together with the flags.  */
+    read_mode  = 5;
+    write_mode = 6;
+  }
+
+  dabr_value = addr & ~(read_mode | write_mode);
   switch (rw)
     {
     case hw_read:
       /* Set read and translate bits.  */
-      dabr_value |= 5;
+      dabr_value |= read_mode;
       break;
     case hw_write:
       /* Set write and translate bits.  */
-      dabr_value |= 6;
+      dabr_value |= write_mode;
       break;
     case hw_access:
       /* Set read, write and translate bits.  */
-      dabr_value |= 7;
+      dabr_value |= read_mode | write_mode;
       break;
     }
 
@@ -889,8 +1419,27 @@ ppc_linux_stopped_by_watchpoint (void)
   return ppc_linux_stopped_data_address (&current_target, &addr);
 }
 
+static int
+ppc_linux_watchpoint_addr_within_range (struct target_ops *target,
+					CORE_ADDR addr,
+					CORE_ADDR start, int length)
+{
+  int mask;
+
+  if (ppc_linux_get_hwcap () & PPC_FEATURE_BOOKE)
+    mask = 3;
+  else
+    mask = 7;
+
+  addr &= ~mask;
+
+  /* Check whether [start, start+length-1] intersects [addr, addr+mask]. */
+  return start <= addr + mask && start + length - 1 >= addr;
+}
+
 static void
-ppc_linux_store_inferior_registers (struct regcache *regcache, int regno)
+ppc_linux_store_inferior_registers (struct target_ops *ops,
+				    struct regcache *regcache, int regno)
 {
   /* Overload thread id onto process id */
   int tid = TIDGET (inferior_ptid);
@@ -949,31 +1498,135 @@ fill_fpregset (const struct regcache *regcache,
 			fpregsetp, sizeof (*fpregsetp));
 }
 
+static int
+ppc_linux_target_wordsize (void)
+{
+  int wordsize = 4;
+
+  /* Check for 64-bit inferior process.  This is the case when the host is
+     64-bit, and in addition the top bit of the MSR register is set.  */
+#ifdef __powerpc64__
+  long msr;
+
+  int tid = TIDGET (inferior_ptid);
+  if (tid == 0)
+    tid = PIDGET (inferior_ptid);
+
+  errno = 0;
+  msr = (long) ptrace (PTRACE_PEEKUSER, tid, PT_MSR * 8, 0);
+  if (errno == 0 && msr < 0)
+    wordsize = 8;
+#endif
+
+  return wordsize;
+}
+
+static int
+ppc_linux_auxv_parse (struct target_ops *ops, gdb_byte **readptr,
+                      gdb_byte *endptr, CORE_ADDR *typep, CORE_ADDR *valp)
+{
+  int sizeof_auxv_field = ppc_linux_target_wordsize ();
+  enum bfd_endian byte_order = gdbarch_byte_order (target_gdbarch);
+  gdb_byte *ptr = *readptr;
+
+  if (endptr == ptr)
+    return 0;
+
+  if (endptr - ptr < sizeof_auxv_field * 2)
+    return -1;
+
+  *typep = extract_unsigned_integer (ptr, sizeof_auxv_field, byte_order);
+  ptr += sizeof_auxv_field;
+  *valp = extract_unsigned_integer (ptr, sizeof_auxv_field, byte_order);
+  ptr += sizeof_auxv_field;
+
+  *readptr = ptr;
+  return 1;
+}
+
 static const struct target_desc *
 ppc_linux_read_description (struct target_ops *ops)
 {
+  int altivec = 0;
+  int vsx = 0;
+  int isa205 = 0;
+  int cell = 0;
+
+  int tid = TIDGET (inferior_ptid);
+  if (tid == 0)
+    tid = PIDGET (inferior_ptid);
+
   if (have_ptrace_getsetevrregs)
     {
       struct gdb_evrregset_t evrregset;
-      int tid = TIDGET (inferior_ptid);
-
-      if (tid == 0)
-	tid = PIDGET (inferior_ptid);
 
       if (ptrace (PTRACE_GETEVRREGS, tid, 0, &evrregset) >= 0)
-        return tdesc_powerpc_e500;
-      else
-        {
-          /* EIO means that the PTRACE_GETEVRREGS request isn't supported.  */
-          if (errno == EIO)
-	    return NULL;
-	  else
-            /* Anything else needs to be reported.  */
-            perror_with_name (_("Unable to fetch SPE registers"));
-	}
+        return tdesc_powerpc_e500l;
+
+      /* EIO means that the PTRACE_GETEVRREGS request isn't supported.
+	 Anything else needs to be reported.  */
+      else if (errno != EIO)
+	perror_with_name (_("Unable to fetch SPE registers"));
     }
 
-  return NULL;
+  if (have_ptrace_getsetvsxregs)
+    {
+      gdb_vsxregset_t vsxregset;
+
+      if (ptrace (PTRACE_GETVSXREGS, tid, 0, &vsxregset) >= 0)
+	vsx = 1;
+
+      /* EIO means that the PTRACE_GETVSXREGS request isn't supported.
+	 Anything else needs to be reported.  */
+      else if (errno != EIO)
+	perror_with_name (_("Unable to fetch VSX registers"));
+    }
+
+  if (have_ptrace_getvrregs)
+    {
+      gdb_vrregset_t vrregset;
+
+      if (ptrace (PTRACE_GETVRREGS, tid, 0, &vrregset) >= 0)
+        altivec = 1;
+
+      /* EIO means that the PTRACE_GETVRREGS request isn't supported.
+	 Anything else needs to be reported.  */
+      else if (errno != EIO)
+	perror_with_name (_("Unable to fetch AltiVec registers"));
+    }
+
+  /* Power ISA 2.05 (implemented by Power 6 and newer processors) increases
+     the FPSCR from 32 bits to 64 bits. Even though Power 7 supports this
+     ISA version, it doesn't have PPC_FEATURE_ARCH_2_05 set, only
+     PPC_FEATURE_ARCH_2_06.  Since for now the only bits used in the higher
+     half of the register are for Decimal Floating Point, we check if that
+     feature is available to decide the size of the FPSCR.  */
+  if (ppc_linux_get_hwcap () & PPC_FEATURE_HAS_DFP)
+    isa205 = 1;
+
+  if (ppc_linux_get_hwcap () & PPC_FEATURE_CELL)
+    cell = 1;
+
+  if (ppc_linux_target_wordsize () == 8)
+    {
+      if (cell)
+	return tdesc_powerpc_cell64l;
+      else if (vsx)
+	return isa205? tdesc_powerpc_isa205_vsx64l : tdesc_powerpc_vsx64l;
+      else if (altivec)
+	return isa205? tdesc_powerpc_isa205_altivec64l : tdesc_powerpc_altivec64l;
+
+      return isa205? tdesc_powerpc_isa205_64l : tdesc_powerpc_64l;
+    }
+
+  if (cell)
+    return tdesc_powerpc_cell32l;
+  else if (vsx)
+    return isa205? tdesc_powerpc_isa205_vsx32l : tdesc_powerpc_vsx32l;
+  else if (altivec)
+    return isa205? tdesc_powerpc_isa205_altivec32l : tdesc_powerpc_altivec32l;
+
+  return isa205? tdesc_powerpc_isa205_32l : tdesc_powerpc_32l;
 }
 
 void _initialize_ppc_linux_nat (void);
@@ -997,8 +1650,10 @@ _initialize_ppc_linux_nat (void)
   t->to_remove_watchpoint = ppc_linux_remove_watchpoint;
   t->to_stopped_by_watchpoint = ppc_linux_stopped_by_watchpoint;
   t->to_stopped_data_address = ppc_linux_stopped_data_address;
+  t->to_watchpoint_addr_within_range = ppc_linux_watchpoint_addr_within_range;
 
   t->to_read_description = ppc_linux_read_description;
+  t->to_auxv_parse = ppc_linux_auxv_parse;
 
   /* Register the target.  */
   linux_nat_add_target (t);

@@ -171,9 +171,10 @@ enum ia64_resource_specifier
   IA64_RS_BR,
   IA64_RS_CFM,
   IA64_RS_CPUID,
+  IA64_RS_CR_IIB,
   IA64_RS_CR_IRR,
   IA64_RS_CR_LRR,
-  IA64_RS_CR, /* 3-7,10-15,18,26-63,75-79,82-127 */
+  IA64_RS_CR, /* 3-7,10-15,18,28-63,75-79,82-127 */
   IA64_RS_DBR,
   IA64_RS_FR,
   IA64_RS_FRb,
@@ -326,7 +327,7 @@ enum ia64_operand_class
 
 struct ia64_operand
 {
-  enum ia64_operand_class class;
+  enum ia64_operand_class op_class;
 
   /* Set VALUE as the operand bits for the operand of type SELF in the
      instruction pointed to by CODE.  If an error occurs, *CODE is not
@@ -380,14 +381,14 @@ extern struct ia64_opcode ia64_opcodes_f[];
 extern struct ia64_opcode ia64_opcodes_d[];
 
 
-extern struct ia64_opcode *ia64_find_opcode (const char *name);
-extern struct ia64_opcode *ia64_find_next_opcode (struct ia64_opcode *ent);
+extern struct ia64_opcode *ia64_find_opcode (const char *);
+extern struct ia64_opcode *ia64_find_next_opcode (struct ia64_opcode *);
 
-extern struct ia64_opcode *ia64_dis_opcode (ia64_insn insn,
-					    enum ia64_insn_type type);
+extern struct ia64_opcode *ia64_dis_opcode (ia64_insn,
+					    enum ia64_insn_type);
 
-extern void ia64_free_opcode (struct ia64_opcode *ent);
-extern const struct ia64_dependency *ia64_find_dependency (int index);
+extern void ia64_free_opcode (struct ia64_opcode *);
+extern const struct ia64_dependency *ia64_find_dependency (int);
 
 /* To avoid circular library dependencies, this array is implemented
    in bfd/cpu-ia64-opc.c: */

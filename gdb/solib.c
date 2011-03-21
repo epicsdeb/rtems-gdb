@@ -1,7 +1,7 @@
 /* Handle shared libraries for GDB, the GNU Debugger.
 
    Copyright (C) 1990, 1991, 1992, 1993, 1994, 1995, 1996, 1997, 1998, 1999,
-   2000, 2001, 2002, 2003, 2005, 2006, 2007, 2008
+   2000, 2001, 2002, 2003, 2005, 2006, 2007, 2008, 2009, 2010
    Free Software Foundation, Inc.
 
    This file is part of GDB.
@@ -44,6 +44,9 @@
 #include "solist.h"
 #include "observer.h"
 #include "readline/readline.h"
+#include "remote.h"
+#include "solib.h"
+#include "interps.h"
 
 /* Architecture-specific operations.  */
 
@@ -83,9 +86,8 @@ set_solib_ops (struct gdbarch *gdbarch, struct target_so_ops *new_ops)
    configuration needs to call set_solib_ops.  */
 struct target_so_ops *current_target_so_ops;
 
-/* local data declarations */
-
-static struct so_list *so_list_head;	/* List of known shared objects */
+/* List of known shared objects */
+#define so_list_head current_program_space->so_list
 
 /* Local function prototypes */
 
@@ -106,11 +108,11 @@ The search path for loading non-absolute shared library symbol files is %s.\n"),
 
    GLOBAL FUNCTION
 
-   solib_open -- Find a shared library file and open it.
+   solib_find -- Find a shared library file.
 
    SYNOPSIS
 
-   int solib_open (char *in_patname, char **found_pathname);
+   char *solib_find (char *in_pathname, int *fd);
 
    DESCRIPTION
 
@@ -137,15 +139,16 @@ The search path for loading non-absolute shared library symbol files is %s.\n"),
 
    RETURNS
 
-   file handle for opened solib, or -1 for failure.  */
+   Full pathname of the shared library file, or NULL if not found.
+   (The pathname is malloc'ed; it needs to be freed by the caller.)
+   *FD is set to either -1 or an open file handle for the library.  */
 
-int
-solib_open (char *in_pathname, char **found_pathname)
+char *
+solib_find (char *in_pathname, int *fd)
 {
-  struct target_so_ops *ops = solib_ops (current_gdbarch);
+  struct target_so_ops *ops = solib_ops (target_gdbarch);
   int found_file = -1;
   char *temp_pathname = NULL;
-  char *p = in_pathname;
   int gdb_sysroot_is_empty;
 
   gdb_sysroot_is_empty = (gdb_sysroot == NULL || *gdb_sysroot == 0);
@@ -166,6 +169,13 @@ solib_open (char *in_pathname, char **found_pathname)
       strncpy (temp_pathname, gdb_sysroot, prefix_len);
       temp_pathname[prefix_len] = '\0';
       strcat (temp_pathname, in_pathname);
+    }
+
+  /* Handle remote files.  */
+  if (remote_filename_p (temp_pathname))
+    {
+      *fd = -1;
+      return xstrdup (temp_pathname);
     }
 
   /* Now see if we can open it.  */
@@ -200,14 +210,14 @@ solib_open (char *in_pathname, char **found_pathname)
   /* If not found, search the solib_search_path (if any).  */
   if (found_file < 0 && solib_search_path != NULL)
     found_file = openp (solib_search_path, OPF_TRY_CWD_FIRST,
-			in_pathname, O_RDONLY | O_BINARY, 0, &temp_pathname);
+			in_pathname, O_RDONLY | O_BINARY, &temp_pathname);
   
   /* If not found, next search the solib_search_path (if any) for the basename
      only (ignoring the path).  This is to allow reading solibs from a path
      that differs from the opened path.  */
   if (found_file < 0 && solib_search_path != NULL)
     found_file = openp (solib_search_path, OPF_TRY_CWD_FIRST,
-                        lbasename (in_pathname), O_RDONLY | O_BINARY, 0,
+                        lbasename (in_pathname), O_RDONLY | O_BINARY,
                         &temp_pathname);
 
   /* If not found, try to use target supplied solib search method */
@@ -217,27 +227,96 @@ solib_open (char *in_pathname, char **found_pathname)
 
   /* If not found, next search the inferior's $PATH environment variable. */
   if (found_file < 0 && gdb_sysroot_is_empty)
-    found_file = openp (get_in_environ (inferior_environ, "PATH"),
-			OPF_TRY_CWD_FIRST, in_pathname, O_RDONLY | O_BINARY, 0,
+    found_file = openp (get_in_environ (current_inferior ()->environment,
+					"PATH"),
+			OPF_TRY_CWD_FIRST, in_pathname, O_RDONLY | O_BINARY,
 			&temp_pathname);
 
   /* If not found, next search the inferior's $LD_LIBRARY_PATH 
      environment variable. */
   if (found_file < 0 && gdb_sysroot_is_empty)
-    found_file = openp (get_in_environ (inferior_environ, "LD_LIBRARY_PATH"),
-			OPF_TRY_CWD_FIRST, in_pathname, O_RDONLY | O_BINARY, 0,
+    found_file = openp (get_in_environ (current_inferior ()->environment,
+					"LD_LIBRARY_PATH"),
+			OPF_TRY_CWD_FIRST, in_pathname, O_RDONLY | O_BINARY,
 			&temp_pathname);
 
-  /* Done.  If not found, tough luck.  Return found_file and 
-     (optionally) found_pathname.  */
-  if (temp_pathname)
+  *fd = found_file;
+  return temp_pathname;
+}
+
+/* Open and return a BFD for the shared library PATHNAME.  If FD is not -1,
+   it is used as file handle to open the file.  Throws an error if the file
+   could not be opened.  Handles both local and remote file access.
+
+   PATHNAME must be malloc'ed by the caller.  If successful, the new BFD's
+   name will point to it.  If unsuccessful, PATHNAME will be freed and the
+   FD will be closed (unless FD was -1).  */
+
+bfd *
+solib_bfd_fopen (char *pathname, int fd)
+{
+  bfd *abfd;
+
+  if (remote_filename_p (pathname))
     {
-      if (found_pathname != NULL)
-	*found_pathname = temp_pathname;
-      else
-	xfree (temp_pathname);
+      gdb_assert (fd == -1);
+      abfd = remote_bfd_open (pathname, gnutarget);
     }
-  return found_file;
+  else
+    {
+      abfd = bfd_fopen (pathname, gnutarget, FOPEN_RB, fd);
+
+      if (abfd)
+	bfd_set_cacheable (abfd, 1);
+      else if (fd != -1)
+	close (fd);
+    }
+
+  if (!abfd)
+    {
+      make_cleanup (xfree, pathname);
+      error (_("Could not open `%s' as an executable file: %s"),
+	     pathname, bfd_errmsg (bfd_get_error ()));
+    }
+
+  return abfd;
+}
+
+/* Find shared library PATHNAME and open a BFD for it.  */
+
+bfd *
+solib_bfd_open (char *pathname)
+{
+  char *found_pathname;
+  int found_file;
+  bfd *abfd;
+  const struct bfd_arch_info *b;
+
+  /* Search for shared library file.  */
+  found_pathname = solib_find (pathname, &found_file);
+  if (found_pathname == NULL)
+    perror_with_name (pathname);
+
+  /* Open bfd for shared library.  */
+  abfd = solib_bfd_fopen (found_pathname, found_file);
+
+  /* Check bfd format.  */
+  if (!bfd_check_format (abfd, bfd_object))
+    {
+      bfd_close (abfd);
+      make_cleanup (xfree, found_pathname);
+      error (_("`%s': not in executable format: %s"),
+	     found_pathname, bfd_errmsg (bfd_get_error ()));
+    }
+
+  /* Check bfd arch.  */
+  b = gdbarch_bfd_arch_info (target_gdbarch);
+  if (!b->compatible (b, bfd_get_arch_info (abfd)))
+    warning (_("`%s': Shared library architecture %s is not compatible "
+               "with target architecture %s."), found_pathname,
+             bfd_get_arch_info (abfd)->printable_name, b->printable_name);
+
+  return abfd;
 }
 
 
@@ -272,47 +351,26 @@ static int
 solib_map_sections (void *arg)
 {
   struct so_list *so = (struct so_list *) arg;	/* catch_errors bogon */
+  struct target_so_ops *ops = solib_ops (target_gdbarch);
   char *filename;
-  char *scratch_pathname;
-  int scratch_chan;
-  struct section_table *p;
+  struct target_section *p;
   struct cleanup *old_chain;
   bfd *abfd;
 
   filename = tilde_expand (so->so_name);
-
   old_chain = make_cleanup (xfree, filename);
-  scratch_chan = solib_open (filename, &scratch_pathname);
-
-  if (scratch_chan < 0)
-    {
-      perror_with_name (filename);
-    }
-
-  /* Leave scratch_pathname allocated.  abfd->name will point to it.  */
-  abfd = bfd_fopen (scratch_pathname, gnutarget, FOPEN_RB, scratch_chan);
-  if (!abfd)
-    {
-      close (scratch_chan);
-      error (_("Could not open `%s' as an executable file: %s"),
-	     scratch_pathname, bfd_errmsg (bfd_get_error ()));
-    }
+  abfd = ops->bfd_open (filename);
+  do_cleanups (old_chain);
 
   /* Leave bfd open, core_xfer_memory and "info files" need it.  */
-  so->abfd = abfd;
-  bfd_set_cacheable (abfd, 1);
+  so->abfd = gdb_bfd_ref (abfd);
 
   /* copy full path name into so_name, so that later symbol_file_add
      can find it */
-  if (strlen (scratch_pathname) >= SO_NAME_MAX_PATH_SIZE)
-    error (_("Full path name length of shared library exceeds SO_NAME_MAX_PATH_SIZE in so_list structure."));
-  strcpy (so->so_name, scratch_pathname);
+  if (strlen (bfd_get_filename (abfd)) >= SO_NAME_MAX_PATH_SIZE)
+    error (_("Shared library file name is too long."));
+  strcpy (so->so_name, bfd_get_filename (abfd));
 
-  if (!bfd_check_format (abfd, bfd_object))
-    {
-      error (_("\"%s\": not in executable format: %s."),
-	     scratch_pathname, bfd_errmsg (bfd_get_error ()));
-    }
   if (build_section_table (abfd, &so->sections, &so->sections_end))
     {
       error (_("Can't find the file sections in `%s': %s"),
@@ -321,8 +379,6 @@ solib_map_sections (void *arg)
 
   for (p = so->sections; p < so->sections_end; p++)
     {
-      struct target_so_ops *ops = solib_ops (current_gdbarch);
-
       /* Relocate the section binding addresses as recorded in the shared
          object's file by the base address to which the object was actually
          mapped. */
@@ -338,9 +394,6 @@ solib_map_sections (void *arg)
 	  so->addr_high = p->endaddr;
 	}
     }
-
-  /* Free the file names, close the file now.  */
-  do_cleanups (old_chain);
 
   return (1);
 }
@@ -369,22 +422,12 @@ solib_map_sections (void *arg)
 void
 free_so (struct so_list *so)
 {
-  struct target_so_ops *ops = solib_ops (current_gdbarch);
-  char *bfd_filename = 0;
+  struct target_so_ops *ops = solib_ops (target_gdbarch);
 
   if (so->sections)
     xfree (so->sections);
-      
-  if (so->abfd)
-    {
-      bfd_filename = bfd_get_filename (so->abfd);
-      if (! bfd_close (so->abfd))
-	warning (_("cannot close \"%s\": %s"),
-		 bfd_filename, bfd_errmsg (bfd_get_error ()));
-    }
 
-  if (bfd_filename)
-    xfree (bfd_filename);
+  gdb_bfd_unref (so->abfd);
 
   ops->free_so (so);
 
@@ -399,60 +442,63 @@ master_so_list (void)
   return so_list_head;
 }
 
-
-/* A small stub to get us past the arg-passing pinhole of catch_errors.  */
-
-static int
-symbol_add_stub (void *arg)
+static void
+symbol_add_stub (struct so_list *so, int flags)
 {
-  struct so_list *so = (struct so_list *) arg;  /* catch_errs bogon */
   struct section_addr_info *sap;
 
   /* Have we already loaded this shared object?  */
   ALL_OBJFILES (so->objfile)
     {
       if (strcmp (so->objfile->name, so->so_name) == 0)
-	return 1;
+	return;
     }
 
   sap = build_section_addr_info_from_section_table (so->sections,
                                                     so->sections_end);
 
-  so->objfile = symbol_file_add (so->so_name, so->from_tty,
-				 sap, 0, OBJF_SHARED);
+  so->objfile = symbol_file_add_from_bfd (so->abfd, flags, sap, OBJF_SHARED);
   free_section_addr_info (sap);
 
-  return (1);
+  return;
 }
 
-/* Read in symbols for shared object SO.  If FROM_TTY is non-zero, be
-   chatty about it.  Return non-zero if any symbols were actually
+/* Read in symbols for shared object SO.  If SYMFILE_VERBOSE is set in FLAGS,
+   be chatty about it.  Return non-zero if any symbols were actually
    loaded.  */
 
 int
-solib_read_symbols (struct so_list *so, int from_tty)
+solib_read_symbols (struct so_list *so, int flags)
 {
+  const int from_tty = flags & SYMFILE_VERBOSE;
+
   if (so->symbols_loaded)
     {
-      if (from_tty)
+      if (from_tty || info_verbose)
 	printf_unfiltered (_("Symbols already loaded for %s\n"), so->so_name);
     }
   else if (so->abfd == NULL)
     {
-      if (from_tty)
+      if (from_tty || info_verbose)
 	printf_unfiltered (_("Symbol file not found for %s\n"), so->so_name);
     }
   else
     {
-      if (catch_errors (symbol_add_stub, so,
-			"Error while reading shared library symbols:\n",
-			RETURN_MASK_ALL))
-	{
-	  if (from_tty)
-	    printf_unfiltered (_("Loaded symbols for %s\n"), so->so_name);
-	  so->symbols_loaded = 1;
-	  return 1;
-	}
+      volatile struct gdb_exception exception;
+      TRY_CATCH (exception, RETURN_MASK_ALL)
+        {
+          symbol_add_stub (so, flags);
+        }
+      if (exception.reason != 0)
+        {
+          exception_fprintf (gdb_stderr, exception,
+                             "Error while reading shared library symbols:\n");
+          return 0;
+        }
+      if (from_tty || info_verbose)
+        printf_unfiltered (_("Loaded symbols for %s\n"), so->so_name);
+      so->symbols_loaded = 1;
+      return 1;
     }
 
   return 0;
@@ -490,18 +536,24 @@ solib_read_symbols (struct so_list *so, int from_tty)
 static void
 update_solib_list (int from_tty, struct target_ops *target)
 {
-  struct target_so_ops *ops = solib_ops (current_gdbarch);
+  struct target_so_ops *ops = solib_ops (target_gdbarch);
   struct so_list *inferior = ops->current_sos();
   struct so_list *gdb, **gdb_link;
 
-  /* If we are attaching to a running process for which we 
-     have not opened a symbol file, we may be able to get its 
-     symbols now!  */
-  if (attach_flag &&
-      symfile_objfile == NULL)
-    catch_errors (ops->open_symbol_file_object, &from_tty, 
-		  "Error reading attached process's symbol file.\n",
-		  RETURN_MASK_ALL);
+  /* We can reach here due to changing solib-search-path or the
+     sysroot, before having any inferior.  */
+  if (target_has_execution && !ptid_equal (inferior_ptid, null_ptid))
+    {
+      struct inferior *inf = current_inferior ();
+
+      /* If we are attaching to a running process for which we
+	 have not opened a symbol file, we may be able to get its
+	 symbols now!  */
+      if (inf->attach_flag && symfile_objfile == NULL)
+	catch_errors (ops->open_symbol_file_object, &from_tty,
+		      "Error reading attached process's symbol file.\n",
+		      RETURN_MASK_ALL);
+    }
 
   /* GDB and the inferior's dynamic linker each maintain their own
      list of currently loaded shared objects; we want to bring the
@@ -600,27 +652,18 @@ update_solib_list (int from_tty, struct target_ops *target)
       for (i = inferior; i; i = i->next)
 	{
 	  i->from_tty = from_tty;
+	  i->pspace = current_program_space;
 
 	  /* Fill in the rest of the `struct so_list' node.  */
 	  catch_errors (solib_map_sections, i,
 			"Error while mapping shared library sections:\n",
 			RETURN_MASK_ALL);
 
-	  /* If requested, add the shared object's sections to the TARGET's
-	     section table.  Do this immediately after mapping the object so
-	     that later nodes in the list can query this object, as is needed
-	     in solib-osf.c.  */
-	  if (target)
-	    {
-	      int count = (i->sections_end - i->sections);
-	      if (count > 0)
-		{
-		  int space = target_resize_to_sections (target, count);
-		  memcpy (target->to_sections + space,
-			  i->sections,
-			  count * sizeof (i->sections[0]));
-		}
-	    }
+	  /* Add the shared object's sections to the current set of
+	     file section tables.  Do this immediately after mapping
+	     the object so that later nodes in the list can query this
+	     object, as is needed in solib-osf.c.  */
+	  add_target_sections (i->sections, i->sections_end);
 
 	  /* Notify any observer that the shared object has been
              loaded now that we've added it to GDB's tables.  */
@@ -629,16 +672,25 @@ update_solib_list (int from_tty, struct target_ops *target)
     }
 }
 
-/* Return non-zero if SO is the libpthread shared library.
+
+/* Return non-zero if NAME is the libpthread shared library.
 
    Uses a fairly simplistic heuristic approach where we check
    the file name against "/libpthread".  This can lead to false
    positives, but this should be good enough in practice.  */
 
+int
+libpthread_name_p (const char *name)
+{
+  return (strstr (name, "/libpthread") != NULL);
+}
+
+/* Return non-zero if SO is the libpthread shared library.  */
+
 static int
 libpthread_solib_p (struct so_list *so)
 {
-  return (strstr (so->so_name, "/libpthread") != NULL);
+  return libpthread_name_p (so->so_name);
 }
 
 /* GLOBAL FUNCTION
@@ -682,6 +734,8 @@ solib_add (char *pattern, int from_tty, struct target_ops *target, int readsyms)
   {
     int any_matches = 0;
     int loaded_any_symbols = 0;
+    const int flags =
+        SYMFILE_DEFER_BP_RESET | (from_tty ? SYMFILE_VERBOSE : 0);
 
     for (gdb = so_list_head; gdb; gdb = gdb->next)
       if (! pattern || re_exec (gdb->so_name))
@@ -695,9 +749,12 @@ solib_add (char *pattern, int from_tty, struct target_ops *target, int readsyms)
             (readsyms || libpthread_solib_p (gdb));
 
 	  any_matches = 1;
-	  if (add_this_solib && solib_read_symbols (gdb, from_tty))
+	  if (add_this_solib && solib_read_symbols (gdb, flags))
 	    loaded_any_symbols = 1;
 	}
+
+    if (loaded_any_symbols)
+      breakpoint_re_set ();
 
     if (from_tty && pattern && ! any_matches)
       printf_unfiltered
@@ -705,7 +762,7 @@ solib_add (char *pattern, int from_tty, struct target_ops *target, int readsyms)
 
     if (loaded_any_symbols)
       {
-	struct target_so_ops *ops = solib_ops (current_gdbarch);
+	struct target_so_ops *ops = solib_ops (target_gdbarch);
 
 	/* Getting new symbols may change our opinion about what is
 	   frameless.  */
@@ -730,64 +787,144 @@ solib_add (char *pattern, int from_tty, struct target_ops *target, int readsyms)
    DESCRIPTION
 
    Walk through the shared library list and print information
-   about each attached library.
+   about each attached library matching PATTERN.  If PATTERN is elided,
+   print them all.
  */
 
 static void
-info_sharedlibrary_command (char *ignore, int from_tty)
+info_sharedlibrary_command (char *pattern, int from_tty)
 {
   struct so_list *so = NULL;	/* link map state variable */
   int header_done = 0;
+  int so_missing_debug_info = 0;
   int addr_width;
+  int nr_libs;
+  struct cleanup *table_cleanup;
+  struct gdbarch *gdbarch = target_gdbarch;
+
+  if (pattern)
+    {
+      char *re_err = re_comp (pattern);
+
+      if (re_err)
+	error (_("Invalid regexp: %s"), re_err);
+    }
 
   /* "0x", a little whitespace, and two hex digits per byte of pointers.  */
-  addr_width = 4 + (gdbarch_ptr_bit (current_gdbarch) / 4);
+  addr_width = 4 + (gdbarch_ptr_bit (gdbarch) / 4);
 
   update_solib_list (from_tty, 0);
 
-  for (so = so_list_head; so; so = so->next)
+  /* make_cleanup_ui_out_table_begin_end needs to know the number of
+     rows, so we need to make two passes over the libs.  */
+
+  for (nr_libs = 0, so = so_list_head; so; so = so->next)
     {
       if (so->so_name[0])
 	{
-	  if (!header_done)
-	    {
-	      printf_unfiltered ("%-*s%-*s%-12s%s\n", addr_width, "From",
-				 addr_width, "To", "Syms Read",
-				 "Shared Object Library");
-	      header_done++;
-	    }
-
-	  printf_unfiltered ("%-*s", addr_width,
-			     so->addr_high != 0
-			       ? hex_string_custom (
-			           (LONGEST) so->addr_low,
-	                           addr_width - 4)
-			       : "");
-	  printf_unfiltered ("%-*s", addr_width,
-			     so->addr_high != 0
-			       ? hex_string_custom (
-			           (LONGEST) so->addr_high,
-	                           addr_width - 4)
-			       : "");
-	  printf_unfiltered ("%-12s", so->symbols_loaded ? "Yes" : "No");
-	  printf_unfiltered ("%s\n", so->so_name);
+	  if (pattern && ! re_exec (so->so_name))
+	    continue;
+	  ++nr_libs;
 	}
     }
-  if (so_list_head == NULL)
+
+  table_cleanup =
+    make_cleanup_ui_out_table_begin_end (uiout, 4, nr_libs,
+					 "SharedLibraryTable");
+
+  /* The "- 1" is because ui_out adds one space between columns.  */
+  ui_out_table_header (uiout, addr_width - 1, ui_left, "from", "From");
+  ui_out_table_header (uiout, addr_width - 1, ui_left, "to", "To");
+  ui_out_table_header (uiout, 12 - 1, ui_left, "syms-read", "Syms Read");
+  ui_out_table_header (uiout, 0, ui_noalign,
+		       "name", "Shared Object Library");
+
+  ui_out_table_body (uiout);
+
+  for (so = so_list_head; so; so = so->next)
     {
-      printf_unfiltered (_("No shared libraries loaded at this time.\n"));
+      struct cleanup *lib_cleanup;
+
+      if (! so->so_name[0])
+	continue;
+      if (pattern && ! re_exec (so->so_name))
+	continue;
+
+      lib_cleanup = make_cleanup_ui_out_tuple_begin_end (uiout, "lib");
+
+      if (so->addr_high != 0)
+	{
+	  ui_out_field_core_addr (uiout, "from", gdbarch, so->addr_low);
+	  ui_out_field_core_addr (uiout, "to", gdbarch, so->addr_high);
+	}
+      else
+	{
+	  ui_out_field_skip (uiout, "from");
+	  ui_out_field_skip (uiout, "to");
+	}
+
+      if (! ui_out_is_mi_like_p (interp_ui_out (top_level_interpreter ()))
+	  && so->symbols_loaded
+	  && !objfile_has_symbols (so->objfile))
+	{
+	  so_missing_debug_info = 1;
+	  ui_out_field_string (uiout, "syms-read", "Yes (*)");
+	}
+      else
+	ui_out_field_string (uiout, "syms-read", 
+			     so->symbols_loaded ? "Yes" : "No");
+
+      ui_out_field_string (uiout, "name", so->so_name);
+
+      ui_out_text (uiout, "\n");
+
+      do_cleanups (lib_cleanup);
     }
+
+  do_cleanups (table_cleanup);
+
+  if (nr_libs == 0)
+    {
+      if (pattern)
+	ui_out_message (uiout, 0,
+			_("No shared libraries matched.\n"));
+      else
+	ui_out_message (uiout, 0,
+			_("No shared libraries loaded at this time.\n"));
+    }
+  else
+    {
+      if (so_missing_debug_info)
+	ui_out_message (uiout, 0,
+			_("(*): Shared library is missing debugging information.\n"));
+    }
+}
+
+/* Return 1 if ADDRESS lies within SOLIB.  */
+
+int
+solib_contains_address_p (const struct so_list *const solib,
+			  CORE_ADDR address)
+{
+  struct target_section *p;
+
+  for (p = solib->sections; p < solib->sections_end; p++)
+    if (p->addr <= address && address < p->endaddr)
+      return 1;
+
+  return 0;
 }
 
 /*
 
    GLOBAL FUNCTION
 
-   solib_address -- check to see if an address is in a shared lib
+   solib_name_from_address -- if an address is in a shared lib, return
+   its name.
 
    SYNOPSIS
 
-   char * solib_address (CORE_ADDR address)
+   char * solib_name_from_address (CORE_ADDR address)
 
    DESCRIPTION
 
@@ -801,22 +938,32 @@ info_sharedlibrary_command (char *ignore, int from_tty)
  */
 
 char *
-solib_address (CORE_ADDR address)
+solib_name_from_address (struct program_space *pspace, CORE_ADDR address)
 {
-  struct so_list *so = 0;	/* link map state variable */
+  struct so_list *so = NULL;
 
-  for (so = so_list_head; so; so = so->next)
-    {
-      struct section_table *p;
-
-      for (p = so->sections; p < so->sections_end; p++)
-	{
-	  if (p->addr <= address && address < p->endaddr)
-	    return (so->so_name);
-	}
-    }
+  for (so = pspace->so_list; so; so = so->next)
+    if (solib_contains_address_p (so, address))
+      return (so->so_name);
 
   return (0);
+}
+
+/* Return whether the data starting at VADDR, size SIZE, must be kept
+   in a core file for shared libraries loaded before "gcore" is used
+   to be handled correctly when the core file is loaded.  This only
+   applies when the section would otherwise not be kept in the core
+   file (in particular, for readonly sections).  */
+
+int
+solib_keep_data_in_core (CORE_ADDR vaddr, unsigned long size)
+{
+  struct target_so_ops *ops = solib_ops (target_gdbarch);
+
+  if (ops->keep_data_in_core)
+    return ops->keep_data_in_core (vaddr, size);
+  else
+    return 0;
 }
 
 /* Called by free_all_symtabs */
@@ -824,7 +971,7 @@ solib_address (CORE_ADDR address)
 void
 clear_solib (void)
 {
-  struct target_so_ops *ops = solib_ops (current_gdbarch);
+  struct target_so_ops *ops = solib_ops (target_gdbarch);
 
   /* This function is expected to handle ELF shared libraries.  It is
      also used on Solaris, which can run either ELF or a.out binaries
@@ -854,6 +1001,7 @@ clear_solib (void)
     {
       struct so_list *so = so_list_head;
       so_list_head = so->next;
+      observer_notify_solib_unloaded (so);
       if (so->abfd)
 	remove_target_sections (so->abfd);
       free_so (so);
@@ -868,7 +1016,7 @@ clear_solib (void)
 
    SYNOPSIS
 
-   void solib_create_inferior_hook ()
+   void solib_create_inferior_hook (int from_tty)
 
    DESCRIPTION
 
@@ -878,10 +1026,10 @@ clear_solib (void)
    SOLIB_CREATE_INFERIOR_HOOK.  */
 
 void
-solib_create_inferior_hook (void)
+solib_create_inferior_hook (int from_tty)
 {
-  struct target_so_ops *ops = solib_ops (current_gdbarch);
-  ops->solib_create_inferior_hook();
+  struct target_so_ops *ops = solib_ops (target_gdbarch);
+  ops->solib_create_inferior_hook (from_tty);
 }
 
 /* GLOBAL FUNCTION
@@ -903,7 +1051,7 @@ solib_create_inferior_hook (void)
 int
 in_solib_dynsym_resolve_code (CORE_ADDR pc)
 {
-  struct target_so_ops *ops = solib_ops (current_gdbarch);
+  struct target_so_ops *ops = solib_ops (target_gdbarch);
   return ops->in_dynsym_resolve_code (pc);
 }
 
@@ -943,8 +1091,13 @@ sharedlibrary_command (char *args, int from_tty)
 void
 no_shared_libraries (char *ignored, int from_tty)
 {
-  objfile_purge_solibs ();
+  /* The order of the two routines below is important: clear_solib notifies
+     the solib_unloaded observers, and some of these observers might need
+     access to their associated objfiles.  Therefore, we can not purge the
+     solibs' objfiles before clear_solib has been called.  */
+
   clear_solib ();
+  objfile_purge_solibs ();
 }
 
 static void
@@ -952,7 +1105,38 @@ reload_shared_libraries (char *ignored, int from_tty,
 			 struct cmd_list_element *e)
 {
   no_shared_libraries (NULL, from_tty);
-  solib_add (NULL, from_tty, NULL, auto_solib_add);
+  /* Creating inferior hooks here has two purposes. First, if we reload 
+     shared libraries then the address of solib breakpoint we've computed
+     previously might be no longer valid.  For example, if we forgot to set
+     solib-absolute-prefix and are setting it right now, then the previous
+     breakpoint address is plain wrong.  Second, installing solib hooks
+     also implicitly figures were ld.so is and loads symbols for it.
+     Absent this call, if we've just connected to a target and set 
+     solib-absolute-prefix or solib-search-path, we'll lose all information
+     about ld.so.  */
+  if (target_has_execution)
+    {
+#ifdef SOLIB_CREATE_INFERIOR_HOOK
+      SOLIB_CREATE_INFERIOR_HOOK (PIDGET (inferior_ptid));
+#else
+      solib_create_inferior_hook (from_tty);
+#endif
+    }
+
+  /* Sometimes the platform-specific hook loads initial shared
+     libraries, and sometimes it doesn't.  If it doesn't FROM_TTY will be
+     incorrectly 0 but such solib targets should be fixed anyway.  If we
+     made all the inferior hook methods consistent, this call could be
+     removed.  Call it only after the solib target has been initialized by
+     solib_create_inferior_hook.  */
+
+  solib_add (NULL, 0, NULL, auto_solib_add);
+
+  /* We have unloaded and then reloaded debug info for all shared libraries.
+     However, frames may still reference them, for example a frame's 
+     unwinder might still point of DWARF FDE structures that are now freed.
+     Reinit frame cache to avoid crashing.  */
+  reinit_frame_cache ();
 }
 
 static void
@@ -971,14 +1155,12 @@ struct symbol *
 solib_global_lookup (const struct objfile *objfile,
 		     const char *name,
 		     const char *linkage_name,
-		     const domain_enum domain,
-		     struct symtab **symtab)
+		     const domain_enum domain)
 {
-  struct target_so_ops *ops = solib_ops (current_gdbarch);
+  struct target_so_ops *ops = solib_ops (target_gdbarch);
 
   if (ops->lookup_lib_global_symbol != NULL)
-    return ops->lookup_lib_global_symbol (objfile, name, linkage_name,
-					  domain, symtab);
+    return ops->lookup_lib_global_symbol (objfile, name, linkage_name, domain);
   return NULL;
 }
 

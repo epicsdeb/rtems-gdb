@@ -1,7 +1,7 @@
 /* TUI support I/O functions.
 
-   Copyright (C) 1998, 1999, 2000, 2001, 2002, 2003, 2004, 2007, 2008
-   Free Software Foundation, Inc.
+   Copyright (C) 1998, 1999, 2000, 2001, 2002, 2003, 2004, 2007, 2008, 2009,
+   2010 Free Software Foundation, Inc.
 
    Contributed by Hewlett-Packard Company.
 
@@ -113,7 +113,9 @@ key_is_command_char (int ch)
    #undef TUI_USE_PIPE_FOR_READLINE.  */
 
 /* For gdb 5.3, prefer to continue the pipe hack as a backup wheel.  */
+#ifdef HAVE_PIPE
 #define TUI_USE_PIPE_FOR_READLINE
+#endif
 /* #undef TUI_USE_PIPE_FOR_READLINE */
 
 /* TUI output files.  */

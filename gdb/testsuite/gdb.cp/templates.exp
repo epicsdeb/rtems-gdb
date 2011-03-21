@@ -1,5 +1,5 @@
 # Copyright 1992, 1994, 1995, 1996, 1997, 1999, 2000, 2002, 2003, 2004, 2007,
-# 2008 Free Software Foundation, Inc.
+# 2008, 2009, 2010 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -112,8 +112,7 @@ proc test_template_breakpoints {} {
     global srcdir
     global hp_aCC_compiler
 
-    send_gdb "break T5<int>::T5\n"
-    gdb_expect {
+    gdb_test_multiple "break T5<int>::T5" "constructor breakpoint" {
 	-re "0. cancel.*\[\r\n\]*.1. all.*\[\r\n\]*.2. T5<int>::T5\\(int\\) at .*\[\r\n\]*.3. T5<int>::T5\\((T5<int> const|const T5<int>) ?&\\) at .*\[\r\n\]*> $" {
 	    gdb_test "0" \
 		"canceled" \
@@ -135,8 +134,6 @@ proc test_template_breakpoints {} {
 		    "nonsense intended to insure that this test fails" \
 		    "constructor breakpoint (bad menu choices)"
 	}
-	-re ".*$gdb_prompt $" { fail "constructor breakpoint" }
-	default { fail "constructor breakpoint (timeout)" }
     }
     
 # See CLLbs14792
@@ -157,6 +154,11 @@ proc test_template_breakpoints {} {
 	"Breakpoint.*at.* file .*${testfile}.cc, line.*" \
 	"value method breakpoint"
 
+    set bp_location [gdb_get_line_number \
+                         "set breakpoint on a line with no real code"]
+    gdb_test "break ${testfile}.cc:${bp_location}" \
+        "Breakpoint.*at.* file .*${testfile}.cc, line.*(2 locations).*" \
+        "breakpoint on a line with no real code"
     delete_breakpoints
 }
 
@@ -190,6 +192,14 @@ proc test_template_calls {} {
     }
 }
 
+proc test_template_typedef {} {
+
+    gdb_test "print intBazOne::baz" ".*baz\\(int, int\\)>" \
+	"print method of template typedef"
+
+    gdb_test "print intBazOne::~Baz" ".*~Baz(\\(\\))?>" \
+	"print destructor of template typedef"
+}
 
 proc do_tests {} {
     global prms_id
@@ -210,10 +220,15 @@ proc do_tests {} {
     gdb_reinitialize_dir $srcdir/$subdir
     gdb_load $binfile
 
+    # Change multiple-symbols to "ask" in order to get the multiple-choice
+    # menu when breaking on overloaded methods.
+    gdb_test "set multiple-symbols ask" ""
+
     runto_main
 
     test_ptype_of_templates
     test_template_breakpoints
+    test_template_typedef
 
     if [ runto_main] {
 	test_template_calls
@@ -325,13 +340,11 @@ gdb_expect {
 
 send_gdb "print Foo<volatile char *>::foo\n"   
 gdb_expect {   
-    -re "\\$\[0-9\]* = \\{.*char \\*\\((class |)Foo<volatile char ?\\*> \\*(| const), int, .*char \\*\\)\\} $hex <Foo<.*char.*\\*>::foo\\(int, .*char.*\\*\\)>\r\n$gdb_prompt $" { pass "print Foo<volatile char *>::foo" }
+    -re "\\$\[0-9\]* = \\{.*char \\*\\((class |)Foo<(volatile char|char volatile) ?\\*> \\*(| const), int, .*char \\*\\)\\} $hex <Foo<.*char.*\\*>::foo\\(int, .*char.*\\*\\)>\r\n$gdb_prompt $" { pass "print Foo<volatile char *>::foo" }
     -re "No symbol \"Foo<volatile char \\*>\" in current context.\r\n$gdb_prompt $"
     {
-	# This used to be a kfail gdb/33.  That problem has been
-	# fixed, but now gdb/931 and gdb/1512 are rearing their ugly
-	# heads.
-	kfail "gdb/931" "print Foo<volatile char *>::foo"
+	# This used to be a kfail gdb/33 and then kfail gdb/931.
+	fail "print Foo<volatile char *>::foo"
     }
     -re "$gdb_prompt $"                     { fail "print Foo<volatile char *>::foo" }
     timeout                             { fail "(timeout) print Foo<volatile char *>::foo" }
@@ -339,13 +352,11 @@ gdb_expect {
 
 send_gdb "print Foo<volatile char*>::foo\n"   
 gdb_expect {   
-    -re "\\$\[0-9\]* = \\{.*char \\*\\((class |)Foo<volatile char ?\\*> \\*(| const), int, .*char \\*\\)\\} $hex <Foo<.*char.*\\*>::foo\\(int, .*char.*\\*\\)>\r\n$gdb_prompt $" { pass "print Foo<volatile char*>::foo" }
+    -re "\\$\[0-9\]* = \\{.*char \\*\\((class |)Foo<(volatile char|char volatile) ?\\*> \\*(| const), int, .*char \\*\\)\\} $hex <Foo<.*char.*\\*>::foo\\(int, .*char.*\\*\\)>\r\n$gdb_prompt $" { pass "print Foo<volatile char*>::foo" }
     -re "No symbol \"Foo<volatile char\\*>\" in current context.\r\n$gdb_prompt $"
     {
-	# This used to be a kfail gdb/33.  That problem has been
-	# fixed, but now gdb/931 and gdb/1512 are rearing their ugly
-	# heads.
-	kfail "gdb/931" "print Foo<volatile char*>::foo"
+	# This used to be a kfail gdb/33 and then kfail gdb/931.
+	fail "print Foo<volatile char*>::foo"
     }
     -re "$gdb_prompt $"                     { fail "print Foo<volatile char*>::foo" }
     timeout                             { fail "(timeout) print Foo<volatile char*>::foo" }
@@ -455,7 +466,7 @@ send_gdb "ptype quxint\n"
 gdb_expect {   
    -re "type = class Qux<int, ?& ?string> \\{\r\n\[ \t\]*public:\r\n\[ \t\]*int x;\r\n\[ \t\]*int t;\r\n\r\n\[ \t\]*.*int qux\\(int, int\\);\r\n\\}\r\n$gdb_prompt $" { pass "ptype quxint" }
    -re "type = class Qux<int, ?& ?string> \\{\r\n\[ \t\]*public:\r\n\[ \t\]*int x;\r\n\[ \t\]*int t;\r\n\r\n\[ \t\]*int qux\\(int, int\\);.*\r\n\\}\r\n$gdb_prompt $" { pass "ptype quxint" }
-   -re "type = class Qux<int, ?\\(char ?\\*\\)\\(& ?string\\)> \\{\r\n\[ \t\]*public:\r\n\[ \t\]*int x;\r\n\[ \t\]*int t;\r\n\r\n\[ \t\]*int qux\\(int, int\\);.*\r\n\\}\r\n$gdb_prompt $" { pass "ptype quxint" }
+   -re "type = class Qux<int, ?\\(char ?\\*\\)\\(& ?\\(?string\\)?\\)> \\{\r\n\[ \t\]*public:\r\n\[ \t\]*int x;\r\n\[ \t\]*int t;\r\n\r\n\[ \t\]*int qux\\(int, int\\);.*\r\n\\}\r\n$gdb_prompt $" { pass "ptype quxint" }
    -re "type = class Qux<int, ?& ?\\(string\\)> \\{\r\n\[ \t\]*public:\r\n\[ \t\]*int x;\r\n\[ \t\]*int t;\r\n\r\n\[ \t\]*int qux\\(int, int\\);.*\r\n\\}\r\n$gdb_prompt $" {
        kfail "gdb/1512" "ptype quxint"
    }
@@ -532,9 +543,5 @@ gdb_expect {
 
 # djb - 06-03-2000
 # Now should work fine
-send_gdb "break Garply<Garply<char> >::garply\n"
-gdb_expect {
-   -re "Breakpoint \[0-9\]* at $hex: file .*templates.cc, line.*\r\n$gdb_prompt $" { pass "break Garply<Garply<char> >::garply" }
-   -re ".*$gdb_prompt $" { fail "break Garply<Garply<char> >::garply" }
-   timeout { fail "break Garply<Garply<char> >::garply (timeout)" }
-}
+gdb_test "break Garply<Garply<char> >::garply" \
+    "Breakpoint \[0-9\]* at $hex: file .*templates.cc, line.*"

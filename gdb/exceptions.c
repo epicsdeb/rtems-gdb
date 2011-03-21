@@ -1,8 +1,8 @@
 /* Exception (throw catch) mechanism, for GDB, the GNU debugger.
 
    Copyright (C) 1986, 1988, 1989, 1990, 1991, 1992, 1993, 1994, 1995, 1996,
-   1997, 1998, 1999, 2000, 2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008
-   Free Software Foundation, Inc.
+   1997, 1998, 1999, 2000, 2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008,
+   2009, 2010 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -29,6 +29,7 @@
 #include "gdb_assert.h"
 #include "gdb_string.h"
 #include "serial.h"
+#include "gdbthread.h"
 
 const struct gdb_exception exception_none = { 0, GDB_NO_ERROR, NULL };
 
@@ -212,19 +213,21 @@ exceptions_state_mc_action_iter_1 (void)
 NORETURN void
 throw_exception (struct gdb_exception exception)
 {
+  struct thread_info *tp = NULL;
+
   quit_flag = 0;
   immediate_quit = 0;
 
+  if (!ptid_equal (inferior_ptid, null_ptid))
+    tp = find_thread_ptid (inferior_ptid);
+
   /* Perhaps it would be cleaner to do this via the cleanup chain (not sure
      I can think of a reason why that is vital, though).  */
-  bpstat_clear_actions (stop_bpstat);	/* Clear queued breakpoint commands */
+  if (tp != NULL)
+    bpstat_clear_actions (tp->stop_bpstat);	/* Clear queued breakpoint commands */
 
   disable_current_display ();
   do_cleanups (ALL_CLEANUPS);
-  if (target_can_async_p () && !target_executing)
-    do_exec_cleanups (ALL_CLEANUPS);
-  if (sync_execution)
-    do_exec_error_cleanups (ALL_CLEANUPS);
 
   /* Jump to the containing catch_errors() call, communicating REASON
      to that call via setjmp's return value.  Note that REASON can't
@@ -353,7 +356,7 @@ exception_fprintf (struct ui_file *file, struct gdb_exception e,
     }
 }
 
-void
+static void
 print_any_exception (struct ui_file *file, const char *prefix,
 		     struct gdb_exception e)
 {
@@ -414,25 +417,21 @@ throw_error (enum errors error, const char *fmt, ...)
   va_end (args);
 }
 
-/* Call FUNC() with args FUNC_UIOUT and FUNC_ARGS, catching any
-   errors.  Set FUNC_CAUGHT to an ``enum return_reason'' if the
-   function is aborted (using throw_exception() or zero if the
-   function returns normally.  Set FUNC_VAL to the value returned by
-   the function or 0 if the function was aborted.
+/* Call FUNC(UIOUT, FUNC_ARGS) but wrapped within an exception
+   handler.  If an exception (enum return_reason) is thrown using
+   throw_exception() than all cleanups installed since
+   catch_exceptions() was entered are invoked, the (-ve) exception
+   value is then returned by catch_exceptions.  If FUNC() returns
+   normally (with a positive or zero return value) then that value is
+   returned by catch_exceptions().  It is an internal_error() for
+   FUNC() to return a negative value.
+
+   See exceptions.h for further usage details.
 
    Must not be called with immediate_quit in effect (bad things might
    happen, say we got a signal in the middle of a memcpy to quit_return).
    This is an OK restriction; with very few exceptions immediate_quit can
-   be replaced by judicious use of QUIT.
-
-   MASK specifies what to catch; it is normally set to
-   RETURN_MASK_ALL, if for no other reason than that the code which
-   calls catch_errors might not be set up to deal with a quit which
-   isn't caught.  But if the code can deal with it, it generally
-   should be RETURN_MASK_ERROR, unless for some reason it is more
-   useful to abort only the portion of the operation inside the
-   catch_errors.  Note that quit should return to the command line
-   fairly quickly, even if some further processing is being done.  */
+   be replaced by judicious use of QUIT.  */
 
 /* MAYBE: cagney/1999-11-05: catch_errors() in conjunction with
    error() et.al. could maintain a set of flags that indicate the the
@@ -441,10 +440,6 @@ throw_error (enum errors error, const char *fmt, ...)
    to longjmperror()).  Prior to 1999-11-05 this wasn't possible as
    code also randomly used a SET_TOP_LEVEL macro that directly
    initialize the longjmp buffers. */
-
-/* MAYBE: cagney/1999-11-05: Should the catch_errors and cleanups code
-   be consolidated into a single file instead of being distributed
-   between utils.c and top.c? */
 
 int
 catch_exceptions (struct ui_out *uiout,
@@ -501,6 +496,8 @@ catch_exceptions_with_msg (struct ui_out *uiout,
     }
   return val;
 }
+
+/* This function is superseded by catch_exceptions().  */
 
 int
 catch_errors (catch_errors_ftype *func, void *func_args, char *errstring,

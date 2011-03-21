@@ -1,7 +1,7 @@
 /* Target-dependent code for PowerPC systems using the SVR4 ABI
    for GDB, the GNU debugger.
 
-   Copyright (C) 2000, 2001, 2002, 2003, 2005, 2007, 2008
+   Copyright (C) 2000, 2001, 2002, 2003, 2005, 2007, 2008, 2009, 2010
    Free Software Foundation, Inc.
 
    This file is part of GDB.
@@ -49,6 +49,7 @@ ppc_sysv_abi_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
 			      int struct_return, CORE_ADDR struct_addr)
 {
   struct gdbarch_tdep *tdep = gdbarch_tdep (gdbarch);
+  enum bfd_endian byte_order = gdbarch_byte_order (gdbarch);
   ULONGEST saved_sp;
   int argspace = 0;		/* 0 is an initial wrong guess.  */
   int write_pass;
@@ -177,13 +178,16 @@ ppc_sysv_abi_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
 	    }
 	  else if (len == 8
 		   && (TYPE_CODE (type) == TYPE_CODE_INT	/* long long */
-		       || TYPE_CODE (type) == TYPE_CODE_FLT))	/* double */
+		       || TYPE_CODE (type) == TYPE_CODE_FLT	/* double */
+		       || (TYPE_CODE (type) == TYPE_CODE_DECFLOAT
+			   && tdep->soft_float)))
 	    {
-	      /* "long long" or soft-float "double" passed in an odd/even
-	         register pair with the low addressed word in the odd
-	         register and the high addressed word in the even
-	         register, or when the registers run out an 8 byte
-	         aligned stack location.  */
+	      /* "long long" or soft-float "double" or "_Decimal64"
+	         passed in an odd/even register pair with the low
+	         addressed word in the odd register and the high
+	         addressed word in the even register, or when the
+	         registers run out an 8 byte aligned stack
+	         location.  */
 	      if (greg > 9)
 		{
 		  /* Just in case GREG was 10.  */
@@ -210,13 +214,16 @@ ppc_sysv_abi_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
 		  greg += 2;
 		}
 	    }
-	  else if (len == 16 && TYPE_CODE (type) == TYPE_CODE_FLT
-		   && (gdbarch_long_double_format (gdbarch)
-		       == floatformats_ibm_long_double))
+	  else if (len == 16
+		   && ((TYPE_CODE (type) == TYPE_CODE_FLT
+			&& (gdbarch_long_double_format (gdbarch)
+			    == floatformats_ibm_long_double))
+		       || (TYPE_CODE (type) == TYPE_CODE_DECFLOAT
+			   && tdep->soft_float)))
 	    {
-	      /* Soft-float IBM long double passed in four consecutive
-		 registers, or on the stack.  The registers are not
-		 necessarily odd/even pairs.  */
+	      /* Soft-float IBM long double or _Decimal128 passed in
+		 four consecutive registers, or on the stack.  The
+		 registers are not necessarily odd/even pairs.  */
 	      if (greg > 7)
 		{
 		  greg = 11;
@@ -392,13 +399,13 @@ ppc_sysv_abi_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
 		    write_memory (sp + structoffset, val, len);
 		  /* ... and then a "word" pointing to that address is
 		     passed as the parameter.  */
-		  store_unsigned_integer (word, tdep->wordsize,
+		  store_unsigned_integer (word, tdep->wordsize, byte_order,
 					  sp + structoffset);
 		  structoffset += len;
 		}
 	      else if (TYPE_CODE (type) == TYPE_CODE_INT)
 		/* Sign or zero extend the "int" into a "word".  */
-		store_unsigned_integer (word, tdep->wordsize,
+		store_unsigned_integer (word, tdep->wordsize, byte_order,
 					unpack_long (type, val));
 	      else
 		/* Always goes in the low address.  */
@@ -456,7 +463,7 @@ ppc_sysv_abi_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
   regcache_cooked_write_signed (regcache, gdbarch_sp_regnum (gdbarch), sp);
 
   /* Write the backchain (it occupies WORDSIZED bytes).  */
-  write_memory_signed_integer (sp, tdep->wordsize, saved_sp);
+  write_memory_signed_integer (sp, tdep->wordsize, byte_order, saved_sp);
 
   /* Point the inferior function call's return address at the dummy's
      breakpoint.  */
@@ -550,6 +557,7 @@ do_ppc_sysv_return_value (struct gdbarch *gdbarch, struct type *type,
 			  const gdb_byte *writebuf, int broken_gcc)
 {
   struct gdbarch_tdep *tdep = gdbarch_tdep (gdbarch);
+  enum bfd_endian byte_order = gdbarch_byte_order (gdbarch);
   gdb_assert (tdep->wordsize == 4);
   if (TYPE_CODE (type) == TYPE_CODE_FLT
       && TYPE_LENGTH (type) <= 8
@@ -596,11 +604,13 @@ do_ppc_sysv_return_value (struct gdbarch *gdbarch, struct type *type,
 	}
       return RETURN_VALUE_REGISTER_CONVENTION;
     }
-  if (TYPE_CODE (type) == TYPE_CODE_FLT
-      && TYPE_LENGTH (type) == 16
-      && (gdbarch_long_double_format (gdbarch) == floatformats_ibm_long_double))
+  if (TYPE_LENGTH (type) == 16
+      && ((TYPE_CODE (type) == TYPE_CODE_FLT
+	   && (gdbarch_long_double_format (gdbarch) == floatformats_ibm_long_double))
+	  || (TYPE_CODE (type) == TYPE_CODE_DECFLOAT && tdep->soft_float)))
     {
-      /* Soft-float IBM long double stored in r3, r4, r5, r6.  */
+      /* Soft-float IBM long double or _Decimal128 stored in r3, r4,
+	 r5, r6.  */
       if (readbuf)
 	{
 	  regcache_cooked_read (regcache, tdep->ppc_gp0_regnum + 3, readbuf);
@@ -624,11 +634,14 @@ do_ppc_sysv_return_value (struct gdbarch *gdbarch, struct type *type,
       return RETURN_VALUE_REGISTER_CONVENTION;
     }
   if ((TYPE_CODE (type) == TYPE_CODE_INT && TYPE_LENGTH (type) == 8)
-      || (TYPE_CODE (type) == TYPE_CODE_FLT && TYPE_LENGTH (type) == 8))
+      || (TYPE_CODE (type) == TYPE_CODE_FLT && TYPE_LENGTH (type) == 8)
+      || (TYPE_CODE (type) == TYPE_CODE_DECFLOAT && TYPE_LENGTH (type) == 8
+	  && tdep->soft_float))
     {
       if (readbuf)
 	{
-	  /* A long long, or a double stored in the 32 bit r3/r4.  */
+	  /* A long long, double or _Decimal64 stored in the 32 bit
+	     r3/r4.  */
 	  regcache_cooked_read (regcache, tdep->ppc_gp0_regnum + 3,
 				readbuf + 0);
 	  regcache_cooked_read (regcache, tdep->ppc_gp0_regnum + 4,
@@ -636,7 +649,8 @@ do_ppc_sysv_return_value (struct gdbarch *gdbarch, struct type *type,
 	}
       if (writebuf)
 	{
-	  /* A long long, or a double stored in the 32 bit r3/r4.  */
+	  /* A long long, double or _Decimal64 stored in the 32 bit
+	     r3/r4.  */
 	  regcache_cooked_write (regcache, tdep->ppc_gp0_regnum + 3,
 				 writebuf + 0);
 	  regcache_cooked_write (regcache, tdep->ppc_gp0_regnum + 4,
@@ -663,7 +677,8 @@ do_ppc_sysv_return_value (struct gdbarch *gdbarch, struct type *type,
 	  ULONGEST regval;
 	  regcache_cooked_read_unsigned (regcache, tdep->ppc_gp0_regnum + 3,
 					 &regval);
-	  store_unsigned_integer (readbuf, TYPE_LENGTH (type), regval);
+	  store_unsigned_integer (readbuf, TYPE_LENGTH (type), byte_order,
+				  regval);
 	}
       if (writebuf)
 	{
@@ -805,9 +820,9 @@ do_ppc_sysv_return_value (struct gdbarch *gdbarch, struct type *type,
 }
 
 enum return_value_convention
-ppc_sysv_abi_return_value (struct gdbarch *gdbarch, struct type *valtype,
-			   struct regcache *regcache, gdb_byte *readbuf,
-			   const gdb_byte *writebuf)
+ppc_sysv_abi_return_value (struct gdbarch *gdbarch, struct type *func_type,
+			   struct type *valtype, struct regcache *regcache,
+			   gdb_byte *readbuf, const gdb_byte *writebuf)
 {
   return do_ppc_sysv_return_value (gdbarch, valtype, regcache, readbuf,
 				   writebuf, 0);
@@ -815,6 +830,7 @@ ppc_sysv_abi_return_value (struct gdbarch *gdbarch, struct type *valtype,
 
 enum return_value_convention
 ppc_sysv_abi_broken_return_value (struct gdbarch *gdbarch,
+				  struct type *func_type,
 				  struct type *valtype,
 				  struct regcache *regcache,
 				  gdb_byte *readbuf, const gdb_byte *writebuf)
@@ -879,6 +895,7 @@ ppc64_sysv_abi_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
 {
   CORE_ADDR func_addr = find_function_addr (function, NULL);
   struct gdbarch_tdep *tdep = gdbarch_tdep (gdbarch);
+  enum bfd_endian byte_order = gdbarch_byte_order (gdbarch);
   ULONGEST back_chain;
   /* See for-loop comment below.  */
   int write_pass;
@@ -938,7 +955,7 @@ ppc64_sysv_abi_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
 	{
 	  /* During the first pass, GPARAM and VPARAM are more like
 	     offsets (start address zero) than addresses.  That way
-	     the accumulate the total stack space each region
+	     they accumulate the total stack space each region
 	     requires.  */
 	  gparam = 0;
 	  vparam = 0;
@@ -1148,7 +1165,10 @@ ppc64_sysv_abi_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
 	    }
 	  else if ((TYPE_CODE (type) == TYPE_CODE_INT
 		    || TYPE_CODE (type) == TYPE_CODE_ENUM
-		    || TYPE_CODE (type) == TYPE_CODE_PTR)
+		    || TYPE_CODE (type) == TYPE_CODE_BOOL
+		    || TYPE_CODE (type) == TYPE_CODE_CHAR
+		    || TYPE_CODE (type) == TYPE_CODE_PTR
+		    || TYPE_CODE (type) == TYPE_CODE_REF)
 		   && TYPE_LENGTH (type) <= 8)
 	    {
 	      /* Scalars and Pointers get sign[un]extended and go in
@@ -1160,18 +1180,25 @@ ppc64_sysv_abi_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
 		  /* Convert any function code addresses into
 		     descriptors.  */
 		  if (TYPE_CODE (type) == TYPE_CODE_PTR
-		      && TYPE_CODE (TYPE_TARGET_TYPE (type)) == TYPE_CODE_FUNC)
+		      || TYPE_CODE (type) == TYPE_CODE_REF)
 		    {
-		      CORE_ADDR desc = word;
-		      convert_code_addr_to_desc_addr (word, &desc);
-		      word = desc;
+		      struct type *target_type;
+		      target_type = check_typedef (TYPE_TARGET_TYPE (type));
+
+		      if (TYPE_CODE (target_type) == TYPE_CODE_FUNC
+			  || TYPE_CODE (target_type) == TYPE_CODE_METHOD)
+			{
+			  CORE_ADDR desc = word;
+			  convert_code_addr_to_desc_addr (word, &desc);
+			  word = desc;
+			}
 		    }
 		  if (greg <= 10)
 		    regcache_cooked_write_unsigned (regcache,
 						    tdep->ppc_gp0_regnum +
 						    greg, word);
 		  write_memory_unsigned_integer (gparam, tdep->wordsize,
-						 word);
+						 byte_order, word);
 		}
 	      greg++;
 	      gparam = align_up (gparam + TYPE_LENGTH (type), tdep->wordsize);
@@ -1205,14 +1232,20 @@ ppc64_sysv_abi_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
 		  greg++;
 		}
 	      if (write_pass)
-		/* WARNING: cagney/2003-09-21: Strictly speaking, this
-		   isn't necessary, unfortunately, GCC appears to get
-		   "struct convention" parameter passing wrong putting
-		   odd sized structures in memory instead of in a
-		   register.  Work around this by always writing the
-		   value to memory.  Fortunately, doing this
-		   simplifies the code.  */
-		write_memory (gparam, val, TYPE_LENGTH (type));
+		{
+		  /* WARNING: cagney/2003-09-21: Strictly speaking, this
+		     isn't necessary, unfortunately, GCC appears to get
+		     "struct convention" parameter passing wrong putting
+		     odd sized structures in memory instead of in a
+		     register.  Work around this by always writing the
+		     value to memory.  Fortunately, doing this
+		     simplifies the code.  */
+		  int len = TYPE_LENGTH (type);
+		  if (len < tdep->wordsize)
+		    write_memory (gparam + tdep->wordsize - len, val, len);
+		  else
+		    write_memory (gparam, val, len);
+		}
 	      if (freg <= 13
 		  && TYPE_CODE (type) == TYPE_CODE_STRUCT
 		  && TYPE_NFIELDS (type) == 1
@@ -1286,22 +1319,26 @@ ppc64_sysv_abi_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
   regcache_cooked_write_signed (regcache, gdbarch_sp_regnum (gdbarch), sp);
 
   /* Write the backchain (it occupies WORDSIZED bytes).  */
-  write_memory_signed_integer (sp, tdep->wordsize, back_chain);
+  write_memory_signed_integer (sp, tdep->wordsize, byte_order, back_chain);
 
   /* Point the inferior function call's return address at the dummy's
      breakpoint.  */
   regcache_cooked_write_signed (regcache, tdep->ppc_lr_regnum, bp_addr);
 
   /* Use the func_addr to find the descriptor, and use that to find
-     the TOC.  */
+     the TOC.  If we're calling via a function pointer, the pointer
+     itself identifies the descriptor.  */
   {
-    CORE_ADDR desc_addr;
-    if (convert_code_addr_to_desc_addr (func_addr, &desc_addr))
+    struct type *ftype = check_typedef (value_type (function));
+    CORE_ADDR desc_addr = value_as_address (function);
+
+    if (TYPE_CODE (ftype) == TYPE_CODE_PTR
+	|| convert_code_addr_to_desc_addr (func_addr, &desc_addr))
       {
 	/* The TOC is the second double word in the descriptor.  */
 	CORE_ADDR toc =
 	  read_memory_unsigned_integer (desc_addr + tdep->wordsize,
-					tdep->wordsize);
+					tdep->wordsize, byte_order);
 	regcache_cooked_write_unsigned (regcache,
 					tdep->ppc_gp0_regnum + 2, toc);
       }
@@ -1322,11 +1359,12 @@ ppc64_sysv_abi_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
    location; when READBUF is non-NULL, fill the buffer from the
    corresponding register return-value location.  */
 enum return_value_convention
-ppc64_sysv_abi_return_value (struct gdbarch *gdbarch, struct type *valtype,
-			     struct regcache *regcache, gdb_byte *readbuf,
-			     const gdb_byte *writebuf)
+ppc64_sysv_abi_return_value (struct gdbarch *gdbarch, struct type *func_type,
+			     struct type *valtype, struct regcache *regcache,
+			     gdb_byte *readbuf, const gdb_byte *writebuf)
 {
   struct gdbarch_tdep *tdep = gdbarch_tdep (gdbarch);
+  enum bfd_endian byte_order = gdbarch_byte_order (gdbarch);
 
   /* This function exists to support a calling convention that
      requires floating-point registers.  It shouldn't be used on
@@ -1355,7 +1393,9 @@ ppc64_sysv_abi_return_value (struct gdbarch *gdbarch, struct type *valtype,
 					   writebuf);
   /* Integers in r3.  */
   if ((TYPE_CODE (valtype) == TYPE_CODE_INT
-       || TYPE_CODE (valtype) == TYPE_CODE_ENUM)
+       || TYPE_CODE (valtype) == TYPE_CODE_ENUM
+       || TYPE_CODE (valtype) == TYPE_CODE_CHAR
+       || TYPE_CODE (valtype) == TYPE_CODE_BOOL)
       && TYPE_LENGTH (valtype) <= 8)
     {
       if (writebuf != NULL)
@@ -1371,12 +1411,14 @@ ppc64_sysv_abi_return_value (struct gdbarch *gdbarch, struct type *valtype,
 	  ULONGEST regval;
 	  regcache_cooked_read_unsigned (regcache, tdep->ppc_gp0_regnum + 3,
 					 &regval);
-	  store_unsigned_integer (readbuf, TYPE_LENGTH (valtype), regval);
+	  store_unsigned_integer (readbuf, TYPE_LENGTH (valtype), byte_order,
+				  regval);
 	}
       return RETURN_VALUE_REGISTER_CONVENTION;
     }
   /* All pointers live in r3.  */
-  if (TYPE_CODE (valtype) == TYPE_CODE_PTR)
+  if (TYPE_CODE (valtype) == TYPE_CODE_PTR
+      || TYPE_CODE (valtype) == TYPE_CODE_REF)
     {
       /* All pointers live in r3.  */
       if (writebuf != NULL)
@@ -1490,20 +1532,3 @@ ppc64_sysv_abi_return_value (struct gdbarch *gdbarch, struct type *valtype,
   return RETURN_VALUE_STRUCT_CONVENTION;
 }
 
-CORE_ADDR
-ppc64_sysv_abi_adjust_breakpoint_address (struct gdbarch *gdbarch,
-					  CORE_ADDR bpaddr)
-{
-  /* PPC64 SYSV specifies that the minimal-symbol "FN" should point at
-     a function-descriptor while the corresponding minimal-symbol
-     ".FN" should point at the entry point.  Consequently, a command
-     like "break FN" applied to an object file with only minimal
-     symbols, will insert the breakpoint into the descriptor at "FN"
-     and not the function at ".FN".  Avoid this confusion by adjusting
-     any attempt to set a descriptor breakpoint into a corresponding
-     function breakpoint.  Note that GDB warns the user when this
-     adjustment is applied - that's ok as otherwise the user will have
-     no way of knowing why their breakpoint at "FN" resulted in the
-     program stopping at ".FN".  */
-  return gdbarch_convert_from_func_ptr_addr (gdbarch, bpaddr, &current_target);
-}

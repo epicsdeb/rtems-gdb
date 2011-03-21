@@ -1,6 +1,7 @@
 /* Dump-to-file commands, for GDB, the GNU debugger.
 
-   Copyright (c) 2002, 2005, 2007, 2008 Free Software Foundation, Inc.
+   Copyright (c) 2002, 2005, 2007, 2008, 2009, 2010
+   Free Software Foundation, Inc.
 
    Contributed by Red Hat.
 
@@ -30,6 +31,7 @@
 #include <ctype.h>
 #include "target.h"
 #include "readline/readline.h"
+#include "gdbcore.h"
 
 #define XMALLOC(TYPE) ((TYPE*) xmalloc (sizeof (TYPE)))
 
@@ -66,19 +68,6 @@ scan_expression_with_cleanup (char **cmd, const char *def)
     }
 }
 
-
-static void
-do_fclose_cleanup (void *arg)
-{
-  FILE *file = arg;
-  fclose (arg);
-}
-
-static struct cleanup *
-make_cleanup_fclose (FILE *file)
-{
-  return make_cleanup (do_fclose_cleanup, file);
-}
 
 char *
 scan_filename_with_cleanup (char **cmd, const char *defname)
@@ -259,7 +248,7 @@ dump_memory_to_file (char *cmd, char *mode, char *file_format)
      value.  */
   buf = xmalloc (count);
   make_cleanup (xfree, buf);
-  target_read_memory (lo, buf, count);
+  read_memory (lo, buf, count);
   
   /* Have everything.  Open/write the data.  */
   if (file_format == NULL || strcmp (file_format, "binary") == 0)
@@ -309,7 +298,7 @@ dump_value_to_file (char *cmd, char *mode, char *file_format)
 
       if (VALUE_LVAL (val))
 	{
-	  vaddr = VALUE_ADDRESS (val);
+	  vaddr = value_address (val);
 	}
       else
 	{
@@ -441,7 +430,7 @@ add_dump_command (char *name, void (*func) (char *args, char *mode),
 
 /* Opaque data for restore_section_callback. */
 struct callback_data {
-  long load_offset;
+  CORE_ADDR load_offset;
   CORE_ADDR load_start;
   CORE_ADDR load_end;
 };
@@ -501,11 +490,13 @@ restore_section_callback (bfd *ibfd, asection *isec, void *args)
 		   (unsigned long) sec_end);
 
   if (data->load_offset != 0 || data->load_start != 0 || data->load_end != 0)
-    printf_filtered (" into memory (0x%s to 0x%s)\n", 
-		     paddr_nz ((unsigned long) sec_start 
+    printf_filtered (" into memory (%s to %s)\n",
+		     paddress (target_gdbarch,
+			       (unsigned long) sec_start
 			       + sec_offset + data->load_offset), 
-		     paddr_nz ((unsigned long) sec_start + sec_offset 
-		       + data->load_offset + sec_load_count));
+		     paddress (target_gdbarch,
+			       (unsigned long) sec_start + sec_offset
+				+ data->load_offset + sec_load_count));
   else
     puts_filtered ("\n");
 
@@ -546,8 +537,8 @@ restore_binary_file (char *filename, struct callback_data *data)
   printf_filtered 
     ("Restoring binary file %s into memory (0x%lx to 0x%lx)\n", 
      filename, 
-     (unsigned long) data->load_start + data->load_offset, 
-     (unsigned long) data->load_start + data->load_offset + len);
+     (unsigned long) (data->load_start + data->load_offset),
+     (unsigned long) (data->load_start + data->load_offset + len));
 
   /* Now set the file pos to the requested load start pos.  */
   if (fseek (file, data->load_start, SEEK_SET) != 0)
@@ -597,7 +588,7 @@ restore_command (char *args, int from_tty)
       /* Parse offset (optional). */
       if (args != NULL && *args != '\0')
       data.load_offset = 
-	parse_and_eval_long (scan_expression_with_cleanup (&args, NULL));
+	parse_and_eval_address (scan_expression_with_cleanup (&args, NULL));
       if (args != NULL && *args != '\0')
 	{
 	  /* Parse start address (optional). */

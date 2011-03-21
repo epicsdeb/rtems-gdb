@@ -1,5 +1,5 @@
 /* Internal interfaces for the Win32 specific target code for gdbserver.
-   Copyright (C) 2007, 2008 Free Software Foundation, Inc.
+   Copyright (C) 2007, 2008, 2009, 2010 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -42,6 +42,9 @@ typedef struct win32_thread_info
 
 struct win32_target_ops
 {
+  /* Architecture-specific setup.  */
+  void (*arch_setup) (void);
+
   /* The number of target registers.  */
   int num_regs;
 
@@ -58,19 +61,23 @@ struct win32_target_ops
   void (*thread_added) (win32_thread_info *th);
 
   /* Fetch register from gdbserver regcache data.  */
-  void (*fetch_inferior_register) (win32_thread_info *th, int r);
+  void (*fetch_inferior_register) (struct regcache *regcache,
+				   win32_thread_info *th, int r);
 
   /* Store a new register value into the thread context of TH.  */
-  void (*store_inferior_register) (win32_thread_info *th, int r);
+  void (*store_inferior_register) (struct regcache *regcache,
+				   win32_thread_info *th, int r);
 
   void (*single_step) (win32_thread_info *th);
 
   const unsigned char *breakpoint;
   int breakpoint_len;
 
-  /* What string to report to GDB when it asks for the architecture,
-     or NULL not to answer.  */
-  const char *arch_string;
+  /* Breakpoint/Watchpoint related functions.  See target.h for comments.  */
+  int (*insert_point) (char type, CORE_ADDR addr, int len);
+  int (*remove_point) (char type, CORE_ADDR addr, int len);
+  int (*stopped_by_watchpoint) (void);
+  CORE_ADDR (*stopped_data_address) (void);
 };
 
 extern struct win32_target_ops the_low_target;

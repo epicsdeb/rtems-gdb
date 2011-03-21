@@ -1,26 +1,25 @@
 /* YACC parser for Fortran expressions, for GDB.
    Copyright (C) 1986, 1989, 1990, 1991, 1993, 1994, 1995, 1996, 2000, 2001,
-   2002, 2003, 2004, 2005, 2006, 2007, 2008 Free Software Foundation, Inc.
+   2002, 2003, 2004, 2005, 2006, 2007, 2008, 2009, 2010
+   Free Software Foundation, Inc.
 
    Contributed by Motorola.  Adapted from the C parser by Farooq Butt
    (fmbutt@engage.sps.mot.com).
 
-This file is part of GDB.
+   This file is part of GDB.
 
-This program is free software; you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation; either version 2 of the License, or
-(at your option) any later version.
+   This program is free software; you can redistribute it and/or modify
+   it under the terms of the GNU General Public License as published by
+   the Free Software Foundation; either version 3 of the License, or
+   (at your option) any later version.
 
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
+   This program is distributed in the hope that it will be useful,
+   but WITHOUT ANY WARRANTY; without even the implied warranty of
+   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+   GNU General Public License for more details.
 
-You should have received a copy of the GNU General Public License
-along with this program; if not, write to the Free Software
-Foundation, Inc., 51 Franklin Street, Fifth Floor,
-Boston, MA 02110-1301, USA.  */
+   You should have received a copy of the GNU General Public License
+   along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
 /* This was blantantly ripped off the C expression parser, please 
    be aware of that as you look at its basic structure -FMB */ 
@@ -56,6 +55,9 @@ Boston, MA 02110-1301, USA.  */
 #include "objfiles.h" /* For have_full_symbols and have_partial_symbols */
 #include "block.h"
 #include <ctype.h>
+
+#define parse_type builtin_type (parse_gdbarch)
+#define parse_f_type builtin_f_type (parse_gdbarch)
 
 /* Remap normal yacc parser interface names (yyparse, yylex, yyerror, etc),
    as well as gratuitiously global symbol names, so we can have multiple
@@ -325,7 +327,9 @@ complexnum:     exp ',' exp
         ;
 
 exp	:	'(' complexnum ')'
-                	{ write_exp_elt_opcode(OP_COMPLEX); }
+                	{ write_exp_elt_opcode(OP_COMPLEX);
+			  write_exp_elt_type (parse_f_type->builtin_complex_s16);
+                	  write_exp_elt_opcode(OP_COMPLEX); }
 	;
 
 exp	:	'(' type ')' exp  %prec UNARY
@@ -447,7 +451,7 @@ exp	:	NAME_OR_INT
 
 exp	:	FLOAT
 			{ write_exp_elt_opcode (OP_DOUBLE);
-			  write_exp_elt_type (builtin_type_f_real_s8);
+			  write_exp_elt_type (parse_f_type->builtin_real_s8);
 			  write_exp_elt_dblcst ($1);
 			  write_exp_elt_opcode (OP_DOUBLE); }
 	;
@@ -460,7 +464,7 @@ exp	:	VARIABLE
 
 exp	:	SIZEOF '(' type ')'	%prec UNARY
 			{ write_exp_elt_opcode (OP_LONG);
-			  write_exp_elt_type (builtin_type_f_integer);
+			  write_exp_elt_type (parse_f_type->builtin_integer);
 			  CHECK_TYPEDEF ($3);
 			  write_exp_elt_longcst ((LONGEST) TYPE_LENGTH ($3));
 			  write_exp_elt_opcode (OP_LONG); }
@@ -488,9 +492,9 @@ variable:	name_not_typename
 			    {
 			      if (symbol_read_needs_frame (sym))
 				{
-				  if (innermost_block == 0 ||
-				      contained_in (block_found, 
-						    innermost_block))
+				  if (innermost_block == 0
+				      || contained_in (block_found, 
+						       innermost_block))
 				    innermost_block = block_found;
 				}
 			      write_exp_elt_opcode (OP_VAR_VALUE);
@@ -510,11 +514,7 @@ variable:	name_not_typename
 			      msymbol =
 				lookup_minimal_symbol (arg, NULL, NULL);
 			      if (msymbol != NULL)
-				{
-				  write_exp_msymbol (msymbol,
-						     lookup_function_type (builtin_type_int),
-						     builtin_type_int);
-				}
+				write_exp_msymbol (msymbol);
 			      else if (!have_full_symbols () && !have_partial_symbols ())
 				error ("No symbol table is loaded.  Use the \"file\" command.");
 			      else
@@ -555,8 +555,8 @@ ptype	:	typebase
 			  {
 			    range_type =
 			      create_range_type ((struct type *) NULL,
-						 builtin_type_f_integer, 0,
-						 array_size - 1);
+						 parse_f_type->builtin_integer,
+						 0, array_size - 1);
 			    follow_type =
 			      create_array_type ((struct type *) NULL,
 						 follow_type, range_type);
@@ -601,29 +601,29 @@ typebase  /* Implements (approximately): (type-qualifier)* type-specifier */
 	:	TYPENAME
 			{ $$ = $1.type; }
 	|	INT_KEYWORD
-			{ $$ = builtin_type_f_integer; }
+			{ $$ = parse_f_type->builtin_integer; }
 	|	INT_S2_KEYWORD 
-			{ $$ = builtin_type_f_integer_s2; }
+			{ $$ = parse_f_type->builtin_integer_s2; }
 	|	CHARACTER 
-			{ $$ = builtin_type_f_character; }
+			{ $$ = parse_f_type->builtin_character; }
 	|	LOGICAL_KEYWORD 
-			{ $$ = builtin_type_f_logical;} 
+			{ $$ = parse_f_type->builtin_logical; }
 	|	LOGICAL_S2_KEYWORD
-			{ $$ = builtin_type_f_logical_s2;}
+			{ $$ = parse_f_type->builtin_logical_s2; }
 	|	LOGICAL_S1_KEYWORD 
-			{ $$ = builtin_type_f_logical_s1;}
+			{ $$ = parse_f_type->builtin_logical_s1; }
 	|	REAL_KEYWORD 
-			{ $$ = builtin_type_f_real;}
+			{ $$ = parse_f_type->builtin_real; }
 	|       REAL_S8_KEYWORD
-			{ $$ = builtin_type_f_real_s8;}
+			{ $$ = parse_f_type->builtin_real_s8; }
 	|	REAL_S16_KEYWORD
-			{ $$ = builtin_type_f_real_s16;}
+			{ $$ = parse_f_type->builtin_real_s16; }
 	|	COMPLEX_S8_KEYWORD
-			{ $$ = builtin_type_f_complex_s8;}
+			{ $$ = parse_f_type->builtin_complex_s8; }
 	|	COMPLEX_S16_KEYWORD 
-			{ $$ = builtin_type_f_complex_s16;}
+			{ $$ = parse_f_type->builtin_complex_s16; }
 	|	COMPLEX_S32_KEYWORD 
-			{ $$ = builtin_type_f_complex_s32;}
+			{ $$ = parse_f_type->builtin_complex_s32; }
 	;
 
 nonempty_typelist
@@ -766,26 +766,26 @@ parse_number (p, len, parsed_float, putithere)
      target int size is different to the target long size.
      
      In the expression below, we could have tested
-     (n >> gdbarch_int_bit (current_gdbarch))
+     (n >> gdbarch_int_bit (parse_gdbarch))
      to see if it was zero,
      but too many compilers warn about that, when ints and longs
      are the same size.  So we shift it twice, with fewer bits
      each time, for the same result.  */
   
-  if ((gdbarch_int_bit (current_gdbarch) != gdbarch_long_bit (current_gdbarch)
+  if ((gdbarch_int_bit (parse_gdbarch) != gdbarch_long_bit (parse_gdbarch)
        && ((n >> 2)
-	   >> (gdbarch_int_bit (current_gdbarch)-2))) /* Avoid shift warning */
+	   >> (gdbarch_int_bit (parse_gdbarch)-2))) /* Avoid shift warning */
       || long_p)
     {
-      high_bit = ((ULONGEST)1) << (gdbarch_long_bit (current_gdbarch)-1);
-      unsigned_type = builtin_type_unsigned_long;
-      signed_type = builtin_type_long;
+      high_bit = ((ULONGEST)1) << (gdbarch_long_bit (parse_gdbarch)-1);
+      unsigned_type = parse_type->builtin_unsigned_long;
+      signed_type = parse_type->builtin_long;
     }
   else 
     {
-      high_bit = ((ULONGEST)1) << (gdbarch_int_bit (current_gdbarch)-1);
-      unsigned_type = builtin_type_unsigned_int;
-      signed_type = builtin_type_int;
+      high_bit = ((ULONGEST)1) << (gdbarch_int_bit (parse_gdbarch)-1);
+      unsigned_type = parse_type->builtin_unsigned_int;
+      signed_type = parse_type->builtin_int;
     }    
   
   putithere->typed_val.val = n;
@@ -1174,17 +1174,16 @@ yylex ()
     
     sym = lookup_symbol (tmp, expression_context_block,
 			 VAR_DOMAIN,
-			 current_language->la_language == language_cplus
-			 ? &is_a_field_of_this : NULL,
-			 NULL);
+			 parse_language->la_language == language_cplus
+			 ? &is_a_field_of_this : NULL);
     if (sym && SYMBOL_CLASS (sym) == LOC_TYPEDEF)
       {
 	yylval.tsym.type = SYMBOL_TYPE (sym);
 	return TYPENAME;
       }
     yylval.tsym.type
-      = language_lookup_primitive_type_by_name (current_language,
-						current_gdbarch, tmp);
+      = language_lookup_primitive_type_by_name (parse_language,
+						parse_gdbarch, tmp);
     if (yylval.tsym.type != NULL)
       return TYPENAME;
     

@@ -1,6 +1,7 @@
 /* Target-dependent code for GNU/Linux SPARC.
 
-   Copyright (C) 2003, 2004, 2005, 2007, 2008 Free Software Foundation, Inc.
+   Copyright (C) 2003, 2004, 2005, 2007, 2008, 2009, 2010
+   Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -37,7 +38,7 @@
 /* Signal trampoline support.  */
 
 static void sparc32_linux_sigframe_init (const struct tramp_frame *self,
-					 struct frame_info *next_frame,
+					 struct frame_info *this_frame,
 					 struct trad_frame_cache *this_cache,
 					 CORE_ADDR func);
 
@@ -87,14 +88,14 @@ static const struct tramp_frame sparc32_linux_rt_sigframe =
 
 static void
 sparc32_linux_sigframe_init (const struct tramp_frame *self,
-			     struct frame_info *next_frame,
+			     struct frame_info *this_frame,
 			     struct trad_frame_cache *this_cache,
 			     CORE_ADDR func)
 {
   CORE_ADDR base, addr, sp_addr;
   int regnum;
 
-  base = frame_unwind_register_unsigned (next_frame, SPARC_O1_REGNUM);
+  base = get_frame_register_unsigned (this_frame, SPARC_O1_REGNUM);
   if (self == &sparc32_linux_rt_sigframe)
     base += 128;
 
@@ -114,8 +115,8 @@ sparc32_linux_sigframe_init (const struct tramp_frame *self,
       addr += 4;
     }
 
-  base = frame_unwind_register_unsigned (next_frame, SPARC_SP_REGNUM);
-  addr = get_frame_memory_unsigned (next_frame, sp_addr, 4);
+  base = get_frame_register_unsigned (this_frame, SPARC_SP_REGNUM);
+  addr = get_frame_memory_unsigned (this_frame, sp_addr, 4);
 
   for (regnum = SPARC_L0_REGNUM; regnum <= SPARC_I7_REGNUM; regnum++)
     {
@@ -138,6 +139,9 @@ sparc32_linux_step_trap (struct frame_info *frame, unsigned long insn)
       /* __NR_rt_sigreturn is 101 and __NR_sigreturn is 216  */
       if (sc_num == 101 || sc_num == 216)
 	{
+	  struct gdbarch *gdbarch = get_frame_arch (frame);
+	  enum bfd_endian byte_order = gdbarch_byte_order (gdbarch);
+
 	  ULONGEST sp, pc_offset;
 
 	  sp = get_frame_register_unsigned (frame, SPARC_SP_REGNUM);
@@ -157,7 +161,7 @@ sparc32_linux_step_trap (struct frame_info *frame, unsigned long insn)
 	  if (sc_num == 101)
 	    pc_offset += 128;
 
-	  return read_memory_unsigned_integer (sp + pc_offset, 4);
+	  return read_memory_unsigned_integer (sp + pc_offset, 4, byte_order);
 	}
     }
 
@@ -211,6 +215,32 @@ sparc32_linux_collect_core_fpregset (const struct regset *regset,
   sparc32_collect_fpregset (regcache, regnum, fpregs);
 }
 
+/* Set the program counter for process PTID to PC.  */
+
+#define PSR_SYSCALL	0x00004000
+
+static void
+sparc_linux_write_pc (struct regcache *regcache, CORE_ADDR pc)
+{
+  struct gdbarch_tdep *tdep = gdbarch_tdep (get_regcache_arch (regcache));
+  ULONGEST psr;
+
+  regcache_cooked_write_unsigned (regcache, tdep->pc_regnum, pc);
+  regcache_cooked_write_unsigned (regcache, tdep->npc_regnum, pc + 4);
+
+  /* Clear the "in syscall" bit to prevent the kernel from
+     messing with the PCs we just installed, if we happen to be
+     within an interrupted system call that the kernel wants to
+     restart.
+
+     Note that after we return from the dummy call, the PSR et al.
+     registers will be automatically restored, and the kernel
+     continues to restart the system call at this point.  */
+  regcache_cooked_read_unsigned (regcache, SPARC32_PSR_REGNUM, &psr);
+  psr &= ~PSR_SYSCALL;
+  regcache_cooked_write_unsigned (regcache, SPARC32_PSR_REGNUM, psr);
+}
+
 
 
 static void
@@ -238,10 +268,6 @@ sparc32_linux_init_abi (struct gdbarch_info info, struct gdbarch *gdbarch)
      prologue analysis.  */
   tdep->plt_entry_size = 12;
 
-  /* GNU/Linux doesn't support the 128-bit `long double' from the psABI.  */
-  set_gdbarch_long_double_bit (gdbarch, 64);
-  set_gdbarch_long_double_format (gdbarch, floatformats_ieee_double);
-
   /* Enable TLS support.  */
   set_gdbarch_fetch_tls_load_module_address (gdbarch,
                                              svr4_fetch_objfile_link_map);
@@ -250,7 +276,9 @@ sparc32_linux_init_abi (struct gdbarch_info info, struct gdbarch *gdbarch)
   tdep->step_trap = sparc32_linux_step_trap;
 
   /* Hook in the DWARF CFI frame unwinder.  */
-  frame_unwind_append_sniffer (gdbarch, dwarf2_frame_sniffer);
+  dwarf2_append_unwinders (gdbarch);
+
+  set_gdbarch_write_pc (gdbarch, sparc_linux_write_pc);
 }
 
 /* Provide a prototype to silence -Wmissing-prototypes.  */

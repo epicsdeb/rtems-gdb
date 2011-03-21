@@ -1,7 +1,7 @@
 #                                                       -*- Autoconf -*-
 # Process this file with autoconf to produce a configure script.
 
-# Copyright 2002, 2003, 2004, 2005
+# Copyright 2002, 2003, 2004, 2005, 2009, 2010
 # Free Software Foundation, Inc.
 #
 # This program is free software; you can redistribute it and/or modify
@@ -26,10 +26,38 @@ AC_CANONICAL_TARGET
 
 ACX_NONCANONICAL_TARGET
 
+# Check for the 'make' the user wants to use.
+AC_CHECK_PROGS(MAKE, make)
+MAKE_IS_GNU=
+case "`$MAKE --version 2>&1 | sed 1q`" in
+  *GNU*)
+    MAKE_IS_GNU=yes
+    ;;
+esac
+AM_CONDITIONAL(GMAKE, test "$MAKE_IS_GNU" = yes)
+AC_PROG_MAKE_SET
+
 # Add HP-specific tests when appropriate.
 case $target in
   hppa*-*-hpux*)
     AC_CONFIG_SUBDIRS(gdb.hp) ;;
+esac
+
+# Add Cell/B.E. specific tests when appropriate.
+# We need support for both PowerPC and SPU targets configured in.
+case $target in
+  powerpc*-*-linux*)
+    have_spu_target=no
+    for targ in `echo $enable_targets | sed 's/,/ /g'`
+      do
+        case "${targ}" in
+          spu*|all) have_spu_target=yes ;;
+        esac
+      done
+    if test x$have_spu_target = xyes; then
+      AC_CONFIG_SUBDIRS(gdb.cell)
+    fi
+    ;;
 esac
 
 # With stabs.
@@ -114,7 +142,8 @@ AC_OUTPUT([Makefile \
   gdb.ada/Makefile \
   gdb.arch/Makefile gdb.asm/Makefile gdb.base/Makefile \
   gdb.cp/Makefile gdb.disasm/Makefile gdb.dwarf2/Makefile \
-  gdb.fortran/Makefile gdb.server/Makefile \
-  gdb.java/Makefile gdb.mi/Makefile gdb.modula2/Makefile \
+  gdb.fortran/Makefile gdb.server/Makefile gdb.java/Makefile \
+  gdb.mi/Makefile gdb.modula2/Makefile gdb.multi/Makefile \
   gdb.objc/Makefile gdb.opt/Makefile gdb.pascal/Makefile \
+  gdb.python/Makefile gdb.reverse/Makefile \
   gdb.threads/Makefile gdb.trace/Makefile gdb.xml/Makefile])

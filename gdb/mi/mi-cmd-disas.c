@@ -1,5 +1,6 @@
 /* MI Command Set - disassemble commands.
-   Copyright (C) 2000, 2001, 2002, 2007, 2008 Free Software Foundation, Inc.
+   Copyright (C) 2000, 2001, 2002, 2007, 2008, 2009, 2010
+   Free Software Foundation, Inc.
    Contributed by Cygnus Solutions (a Red Hat company).
 
    This file is part of GDB.
@@ -18,6 +19,7 @@
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
 #include "defs.h"
+#include "arch-utils.h"
 #include "target.h"
 #include "value.h"
 #include "mi-cmds.h"
@@ -46,10 +48,10 @@
 
    MODE: 0 or 1 for disassembly only, or mixed source and disassembly,
    respectively. */
-enum mi_cmd_result
+void
 mi_cmd_disassemble (char *command, char **argv, int argc)
 {
-  enum mi_cmd_result retval;
+  struct gdbarch *gdbarch = get_current_arch ();
   CORE_ADDR start;
 
   int mixed_source_and_assembly;
@@ -152,10 +154,8 @@ mi_cmd_disassemble (char *command, char **argv, int argc)
 	error (_("mi_cmd_disassemble: No function contains specified address"));
     }
 
-  gdb_disassembly (uiout,
+  gdb_disassembly (gdbarch, uiout,
   		   file_string,
-		   line_num,
-		   mixed_source_and_assembly, how_many, low, high);
-
-  return MI_CMD_DONE;
+		   mixed_source_and_assembly? DISASSEMBLY_SOURCE : 0,
+		   how_many, low, high);
 }

@@ -1,6 +1,7 @@
 /* Target-dependent code for FreeBSD/amd64.
 
-   Copyright (C) 2003, 2004, 2005, 2007, 2008 Free Software Foundation, Inc.
+   Copyright (C) 2003, 2004, 2005, 2007, 2008, 2009, 2010
+   Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -33,18 +34,18 @@
 
 /* Support for signal handlers.  */
 
-/* Assuming NEXT_FRAME is for a frame following a BSD sigtramp
-   routine, return the address of the associated sigcontext structure.  */
+/* Assuming THIS_FRAME is for a BSD sigtramp routine, return the
+   address of the associated sigcontext structure.  */
 
 static CORE_ADDR
-amd64fbsd_sigcontext_addr (struct frame_info *next_frame)
+amd64fbsd_sigcontext_addr (struct frame_info *this_frame)
 {
   CORE_ADDR sp;
 
   /* The `struct sigcontext' (which really is an `ucontext_t' on
      FreeBSD/amd64) lives at a fixed offset in the signal frame.  See
      <machine/sigframe.h>.  */
-  sp = frame_unwind_register_unsigned (next_frame, AMD64_RSP_REGNUM);
+  sp = frame_unwind_register_unsigned (this_frame, AMD64_RSP_REGNUM);
   return sp + 16;
 }
 
@@ -180,7 +181,7 @@ amd64fbsd_collect_uthread (const struct regcache *regcache,
     }
 }
 
-void
+static void
 amd64fbsd_init_abi (struct gdbarch_info info, struct gdbarch *gdbarch)
 {
   struct gdbarch_tdep *tdep = gdbarch_tdep (gdbarch);

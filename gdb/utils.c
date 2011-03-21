@@ -1,8 +1,8 @@
 /* General utility routines for GDB, the GNU debugger.
 
    Copyright (C) 1986, 1988, 1989, 1990, 1991, 1992, 1993, 1994, 1995, 1996,
-   1997, 1998, 1999, 2000, 2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008
-   Free Software Foundation, Inc.
+   1997, 1998, 1999, 2000, 2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008,
+   2009, 2010 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -25,6 +25,10 @@
 #include "gdb_string.h"
 #include "event-top.h"
 #include "exceptions.h"
+#include "gdbthread.h"
+#ifdef HAVE_SYS_RESOURCE_H
+#include <sys/resource.h>
+#endif /* HAVE_SYS_RESOURCE_H */
 
 #ifdef TUI
 #include "tui/tui.h"		/* For tui_get_command_dimension.   */
@@ -63,11 +67,16 @@
 
 #include "readline/readline.h"
 
+#include <sys/time.h>
+#include <time.h>
+
+#include "gdb_usleep.h"
+
 #if !HAVE_DECL_MALLOC
-extern PTR malloc ();		/* OK: PTR */
+extern PTR malloc ();		/* ARI: PTR */
 #endif
 #if !HAVE_DECL_REALLOC
-extern PTR realloc ();		/* OK: PTR */
+extern PTR realloc ();		/* ARI: PTR */
 #endif
 #if !HAVE_DECL_FREE
 extern void free ();
@@ -92,21 +101,15 @@ static void prompt_for_continue (void);
 static void set_screen_size (void);
 static void set_width (void);
 
+/* A flag indicating whether to timestamp debugging messages.  */
+
+static int debug_timestamp = 0;
+
 /* Chain of cleanup actions established with make_cleanup,
    to be executed if an error happens.  */
 
 static struct cleanup *cleanup_chain;	/* cleaned up after a failed command */
 static struct cleanup *final_cleanup_chain;	/* cleaned up when gdb exits */
-static struct cleanup *exec_cleanup_chain;	/* cleaned up on each execution command */
-/* cleaned up on each error from within an execution command */
-static struct cleanup *exec_error_cleanup_chain;
-
-/* Pointer to what is left to do for an execution command after the
-   target stops. Used only in asynchronous mode, by targets that
-   support async execution.  The finish and until commands use it. So
-   does the target extended-remote command. */
-struct continuation *cmd_continuation;
-struct continuation *intermediate_continuation;
 
 /* Nonzero if we have job control. */
 
@@ -204,21 +207,17 @@ make_cleanup (make_cleanup_ftype *function, void *arg)
 }
 
 struct cleanup *
+make_cleanup_dtor (make_cleanup_ftype *function, void *arg,
+		   void (*dtor) (void *))
+{
+  return make_my_cleanup2 (&cleanup_chain,
+			   function, arg, dtor);
+}
+
+struct cleanup *
 make_final_cleanup (make_cleanup_ftype *function, void *arg)
 {
   return make_my_cleanup (&final_cleanup_chain, function, arg);
-}
-
-struct cleanup *
-make_exec_cleanup (make_cleanup_ftype *function, void *arg)
-{
-  return make_my_cleanup (&exec_cleanup_chain, function, arg);
-}
-
-struct cleanup *
-make_exec_error_cleanup (make_cleanup_ftype *function, void *arg)
-{
-  return make_my_cleanup (&exec_error_cleanup_chain, function, arg);
 }
 
 static void
@@ -250,7 +249,6 @@ do_close_cleanup (void *arg)
 {
   int *fd = arg;
   close (*fd);
-  xfree (fd);
 }
 
 struct cleanup *
@@ -258,7 +256,41 @@ make_cleanup_close (int fd)
 {
   int *saved_fd = xmalloc (sizeof (fd));
   *saved_fd = fd;
-  return make_cleanup (do_close_cleanup, saved_fd);
+  return make_cleanup_dtor (do_close_cleanup, saved_fd, xfree);
+}
+
+/* Helper function which does the work for make_cleanup_fclose.  */
+
+static void
+do_fclose_cleanup (void *arg)
+{
+  FILE *file = arg;
+  fclose (arg);
+}
+
+/* Return a new cleanup that closes FILE.  */
+
+struct cleanup *
+make_cleanup_fclose (FILE *file)
+{
+  return make_cleanup (do_fclose_cleanup, file);
+}
+
+/* Helper function which does the work for make_cleanup_obstack_free.  */
+
+static void
+do_obstack_free (void *arg)
+{
+  struct obstack *ob = arg;
+  obstack_free (ob, NULL);
+}
+
+/* Return a new cleanup that frees OBSTACK.  */
+
+struct cleanup *
+make_cleanup_obstack_free (struct obstack *obstack)
+{
+  return make_cleanup (do_obstack_free, obstack);
 }
 
 static void
@@ -285,10 +317,36 @@ make_cleanup_free_section_addr_info (struct section_addr_info *addrs)
   return make_my_cleanup (&cleanup_chain, do_free_section_addr_info, addrs);
 }
 
+struct restore_integer_closure
+{
+  int *variable;
+  int value;
+};
+
+static void
+restore_integer (void *p)
+{
+  struct restore_integer_closure *closure = p;
+  *(closure->variable) = closure->value;
+}
+
+/* Remember the current value of *VARIABLE and make it restored when the cleanup
+   is run.  */
+struct cleanup *
+make_cleanup_restore_integer (int *variable)
+{
+  struct restore_integer_closure *c =
+    xmalloc (sizeof (struct restore_integer_closure));
+  c->variable = variable;
+  c->value = *variable;
+
+  return make_my_cleanup2 (&cleanup_chain, restore_integer, (void *)c,
+			   xfree);
+}
 
 struct cleanup *
-make_my_cleanup (struct cleanup **pmy_chain, make_cleanup_ftype *function,
-		 void *arg)
+make_my_cleanup2 (struct cleanup **pmy_chain, make_cleanup_ftype *function,
+		  void *arg,  void (*free_arg) (void *))
 {
   struct cleanup *new
     = (struct cleanup *) xmalloc (sizeof (struct cleanup));
@@ -296,10 +354,18 @@ make_my_cleanup (struct cleanup **pmy_chain, make_cleanup_ftype *function,
 
   new->next = *pmy_chain;
   new->function = function;
+  new->free_arg = free_arg;
   new->arg = arg;
   *pmy_chain = new;
 
   return old_chain;
+}
+
+struct cleanup *
+make_my_cleanup (struct cleanup **pmy_chain, make_cleanup_ftype *function,
+		 void *arg)
+{
+  return make_my_cleanup2 (pmy_chain, function, arg, NULL);
 }
 
 /* Discard cleanups and do the actions they describe
@@ -317,18 +383,6 @@ do_final_cleanups (struct cleanup *old_chain)
   do_my_cleanups (&final_cleanup_chain, old_chain);
 }
 
-void
-do_exec_cleanups (struct cleanup *old_chain)
-{
-  do_my_cleanups (&exec_cleanup_chain, old_chain);
-}
-
-void
-do_exec_error_cleanups (struct cleanup *old_chain)
-{
-  do_my_cleanups (&exec_error_cleanup_chain, old_chain);
-}
-
 static void
 do_my_cleanups (struct cleanup **pmy_chain,
 		struct cleanup *old_chain)
@@ -338,6 +392,8 @@ do_my_cleanups (struct cleanup **pmy_chain,
     {
       *pmy_chain = ptr->next;	/* Do this first incase recursion */
       (*ptr->function) (ptr->arg);
+      if (ptr->free_arg)
+	(*ptr->free_arg) (ptr->arg);
       xfree (ptr);
     }
 }
@@ -358,12 +414,6 @@ discard_final_cleanups (struct cleanup *old_chain)
 }
 
 void
-discard_exec_error_cleanups (struct cleanup *old_chain)
-{
-  discard_my_cleanups (&exec_error_cleanup_chain, old_chain);
-}
-
-void
 discard_my_cleanups (struct cleanup **pmy_chain,
 		     struct cleanup *old_chain)
 {
@@ -371,6 +421,8 @@ discard_my_cleanups (struct cleanup **pmy_chain,
   while ((ptr = *pmy_chain) != old_chain)
     {
       *pmy_chain = ptr->next;
+      if (ptr->free_arg)
+	(*ptr->free_arg) (ptr->arg);
       xfree (ptr);
     }
 }
@@ -450,84 +502,205 @@ null_cleanup (void *arg)
 {
 }
 
-/* Add a continuation to the continuation list, the global list
-   cmd_continuation. The new continuation will be added at the front.*/
-void
-add_continuation (void (*continuation_hook) (struct continuation_arg *),
-		  struct continuation_arg *arg_list)
+/* Continuations are implemented as cleanups internally.  Inherit from
+   cleanups.  */
+struct continuation
 {
-  struct continuation *continuation_ptr;
+  struct cleanup base;
+};
 
-  continuation_ptr =
-    (struct continuation *) xmalloc (sizeof (struct continuation));
-  continuation_ptr->continuation_hook = continuation_hook;
-  continuation_ptr->arg_list = arg_list;
-  continuation_ptr->next = cmd_continuation;
-  cmd_continuation = continuation_ptr;
+/* Add a continuation to the continuation list of THREAD.  The new
+   continuation will be added at the front.  */
+void
+add_continuation (struct thread_info *thread,
+		  void (*continuation_hook) (void *), void *args,
+		  void (*continuation_free_args) (void *))
+{
+  struct cleanup *as_cleanup = &thread->continuations->base;
+  make_cleanup_ftype *continuation_hook_fn = continuation_hook;
+
+  make_my_cleanup2 (&as_cleanup,
+		    continuation_hook_fn,
+		    args,
+		    continuation_free_args);
+
+  thread->continuations = (struct continuation *) as_cleanup;
 }
 
-/* Walk down the cmd_continuation list, and execute all the
-   continuations. There is a problem though. In some cases new
-   continuations may be added while we are in the middle of this
-   loop. If this happens they will be added in the front, and done
-   before we have a chance of exhausting those that were already
-   there. We need to then save the beginning of the list in a pointer
-   and do the continuations from there on, instead of using the
-   global beginning of list as our iteration pointer.  */
+/* Add a continuation to the continuation list of INFERIOR.  The new
+   continuation will be added at the front.  */
+
 void
-do_all_continuations (void)
+add_inferior_continuation (void (*continuation_hook) (void *), void *args,
+			   void (*continuation_free_args) (void *))
 {
-  struct continuation *continuation_ptr;
-  struct continuation *saved_continuation;
+  struct inferior *inf = current_inferior ();
+  struct cleanup *as_cleanup = &inf->continuations->base;
+  make_cleanup_ftype *continuation_hook_fn = continuation_hook;
+
+  make_my_cleanup2 (&as_cleanup,
+		    continuation_hook_fn,
+		    args,
+		    continuation_free_args);
+
+  inf->continuations = (struct continuation *) as_cleanup;
+}
+
+/* Do all continuations of the current inferior.  */
+
+void
+do_all_inferior_continuations (void)
+{
+  struct cleanup *old_chain;
+  struct cleanup *as_cleanup;
+  struct inferior *inf = current_inferior ();
+
+  if (inf->continuations == NULL)
+    return;
 
   /* Copy the list header into another pointer, and set the global
      list header to null, so that the global list can change as a side
-     effect of invoking the continuations and the processing of
-     the preexisting continuations will not be affected. */
-  continuation_ptr = cmd_continuation;
-  cmd_continuation = NULL;
+     effect of invoking the continuations and the processing of the
+     preexisting continuations will not be affected.  */
+
+  as_cleanup = &inf->continuations->base;
+  inf->continuations = NULL;
 
   /* Work now on the list we have set aside.  */
-  while (continuation_ptr)
-    {
-      (continuation_ptr->continuation_hook) (continuation_ptr->arg_list);
-      saved_continuation = continuation_ptr;
-      continuation_ptr = continuation_ptr->next;
-      xfree (saved_continuation);
-    }
+  do_my_cleanups (&as_cleanup, NULL);
 }
 
-/* Walk down the cmd_continuation list, and get rid of all the
-   continuations. */
+/* Get rid of all the inferior-wide continuations of INF.  */
+
+void
+discard_all_inferior_continuations (struct inferior *inf)
+{
+  struct cleanup *continuation_ptr = &inf->continuations->base;
+  discard_my_cleanups (&continuation_ptr, NULL);
+  inf->continuations = NULL;
+}
+
+static void
+restore_thread_cleanup (void *arg)
+{
+  ptid_t *ptid_p = arg;
+  switch_to_thread (*ptid_p);
+}
+
+/* Walk down the continuation list of PTID, and execute all the
+   continuations.  There is a problem though.  In some cases new
+   continuations may be added while we are in the middle of this loop.
+   If this happens they will be added in the front, and done before we
+   have a chance of exhausting those that were already there.  We need
+   to then save the beginning of the list in a pointer and do the
+   continuations from there on, instead of using the global beginning
+   of list as our iteration pointer.  */
+static void
+do_all_continuations_ptid (ptid_t ptid,
+			   struct continuation **continuations_p)
+{
+  struct cleanup *old_chain;
+  ptid_t current_thread;
+  struct cleanup *as_cleanup;
+
+  if (*continuations_p == NULL)
+    return;
+
+  current_thread = inferior_ptid;
+
+  /* Restore selected thread on exit.  Don't try to restore the frame
+     as well, because:
+
+    - When running continuations, the selected frame is always #0.
+
+    - The continuations may trigger symbol file loads, which may
+      change the frame layout (frame ids change), which would trigger
+      a warning if we used make_cleanup_restore_current_thread.  */
+
+  old_chain = make_cleanup (restore_thread_cleanup, &current_thread);
+
+  /* Let the continuation see this thread as selected.  */
+  switch_to_thread (ptid);
+
+  /* Copy the list header into another pointer, and set the global
+     list header to null, so that the global list can change as a side
+     effect of invoking the continuations and the processing of the
+     preexisting continuations will not be affected.  */
+
+  as_cleanup = &(*continuations_p)->base;
+  *continuations_p = NULL;
+
+  /* Work now on the list we have set aside.  */
+  do_my_cleanups (&as_cleanup, NULL);
+
+  do_cleanups (old_chain);
+}
+
+/* Callback for iterate over threads.  */
+static int
+do_all_continuations_thread_callback (struct thread_info *thread, void *data)
+{
+  do_all_continuations_ptid (thread->ptid, &thread->continuations);
+  return 0;
+}
+
+/* Do all continuations of thread THREAD.  */
+void
+do_all_continuations_thread (struct thread_info *thread)
+{
+  do_all_continuations_thread_callback (thread, NULL);
+}
+
+/* Do all continuations of all threads.  */
+void
+do_all_continuations (void)
+{
+  iterate_over_threads (do_all_continuations_thread_callback, NULL);
+}
+
+/* Callback for iterate over threads.  */
+static int
+discard_all_continuations_thread_callback (struct thread_info *thread,
+					   void *data)
+{
+  struct cleanup *continuation_ptr = &thread->continuations->base;
+  discard_my_cleanups (&continuation_ptr, NULL);
+  thread->continuations = NULL;
+  return 0;
+}
+
+/* Get rid of all the continuations of THREAD.  */
+void
+discard_all_continuations_thread (struct thread_info *thread)
+{
+  discard_all_continuations_thread_callback (thread, NULL);
+}
+
+/* Get rid of all the continuations of all threads.  */
 void
 discard_all_continuations (void)
 {
-  struct continuation *continuation_ptr;
-
-  while (cmd_continuation)
-    {
-      continuation_ptr = cmd_continuation;
-      cmd_continuation = continuation_ptr->next;
-      xfree (continuation_ptr);
-    }
+  iterate_over_threads (discard_all_continuations_thread_callback, NULL);
 }
 
-/* Add a continuation to the continuation list, the global list
-   intermediate_continuation.  The new continuation will be added at
-   the front.  */
-void
-add_intermediate_continuation (void (*continuation_hook)
-			       (struct continuation_arg *),
-			       struct continuation_arg *arg_list)
-{
-  struct continuation *continuation_ptr;
 
-  continuation_ptr =
-    (struct continuation *) xmalloc (sizeof (struct continuation));
-  continuation_ptr->continuation_hook = continuation_hook;
-  continuation_ptr->arg_list = arg_list;
-  continuation_ptr->next = intermediate_continuation;
-  intermediate_continuation = continuation_ptr;
+/* Add a continuation to the intermediate continuation list of THREAD.
+   The new continuation will be added at the front.  */
+void
+add_intermediate_continuation (struct thread_info *thread,
+			       void (*continuation_hook)
+			       (void *), void *args,
+			       void (*continuation_free_args) (void *))
+{
+  struct cleanup *as_cleanup = &thread->intermediate_continuations->base;
+  make_cleanup_ftype *continuation_hook_fn = continuation_hook;
+
+  make_my_cleanup2 (&as_cleanup,
+		    continuation_hook_fn,
+		    args,
+		    continuation_free_args);
+
+  thread->intermediate_continuations = (struct continuation *) as_cleanup;
 }
 
 /* Walk down the cmd_continuation list, and execute all the
@@ -538,42 +711,52 @@ add_intermediate_continuation (void (*continuation_hook)
    there. We need to then save the beginning of the list in a pointer
    and do the continuations from there on, instead of using the
    global beginning of list as our iteration pointer.*/
+static int
+do_all_intermediate_continuations_thread_callback (struct thread_info *thread,
+						   void *data)
+{
+  do_all_continuations_ptid (thread->ptid,
+			     &thread->intermediate_continuations);
+  return 0;
+}
+
+/* Do all intermediate continuations of thread THREAD.  */
+void
+do_all_intermediate_continuations_thread (struct thread_info *thread)
+{
+  do_all_intermediate_continuations_thread_callback (thread, NULL);
+}
+
+/* Do all intermediate continuations of all threads.  */
 void
 do_all_intermediate_continuations (void)
 {
-  struct continuation *continuation_ptr;
-  struct continuation *saved_continuation;
-
-  /* Copy the list header into another pointer, and set the global
-     list header to null, so that the global list can change as a side
-     effect of invoking the continuations and the processing of
-     the preexisting continuations will not be affected. */
-  continuation_ptr = intermediate_continuation;
-  intermediate_continuation = NULL;
-
-  /* Work now on the list we have set aside.  */
-  while (continuation_ptr)
-    {
-      (continuation_ptr->continuation_hook) (continuation_ptr->arg_list);
-      saved_continuation = continuation_ptr;
-      continuation_ptr = continuation_ptr->next;
-      xfree (saved_continuation);
-    }
+  iterate_over_threads (do_all_intermediate_continuations_thread_callback, NULL);
 }
 
-/* Walk down the cmd_continuation list, and get rid of all the
-   continuations. */
+/* Callback for iterate over threads.  */
+static int
+discard_all_intermediate_continuations_thread_callback (struct thread_info *thread,
+							void *data)
+{
+  struct cleanup *continuation_ptr = &thread->intermediate_continuations->base;
+  discard_my_cleanups (&continuation_ptr, NULL);
+  thread->intermediate_continuations = NULL;
+  return 0;
+}
+
+/* Get rid of all the intermediate continuations of THREAD.  */
+void
+discard_all_intermediate_continuations_thread (struct thread_info *thread)
+{
+  discard_all_intermediate_continuations_thread_callback (thread, NULL);
+}
+
+/* Get rid of all the intermediate continuations of all threads.  */
 void
 discard_all_intermediate_continuations (void)
 {
-  struct continuation *continuation_ptr;
-
-  while (intermediate_continuation)
-    {
-      continuation_ptr = intermediate_continuation;
-      intermediate_continuation = continuation_ptr->next;
-      xfree (continuation_ptr);
-    }
+  iterate_over_threads (discard_all_intermediate_continuations_thread_callback, NULL);
 }
 
 
@@ -658,11 +841,63 @@ fatal (const char *string, ...)
 NORETURN void
 error_stream (struct ui_file *stream)
 {
-  long len;
-  char *message = ui_file_xstrdup (stream, &len);
+  char *message = ui_file_xstrdup (stream, NULL);
   make_cleanup (xfree, message);
   error (("%s"), message);
 }
+
+/* Dump core trying to increase the core soft limit to hard limit first.  */
+
+static void
+dump_core (void)
+{
+#ifdef HAVE_SETRLIMIT
+  struct rlimit rlim = { RLIM_INFINITY, RLIM_INFINITY };
+
+  setrlimit (RLIMIT_CORE, &rlim);
+#endif /* HAVE_SETRLIMIT */
+
+  abort ();		/* NOTE: GDB has only three calls to abort().  */
+}
+
+/* Check whether GDB will be able to dump core using the dump_core function.  */
+
+static int
+can_dump_core (const char *reason)
+{
+#ifdef HAVE_GETRLIMIT
+  struct rlimit rlim;
+
+  /* Be quiet and assume we can dump if an error is returned.  */
+  if (getrlimit (RLIMIT_CORE, &rlim) != 0)
+    return 1;
+
+  if (rlim.rlim_max == 0)
+    {
+      fprintf_unfiltered (gdb_stderr,
+			  _("%s\nUnable to dump core, use `ulimit -c unlimited'"
+			    " before executing GDB next time.\n"), reason);
+      return 0;
+    }
+#endif /* HAVE_GETRLIMIT */
+
+  return 1;
+}
+
+/* Allow the user to configure the debugger behavior with respect to
+   what to do when an internal problem is detected.  */
+
+const char internal_problem_ask[] = "ask";
+const char internal_problem_yes[] = "yes";
+const char internal_problem_no[] = "no";
+static const char *internal_problem_modes[] =
+{
+  internal_problem_ask,
+  internal_problem_yes,
+  internal_problem_no,
+  NULL
+};
+static const char *internal_problem_mode = internal_problem_ask;
 
 /* Print a message reporting an internal error/warning. Ask the user
    if they want to continue, dump core, or just exit.  Return
@@ -671,10 +906,8 @@ error_stream (struct ui_file *stream)
 struct internal_problem
 {
   const char *name;
-  /* FIXME: cagney/2002-08-15: There should be ``maint set/show''
-     commands available for controlling these variables.  */
-  enum auto_boolean should_quit;
-  enum auto_boolean should_dump_core;
+  const char *should_quit;
+  const char *should_dump_core;
 };
 
 /* Report a problem, internal to GDB, to the user.  Once the problem
@@ -704,7 +937,13 @@ internal_vproblem (struct internal_problem *problem,
 	abort ();	/* NOTE: GDB has only three calls to abort().  */
       default:
 	dejavu = 3;
-	write (STDERR_FILENO, msg, sizeof (msg));
+        /* Newer GLIBC versions put the warn_unused_result attribute
+           on write, but this is one of those rare cases where
+           ignoring the return value is correct.  Casting to (void)
+           does not fix this problem.  This is the solution suggested
+           at http://gcc.gnu.org/bugzilla/show_bug.cgi?id=25509.  */
+	if (write (STDERR_FILENO, msg, sizeof (msg)) != sizeof (msg))
+          abort (); /* NOTE: GDB has only three calls to abort().  */
 	exit (1);
       }
   }
@@ -729,47 +968,51 @@ further debugging may prove unreliable.", file, line, problem->name, msg);
     make_cleanup (xfree, reason);
   }
 
-  switch (problem->should_quit)
+  if (problem->should_quit == internal_problem_ask)
     {
-    case AUTO_BOOLEAN_AUTO:
       /* Default (yes/batch case) is to quit GDB.  When in batch mode
-         this lessens the likelhood of GDB going into an infinate
-         loop.  */
-      quit_p = query (_("%s\nQuit this debugging session? "), reason);
-      break;
-    case AUTO_BOOLEAN_TRUE:
-      quit_p = 1;
-      break;
-    case AUTO_BOOLEAN_FALSE:
-      quit_p = 0;
-      break;
-    default:
-      internal_error (__FILE__, __LINE__, _("bad switch"));
+	 this lessens the likelihood of GDB going into an infinite
+	 loop.  */
+      if (caution == 0)
+        {
+          /* Emit the message and quit.  */
+          fputs_unfiltered (reason, gdb_stderr);
+          fputs_unfiltered ("\n", gdb_stderr);
+          quit_p = 1;
+        }
+      else
+        quit_p = query (_("%s\nQuit this debugging session? "), reason);
     }
+  else if (problem->should_quit == internal_problem_yes)
+    quit_p = 1;
+  else if (problem->should_quit == internal_problem_no)
+    quit_p = 0;
+  else
+    internal_error (__FILE__, __LINE__, _("bad switch"));
 
-  switch (problem->should_dump_core)
+  if (problem->should_dump_core == internal_problem_ask)
     {
-    case AUTO_BOOLEAN_AUTO:
-      /* Default (yes/batch case) is to dump core.  This leaves a GDB
-         `dropping' so that it is easier to see that something went
-         wrong in GDB.  */
-      dump_core_p = query (_("%s\nCreate a core file of GDB? "), reason);
-      break;
-      break;
-    case AUTO_BOOLEAN_TRUE:
-      dump_core_p = 1;
-      break;
-    case AUTO_BOOLEAN_FALSE:
-      dump_core_p = 0;
-      break;
-    default:
-      internal_error (__FILE__, __LINE__, _("bad switch"));
+      if (!can_dump_core (reason))
+	dump_core_p = 0;
+      else
+	{
+	  /* Default (yes/batch case) is to dump core.  This leaves a GDB
+	     `dropping' so that it is easier to see that something went
+	     wrong in GDB.  */
+	  dump_core_p = query (_("%s\nCreate a core file of GDB? "), reason);
+	}
     }
+  else if (problem->should_dump_core == internal_problem_yes)
+    dump_core_p = can_dump_core (reason);
+  else if (problem->should_dump_core == internal_problem_no)
+    dump_core_p = 0;
+  else
+    internal_error (__FILE__, __LINE__, _("bad switch"));
 
   if (quit_p)
     {
       if (dump_core_p)
-	abort ();		/* NOTE: GDB has only three calls to abort().  */
+	dump_core ();
       else
 	exit (1);
     }
@@ -779,7 +1022,7 @@ further debugging may prove unreliable.", file, line, problem->name, msg);
 	{
 #ifdef HAVE_WORKING_FORK
 	  if (fork () == 0)
-	    abort ();		/* NOTE: GDB has only three calls to abort().  */
+	    dump_core ();
 #endif
 	}
     }
@@ -788,7 +1031,7 @@ further debugging may prove unreliable.", file, line, problem->name, msg);
 }
 
 static struct internal_problem internal_error_problem = {
-  "internal-error", AUTO_BOOLEAN_AUTO, AUTO_BOOLEAN_AUTO
+  "internal-error", internal_problem_ask, internal_problem_ask
 };
 
 NORETURN void
@@ -808,7 +1051,7 @@ internal_error (const char *file, int line, const char *string, ...)
 }
 
 static struct internal_problem internal_warning_problem = {
-  "internal-warning", AUTO_BOOLEAN_AUTO, AUTO_BOOLEAN_AUTO
+  "internal-warning", internal_problem_ask, internal_problem_ask
 };
 
 void
@@ -824,6 +1067,105 @@ internal_warning (const char *file, int line, const char *string, ...)
   va_start (ap, string);
   internal_vwarning (file, line, string, ap);
   va_end (ap);
+}
+
+/* Dummy functions to keep add_prefix_cmd happy.  */
+
+static void
+set_internal_problem_cmd (char *args, int from_tty)
+{
+}
+
+static void
+show_internal_problem_cmd (char *args, int from_tty)
+{
+}
+
+/* When GDB reports an internal problem (error or warning) it gives
+   the user the opportunity to quit GDB and/or create a core file of
+   the current debug session.  This function registers a few commands
+   that make it possible to specify that GDB should always or never
+   quit or create a core file, without asking.  The commands look
+   like:
+
+   maint set PROBLEM-NAME quit ask|yes|no
+   maint show PROBLEM-NAME quit
+   maint set PROBLEM-NAME corefile ask|yes|no
+   maint show PROBLEM-NAME corefile
+
+   Where PROBLEM-NAME is currently "internal-error" or
+   "internal-warning".  */
+
+static void
+add_internal_problem_command (struct internal_problem *problem)
+{
+  struct cmd_list_element **set_cmd_list;
+  struct cmd_list_element **show_cmd_list;
+  char *set_doc;
+  char *show_doc;
+
+  set_cmd_list = xmalloc (sizeof (*set_cmd_list));
+  show_cmd_list = xmalloc (sizeof (*set_cmd_list));
+  *set_cmd_list = NULL;
+  *show_cmd_list = NULL;
+
+  set_doc = xstrprintf (_("Configure what GDB does when %s is detected."),
+			problem->name);
+
+  show_doc = xstrprintf (_("Show what GDB does when %s is detected."),
+			 problem->name);
+
+  add_prefix_cmd ((char*) problem->name,
+		  class_maintenance, set_internal_problem_cmd, set_doc,
+		  set_cmd_list,
+		  concat ("maintenance set ", problem->name, " ", NULL),
+		  0/*allow-unknown*/, &maintenance_set_cmdlist);
+
+  add_prefix_cmd ((char*) problem->name,
+		  class_maintenance, show_internal_problem_cmd, show_doc,
+		  show_cmd_list,
+		  concat ("maintenance show ", problem->name, " ", NULL),
+		  0/*allow-unknown*/, &maintenance_show_cmdlist);
+
+  set_doc = xstrprintf (_("\
+Set whether GDB should quit when an %s is detected"),
+			problem->name);
+  show_doc = xstrprintf (_("\
+Show whether GDB will quit when an %s is detected"),
+			 problem->name);
+  add_setshow_enum_cmd ("quit", class_maintenance,
+			internal_problem_modes,
+			&problem->should_quit,
+			set_doc,
+			show_doc,
+			NULL, /* help_doc */
+			NULL, /* setfunc */
+			NULL, /* showfunc */
+			set_cmd_list,
+			show_cmd_list);
+
+  xfree (set_doc);
+  xfree (show_doc);
+
+  set_doc = xstrprintf (_("\
+Set whether GDB should create a core file of GDB when %s is detected"),
+			problem->name);
+  show_doc = xstrprintf (_("\
+Show whether GDB will create a core file of GDB when %s is detected"),
+			 problem->name);
+  add_setshow_enum_cmd ("corefile", class_maintenance,
+			internal_problem_modes,
+			&problem->should_dump_core,
+			set_doc,
+			show_doc,
+			NULL, /* help_doc */
+			NULL, /* setfunc */
+			NULL, /* showfunc */
+			set_cmd_list,
+			show_cmd_list);
+
+  xfree (set_doc);
+  xfree (show_doc);
 }
 
 /* Print the system error message for errno, and also mention STRING
@@ -920,7 +1262,7 @@ nomem (long size)
 /* NOTE: These are declared using PTR to ensure consistency with
    "libiberty.h".  xfree() is GDB local.  */
 
-PTR				/* OK: PTR */
+PTR				/* ARI: PTR */
 xmalloc (size_t size)
 {
   void *val;
@@ -930,7 +1272,7 @@ xmalloc (size_t size)
   if (size == 0)
     size = 1;
 
-  val = malloc (size);		/* OK: malloc */
+  val = malloc (size);		/* ARI: malloc */
   if (val == NULL)
     nomem (size);
 
@@ -943,8 +1285,8 @@ xzalloc (size_t size)
   return xcalloc (1, size);
 }
 
-PTR				/* OK: PTR */
-xrealloc (PTR ptr, size_t size)	/* OK: PTR */
+PTR				/* ARI: PTR */
+xrealloc (PTR ptr, size_t size)	/* ARI: PTR */
 {
   void *val;
 
@@ -954,16 +1296,16 @@ xrealloc (PTR ptr, size_t size)	/* OK: PTR */
     size = 1;
 
   if (ptr != NULL)
-    val = realloc (ptr, size);	/* OK: realloc */
+    val = realloc (ptr, size);	/* ARI: realloc */
   else
-    val = malloc (size);		/* OK: malloc */
+    val = malloc (size);		/* ARI: malloc */
   if (val == NULL)
     nomem (size);
 
   return (val);
 }
 
-PTR				/* OK: PTR */
+PTR				/* ARI: PTR */
 xcalloc (size_t number, size_t size)
 {
   void *mem;
@@ -976,7 +1318,7 @@ xcalloc (size_t number, size_t size)
       size = 1;
     }
 
-  mem = calloc (number, size);		/* OK: xcalloc */
+  mem = calloc (number, size);		/* ARI: xcalloc */
   if (mem == NULL)
     nomem (number * size);
 
@@ -987,7 +1329,7 @@ void
 xfree (void *ptr)
 {
   if (ptr != NULL)
-    free (ptr);		/* OK: free */
+    free (ptr);		/* ARI: free */
 }
 
 
@@ -1094,12 +1436,7 @@ print_spaces (int n, struct ui_file *file)
 void
 gdb_print_host_address (const void *addr, struct ui_file *stream)
 {
-
-  /* We could use the %p conversion specifier to fprintf if we had any
-     way of knowing whether this host supports it.  But the following
-     should work on the Alpha and on 32 bit machines.  */
-
-  fprintf_filtered (stream, "0x%lx", (unsigned long) addr);
+  fprintf_filtered (stream, "%s", host_address_to_string (addr));
 }
 
 
@@ -1150,12 +1487,12 @@ defaulted_query (const char *ctlstr, const char defchar, va_list args)
     }
 
   /* Automatically answer the default value if the user did not want
-     prompts.  */
-  if (! caution)
+     prompts or the command was issued with the server prefix.  */
+  if (! caution || server_command)
     return def_value;
 
   /* If input isn't coming from the user directly, just say what
-     question we're asking, and then answer "yes" automatically.  This
+     question we're asking, and then answer the default automatically.  This
      way, important error messages don't get lost when talking to GDB
      over a pipe.  */
   if (! input_from_terminal_p ())
@@ -1169,11 +1506,6 @@ defaulted_query (const char *ctlstr, const char defchar, va_list args)
 
       return def_value;
     }
-
-  /* Automatically answer the default value if input is not from the user
-     directly, or if the user did not want prompts.  */
-  if (!input_from_terminal_p () || !caution)
-    return def_value;
 
   if (deprecated_query_hook)
     {
@@ -1201,6 +1533,25 @@ defaulted_query (const char *ctlstr, const char defchar, va_list args)
       gdb_flush (gdb_stdout);
 
       answer = fgetc (stdin);
+
+      /* We expect fgetc to block until a character is read.  But
+         this may not be the case if the terminal was opened with
+         the NONBLOCK flag.  In that case, if there is nothing to
+         read on stdin, fgetc returns EOF, but also sets the error
+         condition flag on stdin and errno to EAGAIN.  With a true
+         EOF, stdin's error condition flag is not set.
+
+         A situation where this behavior was observed is a pseudo
+         terminal on AIX.  */
+      while (answer == EOF && ferror (stdin) && errno == EAGAIN)
+        {
+          /* Not a real EOF.  Wait a little while and try again until
+             we read something.  */
+          clearerr (stdin);
+          gdb_usleep (10000);
+          answer = fgetc (stdin);
+        }
+
       clearerr (stdin);		/* in case of C-d */
       if (answer == EOF)	/* C-d */
 	{
@@ -1295,21 +1646,33 @@ query (const char *ctlstr, ...)
   va_end (args);
 }
 
-/* Print an error message saying that we couldn't make sense of a
-   \^mumble sequence in a string or character constant.  START and END
-   indicate a substring of some larger string that contains the
-   erroneous backslash sequence, missing the initial backslash.  */
-static NORETURN int
-no_control_char_error (const char *start, const char *end)
+/* A helper for parse_escape that converts a host character to a
+   target character.  C is the host character.  If conversion is
+   possible, then the target character is stored in *TARGET_C and the
+   function returns 1.  Otherwise, the function returns 0.  */
+
+static int
+host_char_to_target (int c, int *target_c)
 {
-  int len = end - start;
-  char *copy = alloca (end - start + 1);
+  struct obstack host_data;
+  char the_char = c;
+  struct cleanup *cleanups;
+  int result = 0;
 
-  memcpy (copy, start, len);
-  copy[len] = '\0';
+  obstack_init (&host_data);
+  cleanups = make_cleanup_obstack_free (&host_data);
 
-  error (_("There is no control character `\\%s' in the `%s' character set."),
-	 copy, target_charset ());
+  convert_between_encodings (target_charset (), host_charset (),
+			     &the_char, 1, 1, &host_data, translit_none);
+
+  if (obstack_object_size (&host_data) == 1)
+    {
+      result = 1;
+      *target_c = *(char *) obstack_base (&host_data);
+    }
+
+  do_cleanups (cleanups);
+  return result;
 }
 
 /* Parse a C escape sequence.  STRING_PTR points to a variable
@@ -1330,55 +1693,15 @@ no_control_char_error (const char *start, const char *end)
 int
 parse_escape (char **string_ptr)
 {
-  int target_char;
+  int target_char = -2;	/* initialize to avoid GCC warnings */
   int c = *(*string_ptr)++;
-  if (c_parse_backslash (c, &target_char))
-    return target_char;
-  else
-    switch (c)
-      {
+  switch (c)
+    {
       case '\n':
 	return -2;
       case 0:
 	(*string_ptr)--;
 	return 0;
-      case '^':
-	{
-	  /* Remember where this escape sequence started, for reporting
-	     errors.  */
-	  char *sequence_start_pos = *string_ptr - 1;
-
-	  c = *(*string_ptr)++;
-
-	  if (c == '?')
-	    {
-	      /* XXXCHARSET: What is `delete' in the host character set?  */
-	      c = 0177;
-
-	      if (!host_char_to_target (c, &target_char))
-		error (_("There is no character corresponding to `Delete' "
-		       "in the target character set `%s'."), host_charset ());
-
-	      return target_char;
-	    }
-	  else if (c == '\\')
-	    target_char = parse_escape (string_ptr);
-	  else
-	    {
-	      if (!host_char_to_target (c, &target_char))
-		no_control_char_error (sequence_start_pos, *string_ptr);
-	    }
-
-	  /* Now target_char is something like `c', and we want to find
-	     its control-character equivalent.  */
-	  if (!target_char_to_control_char (target_char, &target_char))
-	    no_control_char_error (sequence_start_pos, *string_ptr);
-
-	  return target_char;
-	}
-
-	/* XXXCHARSET: we need to use isdigit and value-of-digit
-	   methods of the host character set here.  */
 
       case '0':
       case '1':
@@ -1389,16 +1712,16 @@ parse_escape (char **string_ptr)
       case '6':
       case '7':
 	{
-	  int i = c - '0';
+	  int i = host_hex_value (c);
 	  int count = 0;
 	  while (++count < 3)
 	    {
 	      c = (**string_ptr);
-	      if (c >= '0' && c <= '7')
+	      if (isdigit (c) && c != '8' && c != '9')
 		{
 		  (*string_ptr)++;
 		  i *= 8;
-		  i += c - '0';
+		  i += host_hex_value (c);
 		}
 	      else
 		{
@@ -1407,14 +1730,39 @@ parse_escape (char **string_ptr)
 	    }
 	  return i;
 	}
-      default:
-	if (!host_char_to_target (c, &target_char))
-	  error
-	    ("The escape sequence `\%c' is equivalent to plain `%c', which"
-	     " has no equivalent\n" "in the `%s' character set.", c, c,
-	     target_charset ());
-	return target_char;
-      }
+
+    case 'a':
+      c = '\a';
+      break;
+    case 'b':
+      c = '\b';
+      break;
+    case 'f':
+      c = '\f';
+      break;
+    case 'n':
+      c = '\n';
+      break;
+    case 'r':
+      c = '\r';
+      break;
+    case 't':
+      c = '\t';
+      break;
+    case 'v':
+      c = '\v';
+      break;
+
+    default:
+      break;
+    }
+
+  if (!host_char_to_target (c, &target_char))
+    error
+      ("The escape sequence `\%c' is equivalent to plain `%c', which"
+       " has no equivalent\n" "in the `%s' character set.", c, c,
+       target_charset ());
+  return target_char;
 }
 
 /* Print the character C on STREAM as part of the contents of a literal
@@ -2121,7 +2469,26 @@ vfprintf_unfiltered (struct ui_file *stream, const char *format, va_list args)
 
   linebuffer = xstrvprintf (format, args);
   old_cleanups = make_cleanup (xfree, linebuffer);
-  fputs_unfiltered (linebuffer, stream);
+  if (debug_timestamp && stream == gdb_stdlog)
+    {
+      struct timeval tm;
+      char *timestamp;
+      int len, need_nl;
+
+      gettimeofday (&tm, NULL);
+
+      len = strlen (linebuffer);
+      need_nl = (len > 0 && linebuffer[len - 1] != '\n');
+
+      timestamp = xstrprintf ("%ld:%ld %s%s",
+			      (long) tm.tv_sec, (long) tm.tv_usec,
+			      linebuffer,
+			      need_nl ? "\n": "");
+      make_cleanup (xfree, timestamp);
+      fputs_unfiltered (timestamp, stream);
+    }
+  else
+    fputs_unfiltered (linebuffer, stream);
   do_cleanups (old_cleanups);
 }
 
@@ -2437,6 +2804,13 @@ pagination_off_command (char *arg, int from_tty)
 {
   pagination_enabled = 0;
 }
+
+static void
+show_debug_timestamp (struct ui_file *file, int from_tty,
+		      struct cmd_list_element *c, const char *value)
+{
+  fprintf_filtered (file, _("Timestamping debugging messages is %s.\n"), value);
+}
 
 
 void
@@ -2497,6 +2871,15 @@ Show demangling of C++/ObjC names in disassembly listings."), NULL,
 			   NULL,
 			   show_asm_demangle,
 			   &setprintlist, &showprintlist);
+
+  add_setshow_boolean_cmd ("timestamp", class_maintenance,
+			    &debug_timestamp, _("\
+Set timestamping of debugging messages."), _("\
+Show timestamping of debugging messages."), _("\
+When set, debugging messages will be marked with seconds and microseconds."),
+			   NULL,
+			   show_debug_timestamp,
+			   &setdebuglist, &showdebuglist);
 }
 
 /* Machine specific function to handle SIGWINCH signal. */
@@ -2518,26 +2901,8 @@ get_cell (void)
   return buf[cell];
 }
 
-int
-strlen_paddr (void)
-{
-  return (gdbarch_addr_bit (current_gdbarch) / 8 * 2);
-}
-
-char *
-paddr (CORE_ADDR addr)
-{
-  return phex (addr, gdbarch_addr_bit (current_gdbarch) / 8);
-}
-
-char *
-paddr_nz (CORE_ADDR addr)
-{
-  return phex_nz (addr, gdbarch_addr_bit (current_gdbarch) / 8);
-}
-
 const char *
-paddress (CORE_ADDR addr)
+paddress (struct gdbarch *gdbarch, CORE_ADDR addr)
 {
   /* Truncate address to the size of a target address, avoiding shifts
      larger or equal than the width of a CORE_ADDR.  The local
@@ -2548,7 +2913,7 @@ paddress (CORE_ADDR addr)
      either zero or sign extended.  Should gdbarch_address_to_pointer or
      some ADDRESS_TO_PRINTABLE() be used to do the conversion?  */
 
-  int addr_bit = gdbarch_addr_bit (current_gdbarch);
+  int addr_bit = gdbarch_addr_bit (gdbarch);
 
   if (addr_bit < (sizeof (CORE_ADDR) * HOST_CHAR_BIT))
     addr &= ((CORE_ADDR) 1 << addr_bit) - 1;
@@ -2642,18 +3007,18 @@ octal2str (ULONGEST addr, int width)
 }
 
 char *
-paddr_u (CORE_ADDR addr)
+pulongest (ULONGEST u)
 {
-  return decimal2str ("", addr, 0);
+  return decimal2str ("", u, 0);
 }
 
 char *
-paddr_d (LONGEST addr)
+plongest (LONGEST l)
 {
-  if (addr < 0)
-    return decimal2str ("-", -addr, 0);
+  if (l < 0)
+    return decimal2str ("-", -l, 0);
   else
-    return decimal2str ("", addr, 0);
+    return decimal2str ("", l, 0);
 }
 
 /* Eliminate warning from compiler on 32-bit systems.  */
@@ -2825,7 +3190,6 @@ core_addr_to_string_nz (const CORE_ADDR addr)
 CORE_ADDR
 string_to_core_addr (const char *my_string)
 {
-  int addr_bit = gdbarch_addr_bit (current_gdbarch);
   CORE_ADDR addr = 0;
 
   if (my_string[0] == '0' && tolower (my_string[1]) == 'x')
@@ -2841,17 +3205,6 @@ string_to_core_addr (const char *my_string)
 	  else
 	    error (_("invalid hex \"%s\""), my_string);
 	}
-
-      /* Not very modular, but if the executable format expects
-         addresses to be sign-extended, then do so if the address was
-         specified with only 32 significant bits.  Really this should
-         be determined by the target architecture, not by the object
-         file.  */
-      if (i - 2 == addr_bit / 4
-	  && exec_bfd
-	  && bfd_get_sign_extend_vma (exec_bfd))
-	addr = (addr ^ ((CORE_ADDR) 1 << (addr_bit - 1)))
-	       - ((CORE_ADDR) 1 << (addr_bit - 1));
     }
   else
     {
@@ -2867,6 +3220,15 @@ string_to_core_addr (const char *my_string)
     }
 
   return addr;
+}
+
+const char *
+host_address_to_string (const void *addr)
+{
+  char *str = get_cell ();
+
+  xsnprintf (str, CELLSIZE, "0x%s", phex_nz ((uintptr_t) addr, sizeof (addr)));
+  return str;
 }
 
 char *
@@ -2996,7 +3358,7 @@ xfullpath (const char *filename)
 unsigned long
 gnu_debuglink_crc32 (unsigned long crc, unsigned char *buf, size_t len)
 {
-  static const unsigned long crc32_table[256] = {
+  static const unsigned int crc32_table[256] = {
     0x00000000, 0x77073096, 0xee0e612c, 0x990951ba, 0x076dc419,
     0x706af48f, 0xe963a535, 0x9e6495a3, 0x0edb8832, 0x79dcb8a4,
     0xe0d5e91e, 0x97d2d988, 0x09b64c2b, 0x7eb17cbd, 0xe7b82d07,
@@ -3222,4 +3584,96 @@ ldirname (const char *filename)
 
   dirname[base - filename] = '\0';
   return dirname;
+}
+
+/* Call libiberty's buildargv, and return the result.
+   If buildargv fails due to out-of-memory, call nomem.
+   Therefore, the returned value is guaranteed to be non-NULL,
+   unless the parameter itself is NULL.  */
+
+char **
+gdb_buildargv (const char *s)
+{
+  char **argv = buildargv (s);
+  if (s != NULL && argv == NULL)
+    nomem (0);
+  return argv;
+}
+
+int
+compare_positive_ints (const void *ap, const void *bp)
+{
+  /* Because we know we're comparing two ints which are positive,
+     there's no danger of overflow here.  */
+  return * (int *) ap - * (int *) bp;
+}
+
+#define AMBIGUOUS_MESS1	".\nMatching formats:"
+#define AMBIGUOUS_MESS2	".\nUse \"set gnutarget format-name\" to specify the format."
+
+const char *
+gdb_bfd_errmsg (bfd_error_type error_tag, char **matching)
+{
+  char *ret, *retp;
+  int ret_len;
+  char **p;
+
+  /* Check if errmsg just need simple return.  */
+  if (error_tag != bfd_error_file_ambiguously_recognized || matching == NULL)
+    return bfd_errmsg (error_tag);
+
+  ret_len = strlen (bfd_errmsg (error_tag)) + strlen (AMBIGUOUS_MESS1)
+            + strlen (AMBIGUOUS_MESS2);
+  for (p = matching; *p; p++)
+    ret_len += strlen (*p) + 1;
+  ret = xmalloc (ret_len + 1);
+  retp = ret;
+  make_cleanup (xfree, ret);
+
+  strcpy (retp, bfd_errmsg (error_tag));
+  retp += strlen (retp);
+
+  strcpy (retp, AMBIGUOUS_MESS1);
+  retp += strlen (retp);
+
+  for (p = matching; *p; p++)
+    {
+      sprintf (retp, " %s", *p);
+      retp += strlen (retp);
+    }
+  xfree (matching);
+
+  strcpy (retp, AMBIGUOUS_MESS2);
+
+  return ret;
+}
+
+/* Return ARGS parsed as a valid pid, or throw an error.  */
+
+int
+parse_pid_to_attach (char *args)
+{
+  unsigned long pid;
+  char *dummy;
+
+  if (!args)
+    error_no_arg (_("process-id to attach"));
+
+  dummy = args;
+  pid = strtoul (args, &dummy, 0);
+  /* Some targets don't set errno on errors, grrr!  */
+  if ((pid == 0 && dummy == args) || dummy != &args[strlen (args)])
+    error (_("Illegal process-id: %s."), args);
+
+  return pid;
+}
+
+/* Provide a prototype to silence -Wmissing-prototypes.  */
+extern initialize_file_ftype _initialize_utils;
+
+void
+_initialize_utils (void)
+{
+  add_internal_problem_command (&internal_error_problem);
+  add_internal_problem_command (&internal_warning_problem);
 }

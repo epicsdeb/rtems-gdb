@@ -1,5 +1,5 @@
 /* MI Command Set - stack commands.
-   Copyright (C) 2000, 2002, 2003, 2004, 2005, 2007, 2008
+   Copyright (C) 2000, 2002, 2003, 2004, 2005, 2007, 2008, 2009, 2010
    Free Software Foundation, Inc.
    Contributed by Cygnus Solutions (a Red Hat company).
 
@@ -29,15 +29,21 @@
 #include "stack.h"
 #include "dictionary.h"
 #include "gdb_string.h"
+#include "language.h"
+#include "valprint.h"
 
-static void list_args_or_locals (int locals, int values, struct frame_info *fi);
+
+enum what_to_list { locals, arguments, all };
+
+static void list_args_or_locals (enum what_to_list what, 
+				 int values, struct frame_info *fi);
 
 /* Print a list of the stack frames. Args can be none, in which case
    we want to print the whole backtrace, or a pair of numbers
    specifying the frame numbers at which to start and stop the
    display. If the two numbers are equal, a single frame will be
    displayed. */
-enum mi_cmd_result
+void
 mi_cmd_stack_list_frames (char *command, char **argv, int argc)
 {
   int frame_low;
@@ -87,11 +93,9 @@ mi_cmd_stack_list_frames (char *command, char **argv, int argc)
     }
 
   do_cleanups (cleanup_stack);
-
-  return MI_CMD_DONE;
 }
 
-enum mi_cmd_result
+void
 mi_cmd_stack_info_depth (char *command, char **argv, int argc)
 {
   int frame_high;
@@ -114,14 +118,30 @@ mi_cmd_stack_info_depth (char *command, char **argv, int argc)
     QUIT;
 
   ui_out_field_int (uiout, "depth", i);
-
-  return MI_CMD_DONE;
 }
 
-/* Print a list of the locals for the current frame. With argument of
+static enum print_values
+parse_print_values (char *name)
+{
+   if (strcmp (name, "0") == 0
+       || strcmp (name, mi_no_values) == 0)
+     return PRINT_NO_VALUES;
+   else if (strcmp (name, "1") == 0
+	    || strcmp (name, mi_all_values) == 0)
+     return PRINT_ALL_VALUES;
+   else if (strcmp (name, "2") == 0
+	    || strcmp (name, mi_simple_values) == 0)
+     return PRINT_SIMPLE_VALUES;
+   else
+     error (_("Unknown value for PRINT_VALUES: must be: \
+0 or \"%s\", 1 or \"%s\", 2 or \"%s\""),
+	    mi_no_values, mi_all_values, mi_simple_values);
+}
+
+/* Print a list of the locals for the current frame.  With argument of
    0, print only the names, with argument of 1 print also the
    values. */
-enum mi_cmd_result
+void
 mi_cmd_stack_list_locals (char *command, char **argv, int argc)
 {
   struct frame_info *frame;
@@ -132,27 +152,13 @@ mi_cmd_stack_list_locals (char *command, char **argv, int argc)
 
    frame = get_selected_frame (NULL);
 
-   if (strcmp (argv[0], "0") == 0
-       || strcmp (argv[0], mi_no_values) == 0)
-     print_values = PRINT_NO_VALUES;
-   else if (strcmp (argv[0], "1") == 0
-	    || strcmp (argv[0], mi_all_values) == 0)
-     print_values = PRINT_ALL_VALUES;
-   else if (strcmp (argv[0], "2") == 0
-	    || strcmp (argv[0], mi_simple_values) == 0)
-     print_values = PRINT_SIMPLE_VALUES;
-   else
-     error (_("Unknown value for PRINT_VALUES: must be: \
-0 or \"%s\", 1 or \"%s\", 2 or \"%s\""),
-	    mi_no_values, mi_all_values, mi_simple_values);
-  list_args_or_locals (1, print_values, frame);
-  return MI_CMD_DONE;
+   list_args_or_locals (locals, parse_print_values (argv[0]), frame);
 }
 
-/* Print a list of the arguments for the current frame. With argument
+/* Print a list of the arguments for the current frame.  With argument
    of 0, print only the names, with argument of 1 print also the
    values. */
-enum mi_cmd_result
+void
 mi_cmd_stack_list_args (char *command, char **argv, int argc)
 {
   int frame_low;
@@ -160,6 +166,7 @@ mi_cmd_stack_list_args (char *command, char **argv, int argc)
   int i;
   struct frame_info *fi;
   struct cleanup *cleanup_stack_args;
+  enum print_values print_values;
 
   if (argc < 1 || argc > 3 || argc == 2)
     error (_("mi_cmd_stack_list_args: Usage: PRINT_VALUES [FRAME_LOW FRAME_HIGH]"));
@@ -176,6 +183,8 @@ mi_cmd_stack_list_args (char *command, char **argv, int argc)
       frame_low = -1;
       frame_high = -1;
     }
+
+  print_values = parse_print_values (argv[0]);
 
   /* Let's position fi on the frame at which to start the
      display. Could be the innermost frame if the whole stack needs
@@ -199,21 +208,38 @@ mi_cmd_stack_list_args (char *command, char **argv, int argc)
       QUIT;
       cleanup_frame = make_cleanup_ui_out_tuple_begin_end (uiout, "frame");
       ui_out_field_int (uiout, "level", i);
-      list_args_or_locals (0, atoi (argv[0]), fi);
+      list_args_or_locals (arguments, print_values, fi);
       do_cleanups (cleanup_frame);
     }
 
   do_cleanups (cleanup_stack_args);
-
-  return MI_CMD_DONE;
 }
+
+/* Print a list of the local variables (including arguments) for the 
+   current frame.  ARGC must be 1 and ARGV[0] specify if only the names,
+   or both names and values of the variables must be printed.  See 
+   parse_print_value for possible values.  */
+void
+mi_cmd_stack_list_variables (char *command, char **argv, int argc)
+{
+  struct frame_info *frame;
+  enum print_values print_values;
+
+  if (argc != 1)
+    error (_("Usage: PRINT_VALUES"));
+
+  frame = get_selected_frame (NULL);
+
+  list_args_or_locals (all, parse_print_values (argv[0]), frame);
+}
+
 
 /* Print a list of the locals or the arguments for the currently
    selected frame.  If the argument passed is 0, printonly the names
    of the variables, if an argument of 1 is passed, print the values
    as well. */
 static void
-list_args_or_locals (int locals, int values, struct frame_info *fi)
+list_args_or_locals (enum what_to_list what, int values, struct frame_info *fi)
 {
   struct block *block;
   struct symbol *sym;
@@ -222,12 +248,29 @@ list_args_or_locals (int locals, int values, struct frame_info *fi)
   struct cleanup *cleanup_list;
   static struct ui_stream *stb = NULL;
   struct type *type;
+  char *name_of_result;
 
   stb = ui_out_stream_new (uiout);
 
   block = get_frame_block (fi, 0);
 
-  cleanup_list = make_cleanup_ui_out_list_begin_end (uiout, locals ? "locals" : "args");
+  switch (what)
+    {
+    case locals:
+      name_of_result = "locals";
+      break;
+    case arguments:
+      name_of_result = "args";
+      break;
+    case all:
+      name_of_result = "variables";
+      break;
+    default:
+      internal_error (__FILE__, __LINE__,
+		      "unexpected what_to_list: %d", (int) what);
+    }
+
+  cleanup_list = make_cleanup_ui_out_list_begin_end (uiout, name_of_result);
 
   while (block != 0)
     {
@@ -251,22 +294,17 @@ list_args_or_locals (int locals, int values, struct frame_info *fi)
 
 	    case LOC_ARG:	/* argument              */
 	    case LOC_REF_ARG:	/* reference arg         */
-	    case LOC_REGPARM:	/* register arg          */
 	    case LOC_REGPARM_ADDR:	/* indirect register arg */
-	    case LOC_LOCAL_ARG:	/* stack arg             */
-	    case LOC_BASEREG_ARG:	/* basereg arg           */
-	    case LOC_COMPUTED_ARG:	/* arg with computed location */
-	      if (!locals)
-		print_me = 1;
-	      break;
-
 	    case LOC_LOCAL:	/* stack local           */
-	    case LOC_BASEREG:	/* basereg local         */
 	    case LOC_STATIC:	/* static                */
 	    case LOC_REGISTER:	/* register              */
 	    case LOC_COMPUTED:	/* computed location     */
-	      if (locals)
+	      if (what == all)
 		print_me = 1;
+	      else if (what == locals)
+		print_me = !SYMBOL_IS_ARGUMENT (sym);
+	      else
+		print_me = SYMBOL_IS_ARGUMENT (sym);
 	      break;
 	    }
 	  if (print_me)
@@ -274,18 +312,19 @@ list_args_or_locals (int locals, int values, struct frame_info *fi)
 	      struct cleanup *cleanup_tuple = NULL;
 	      struct symbol *sym2;
 	      struct value *val;
-	      if (values != PRINT_NO_VALUES)
+	      if (values != PRINT_NO_VALUES || what == all)
 		cleanup_tuple =
 		  make_cleanup_ui_out_tuple_begin_end (uiout, NULL);
 	      ui_out_field_string (uiout, "name", SYMBOL_PRINT_NAME (sym));
+	      if (what == all && SYMBOL_IS_ARGUMENT (sym))
+		ui_out_field_int (uiout, "arg", 1);
 
-	      if (!locals)
+	      if (SYMBOL_IS_ARGUMENT (sym))
 		sym2 = lookup_symbol (SYMBOL_NATURAL_NAME (sym),
 				      block, VAR_DOMAIN,
-				      (int *) NULL,
-				      (struct symtab **) NULL);
+				      (int *) NULL);
 	      else
-		    sym2 = sym;
+		sym2 = sym;
 	      switch (values)
 		{
 		case PRINT_SIMPLE_VALUES:
@@ -296,21 +335,32 @@ list_args_or_locals (int locals, int values, struct frame_info *fi)
 		      && TYPE_CODE (type) != TYPE_CODE_STRUCT
 		      && TYPE_CODE (type) != TYPE_CODE_UNION)
 		    {
+		      struct value_print_options opts;
 		      val = read_var_value (sym2, fi);
+		      get_raw_print_options (&opts);
+		      opts.deref_ref = 1;
 		      common_val_print
-			(val, stb->stream, 0, 1, 0, Val_no_prettyprint);
+			(val, stb->stream, 0, &opts,
+			 language_def (SYMBOL_LANGUAGE (sym2)));
 		      ui_out_field_stream (uiout, "value", stb);
 		    }
-		  do_cleanups (cleanup_tuple);
 		  break;
 		case PRINT_ALL_VALUES:
-		  val = read_var_value (sym2, fi);
-		  common_val_print
-		    (val, stb->stream, 0, 1, 0, Val_no_prettyprint);
-		  ui_out_field_stream (uiout, "value", stb);
-		  do_cleanups (cleanup_tuple);
+		  {
+		    struct value_print_options opts;
+		    val = read_var_value (sym2, fi);
+		    get_raw_print_options (&opts);
+		    opts.deref_ref = 1;
+		    common_val_print
+		      (val, stb->stream, 0, &opts,
+		       language_def (SYMBOL_LANGUAGE (sym2)));
+		    ui_out_field_stream (uiout, "value", stb);
+		  }
 		  break;
 		}
+
+	      if (values != PRINT_NO_VALUES || what == all)
+		do_cleanups (cleanup_tuple);
 	    }
 	}
       if (BLOCK_FUNCTION (block))
@@ -322,22 +372,20 @@ list_args_or_locals (int locals, int values, struct frame_info *fi)
   ui_out_stream_delete (stb);
 }
 
-enum mi_cmd_result
+void
 mi_cmd_stack_select_frame (char *command, char **argv, int argc)
 {
   if (argc == 0 || argc > 1)
     error (_("mi_cmd_stack_select_frame: Usage: FRAME_SPEC"));
 
   select_frame_command (argv[0], 1 /* not used */ );
-  return MI_CMD_DONE;
 }
 
-enum mi_cmd_result
+void
 mi_cmd_stack_info_frame (char *command, char **argv, int argc)
 {
   if (argc > 0)
     error (_("mi_cmd_stack_info_frame: No arguments required"));
-  
+
   print_frame_info (get_selected_frame (NULL), 1, LOC_AND_ADDRESS, 0);
-  return MI_CMD_DONE;
 }

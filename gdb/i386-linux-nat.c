@@ -1,7 +1,7 @@
 /* Native-dependent code for GNU/Linux i386.
 
-   Copyright (C) 1999, 2000, 2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008
-   Free Software Foundation, Inc.
+   Copyright (C) 1999, 2000, 2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008,
+   2009, 2010 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -19,6 +19,7 @@
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
 #include "defs.h"
+#include "i386-nat.h"
 #include "inferior.h"
 #include "gdbcore.h"
 #include "regcache.h"
@@ -450,7 +451,8 @@ static int store_fpxregs (const struct regcache *regcache, int tid, int regno) {
    registers).  */
 
 static void
-i386_linux_fetch_inferior_registers (struct regcache *regcache, int regno)
+i386_linux_fetch_inferior_registers (struct target_ops *ops,
+				     struct regcache *regcache, int regno)
 {
   int tid;
 
@@ -483,7 +485,7 @@ i386_linux_fetch_inferior_registers (struct regcache *regcache, int regno)
       /* The call above might reset `have_ptrace_getregs'.  */
       if (!have_ptrace_getregs)
 	{
-	  i386_linux_fetch_inferior_registers (regcache, regno);
+	  i386_linux_fetch_inferior_registers (ops, regcache, regno);
 	  return;
 	}
 
@@ -522,7 +524,8 @@ i386_linux_fetch_inferior_registers (struct regcache *regcache, int regno)
    do this for all registers (including the floating point and SSE
    registers).  */
 static void
-i386_linux_store_inferior_registers (struct regcache *regcache, int regno)
+i386_linux_store_inferior_registers (struct target_ops *ops,
+				     struct regcache *regcache, int regno)
 {
   int tid;
 
@@ -583,6 +586,8 @@ i386_linux_store_inferior_registers (struct regcache *regcache, int regno)
 
 static unsigned long i386_linux_dr[DR_CONTROL + 1];
 
+/* Get debug register REGNUM value from only the one LWP of PTID.  */
+
 static unsigned long
 i386_linux_dr_get (ptid_t ptid, int regnum)
 {
@@ -611,6 +616,8 @@ i386_linux_dr_get (ptid_t ptid, int regnum)
   return value;
 }
 
+/* Set debug register REGNUM to VALUE in only the one LWP of PTID.  */
+
 static void
 i386_linux_dr_set (ptid_t ptid, int regnum, unsigned long value)
 {
@@ -627,7 +634,9 @@ i386_linux_dr_set (ptid_t ptid, int regnum, unsigned long value)
     perror_with_name (_("Couldn't write debug register"));
 }
 
-void
+/* Set DR_CONTROL to ADDR in all LWPs of LWP_LIST.  */
+
+static void
 i386_linux_dr_set_control (unsigned long control)
 {
   struct lwp_info *lp;
@@ -638,7 +647,9 @@ i386_linux_dr_set_control (unsigned long control)
     i386_linux_dr_set (ptid, DR_CONTROL, control);
 }
 
-void
+/* Set address REGNUM (zero based) to ADDR in all LWPs of LWP_LIST.  */
+
+static void
 i386_linux_dr_set_addr (int regnum, CORE_ADDR addr)
 {
   struct lwp_info *lp;
@@ -651,16 +662,38 @@ i386_linux_dr_set_addr (int regnum, CORE_ADDR addr)
     i386_linux_dr_set (ptid, DR_FIRSTADDR + regnum, addr);
 }
 
-void
+/* Set address REGNUM (zero based) to zero in all LWPs of LWP_LIST.  */
+
+static void
 i386_linux_dr_reset_addr (int regnum)
 {
   i386_linux_dr_set_addr (regnum, 0);
 }
 
-unsigned long
+/* Get DR_STATUS from only the one LWP of INFERIOR_PTID.  */
+
+static unsigned long
 i386_linux_dr_get_status (void)
 {
   return i386_linux_dr_get (inferior_ptid, DR_STATUS);
+}
+
+/* Unset MASK bits in DR_STATUS in all LWPs of LWP_LIST.  */
+
+static void
+i386_linux_dr_unset_status (unsigned long mask)
+{
+  struct lwp_info *lp;
+  ptid_t ptid;
+
+  ALL_LWPS (lp, ptid)
+    {
+      unsigned long value;
+      
+      value = i386_linux_dr_get (ptid, DR_STATUS);
+      value &= ~mask;
+      i386_linux_dr_set (ptid, DR_STATUS, value);
+    }
 }
 
 static void
@@ -744,22 +777,30 @@ static const unsigned char linux_syscall[] = { 0xcd, 0x80 };
    If SIGNAL is nonzero, give it that signal.  */
 
 static void
-i386_linux_resume (ptid_t ptid, int step, enum target_signal signal)
+i386_linux_resume (struct target_ops *ops,
+		   ptid_t ptid, int step, enum target_signal signal)
 {
   int pid = PIDGET (ptid);
 
-  int request = PTRACE_CONT;
+  int request;
+
+  if (catch_syscall_enabled () > 0)
+   request = PTRACE_SYSCALL;
+  else
+    request = PTRACE_CONT;
 
   if (step)
     {
       struct regcache *regcache = get_thread_regcache (pid_to_ptid (pid));
+      struct gdbarch *gdbarch = get_regcache_arch (regcache);
+      enum bfd_endian byte_order = gdbarch_byte_order (gdbarch);
       ULONGEST pc;
       gdb_byte buf[LINUX_SYSCALL_LEN];
 
       request = PTRACE_SINGLESTEP;
 
-      regcache_cooked_read_unsigned
-	(regcache, gdbarch_pc_regnum (get_regcache_arch (regcache)), &pc);
+      regcache_cooked_read_unsigned (regcache,
+				     gdbarch_pc_regnum (gdbarch), &pc);
 
       /* Returning from a signal trampoline is done by calling a
          special system call (sigreturn or rt_sigreturn, see
@@ -770,7 +811,7 @@ i386_linux_resume (ptid_t ptid, int step, enum target_signal signal)
          that's about to be restored, and set the trace flag there.  */
 
       /* First check if PC is at a system call.  */
-      if (read_memory_nobpt (pc, buf, LINUX_SYSCALL_LEN) == 0
+      if (target_read_memory (pc, buf, LINUX_SYSCALL_LEN) == 0
 	  && memcmp (buf, linux_syscall, LINUX_SYSCALL_LEN) == 0)
 	{
 	  ULONGEST syscall;
@@ -785,7 +826,7 @@ i386_linux_resume (ptid_t ptid, int step, enum target_signal signal)
 
 	      regcache_cooked_read_unsigned (regcache, I386_ESP_REGNUM, &sp);
 	      if (syscall == SYS_rt_sigreturn)
-		addr = read_memory_integer (sp + 8, 4) + 20;
+		addr = read_memory_integer (sp + 8, 4, byte_order) + 20;
 	      else
 		addr = sp;
 
@@ -819,6 +860,15 @@ _initialize_i386_linux_nat (void)
 
   /* Fill in the generic GNU/Linux methods.  */
   t = linux_target ();
+
+  i386_use_watchpoints (t);
+
+  i386_dr_low.set_control = i386_linux_dr_set_control;
+  i386_dr_low.set_addr = i386_linux_dr_set_addr;
+  i386_dr_low.reset_addr = i386_linux_dr_reset_addr;
+  i386_dr_low.get_status = i386_linux_dr_get_status;
+  i386_dr_low.unset_status = i386_linux_dr_unset_status;
+  i386_set_debug_register_length (4);
 
   /* Override the default ptrace resume method.  */
   t->to_resume = i386_linux_resume;

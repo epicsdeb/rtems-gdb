@@ -1,6 +1,7 @@
 /* Header file for GDB command decoding library.
 
-   Copyright (c) 2000, 2003, 2007, 2008 Free Software Foundation, Inc.
+   Copyright (c) 2000, 2003, 2007, 2008, 2009, 2010
+   Free Software Foundation, Inc.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -125,7 +126,7 @@ struct cmd_list_element
     /* Hook for another command to be executed after this command.  */
     struct cmd_list_element *hook_post;
 
-    /* Flag that specifies if this command is already running it's hook.  */
+    /* Flag that specifies if this command is already running its hook.  */
     /* Prevents the possibility of hook recursion.  */
     int hook_in;
 
@@ -163,7 +164,12 @@ struct cmd_list_element
        returned relative to this position.  For example, suppose TEXT is "foo"
        and we want to complete to "foobar".  If WORD is "oo", return
        "oobar"; if WORD is "baz/foo", return "baz/foobar".  */
-    char **(*completer) (char *text, char *word);
+    char **(*completer) (struct cmd_list_element *cmd, char *text, char *word);
+
+    /* Destruction routine for this command.  If non-NULL, this is
+       called when this command instance is destroyed.  This may be
+       used to finalize the CONTEXT field, if needed.  */
+    void (*destroyer) (struct cmd_list_element *self, void *context);
 
     /* Type of "set" or "show" command (or SET_NOT_SET if not "set"
        or "show").  */
@@ -193,6 +199,12 @@ struct cmd_list_element
     /* Pointer to command that is aliased by this one, so the
        aliased command can be located in case it has been hooked.  */
     struct cmd_list_element *cmd_pointer;
+
+    /* Start of a linked list of all aliases of this command.  */
+    struct cmd_list_element *aliases;
+
+    /* Link pointer for aliases on an alias list.  */
+    struct cmd_list_element *alias_chain;
   };
 
 /* API to the manipulation of command lists.  */
@@ -232,7 +244,8 @@ extern void set_cmd_sfunc (struct cmd_list_element *cmd,
 					  struct cmd_list_element * c));
 
 extern void set_cmd_completer (struct cmd_list_element *cmd,
-			       char **(*completer) (char *text, char *word));
+			       char **(*completer) (struct cmd_list_element *self,
+						    char *text, char *word));
 
 /* HACK: cagney/2002-02-23: Code, mostly in tracepoints.c, grubs
    around in cmd objects to test the value of the commands sfunc().  */
@@ -278,8 +291,6 @@ extern struct cmd_list_element *add_info_alias (char *, char *, int);
 extern char **complete_on_cmdlist (struct cmd_list_element *, char *, char *);
 
 extern char **complete_on_enum (const char *enumlist[], char *, char *);
-
-extern void delete_cmd (char *, struct cmd_list_element **);
 
 extern void help_cmd_list (struct cmd_list_element *, enum command_class,
 			   char *, int, struct ui_file *);

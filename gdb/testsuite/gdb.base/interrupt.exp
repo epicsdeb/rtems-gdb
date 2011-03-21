@@ -1,4 +1,4 @@
-# Copyright 1994, 1995, 1996, 1997, 1998, 1999, 2000, 2007, 2008
+# Copyright 1994, 1995, 1996, 1997, 1998, 1999, 2000, 2007, 2008, 2009, 2010
 # Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
@@ -13,9 +13,6 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
-
-# Please email any bugs, comments, and/or additions to this file to:
-# bug-gdb@prep.ai.mit.edu
 
 if [target_info exists gdb,nointerrupts] {
     verbose "Skipping interrupt.exp because of nointerrupts."
@@ -37,7 +34,13 @@ set bug_id 0
 set testfile interrupt
 set srcfile ${testfile}.c
 set binfile ${objdir}/${subdir}/${testfile}
-if  { [gdb_compile "${srcdir}/${subdir}/${srcfile}" "${binfile}" executable {debug}] != "" } {
+
+set options { debug }
+if { ! [target_info exists gdb,nosignals] } {
+    lappend options "additional_flags=-DSIGNALS"
+}
+
+if  { [gdb_compile "${srcdir}/${subdir}/${srcfile}" "${binfile}" executable $options] != "" } {
      untested interrupt.exp
      return -1
 }
@@ -164,11 +167,40 @@ if ![file exists $binfile] then {
         # here.
 	gdb_expect {
 	    -re "^(\r\n|)data\r\n(|data\r\n)$" { pass "echo data" }
+	    -re "Undefined command.*$gdb_prompt " { fail "echo data" }
 	    timeout { fail "echo data (timeout)" }
 	    eof { fail "echo data (eof)" }
 	}
 
-	setup_xfail "i*86-pc-linux*-gnu*"
+ 	if { ! [target_info exists gdb,nosignals] } {
+	    # Wait until the program is in the read system call again.
+	    sleep 2
+
+	    # Stop the program for another test.
+	    set msg "Send Control-C, second time"
+	    send_gdb "\003"
+	    gdb_test_multiple "" "$msg" {
+		-re "Program received signal SIGINT.*$gdb_prompt $" {
+		    pass "$msg"
+		}
+	    }
+
+	    # The "signal" command should deliver the correct signal and
+	    # return to the loop.
+	    set msg "signal SIGINT"
+	    gdb_test_multiple "signal SIGINT" "$msg" {
+		-re "^signal SIGINT\r\nContinuing with signal SIGINT.\r\n(\r\n|)$" { pass "$msg" }
+	    }
+
+	    # We should be back in the loop.
+	    send_gdb "more data\n"
+	    gdb_expect {
+		-re "^(\r\n|)more data\r\n(|more data\r\n)$" { pass "echo more data" }
+		timeout { fail "echo more data (timeout)" }
+		eof { fail "echo more data (eof)" }
+	    }
+	}
+
 	send_gdb "\004"
 	gdb_expect {
 	    -re "end of file.*Program exited normally.*$gdb_prompt $" {

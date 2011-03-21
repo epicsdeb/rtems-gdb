@@ -1,6 +1,6 @@
 /* mem.h --- interface to memory for M32C simulator.
 
-Copyright (C) 2005, 2007, 2008 Free Software Foundation, Inc.
+Copyright (C) 2005, 2007, 2008, 2009, 2010 Free Software Foundation, Inc.
 Contributed by Red Hat, Inc.
 
 This file is part of the GNU simulators.
@@ -39,3 +39,7 @@ unsigned long mem_get_si (int address);
 void mem_get_blk (int address, void *bufptr, int nbytes);
 
 int sign_ext (int v, int bits);
+
+void m32c_sim_restore_console ();
+
+extern int m32c_use_raw_console;

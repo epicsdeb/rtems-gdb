@@ -1,7 +1,7 @@
 /* TUI data manipulation routines.
 
-   Copyright (C) 1998, 1999, 2000, 2001, 2002, 2003, 2004, 2006, 2007, 2008
-   Free Software Foundation, Inc.
+   Copyright (C) 1998, 1999, 2000, 2001, 2002, 2003, 2004, 2006, 2007, 2008,
+   2009, 2010 Free Software Foundation, Inc.
 
    Contributed by Hewlett-Packard Company.
 
@@ -211,6 +211,7 @@ tui_clear_win_detail (struct tui_win_info *win_info)
 	{
 	case SRC_WIN:
 	case DISASSEM_WIN:
+	  win_info->detail.source_info.gdbarch = NULL;
 	  win_info->detail.source_info.start_line_or_addr.loa = LOA_ADDRESS;
 	  win_info->detail.source_info.start_line_or_addr.u.addr = 0;
 	  win_info->detail.source_info.horizontal_offset = 0;
@@ -483,7 +484,7 @@ tui_init_generic_part (struct tui_gen_win_info *win)
 
 /* init_content_element().
  */
-void
+static void
 init_content_element (struct tui_win_element *element, 
 		      enum tui_win_type type)
 {
@@ -532,7 +533,7 @@ init_content_element (struct tui_win_element *element,
     }
 }
 
-void
+static void
 init_win_info (struct tui_win_info *win_info)
 {
   tui_init_generic_part (&win_info->generic);
@@ -545,6 +546,7 @@ init_win_info (struct tui_win_info *win_info)
       win_info->detail.source_info.execution_info = (struct tui_gen_win_info *) NULL;
       win_info->detail.source_info.has_locator = FALSE;
       win_info->detail.source_info.horizontal_offset = 0;
+      win_info->detail.source_info.gdbarch = NULL;
       win_info->detail.source_info.start_line_or_addr.loa = LOA_ADDRESS;
       win_info->detail.source_info.start_line_or_addr.u.addr = 0;
       win_info->detail.source_info.filename = 0;

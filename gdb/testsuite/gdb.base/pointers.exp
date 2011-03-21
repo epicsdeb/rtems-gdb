@@ -1,4 +1,5 @@
-# Copyright 1998, 1999, 2000, 2007, 2008 Free Software Foundation, Inc.
+# Copyright 1998, 1999, 2000, 2007, 2008, 2009, 2010
+# Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -12,9 +13,6 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
-
-# Please email any bugs, comments, and/or additions to this file to:
-# bug-gdb@prep.ai.mit.edu
 
 # This file was written by Elena Zannoni (ezannoni@cygnus.com)
 
@@ -515,7 +513,7 @@ gdb_expect {
 
 send_gdb "print *pF\n"
 gdb_expect {
-    -re ".\[0-9\]* = 1.2\[0-9\]*e\\+10.*$gdb_prompt $" {
+    -re ".\[0-9\]* = 1.2\[0-9\]*e\\+0?10.*$gdb_prompt $" {
         pass "print value of *pF"
       }
     -re ".*$gdb_prompt $" { fail "print value of *pF" }
@@ -532,7 +530,7 @@ gdb_expect {
 
 send_gdb "print *pD\n"
 gdb_expect {
-    -re ".\[0-9\]* = -1.2\[0-9\]*e\\-37.*$gdb_prompt $" {
+    -re ".\[0-9\]* = -1.2\[0-9\]*e\\-0?37.*$gdb_prompt $" {
         pass "print value of *pD"
       }
     -re ".*$gdb_prompt $" { fail "print value of *pD" }
@@ -599,3 +597,7 @@ gdb_expect {
     timeout             { fail "(timeout) ptype ppppppC" }
 }
 
+# Regression test for a crash.
+
+gdb_test "p instance.array_variable + 0" \
+  " = \\(long int \\*\\) 0x\[0-9a-f\]*"

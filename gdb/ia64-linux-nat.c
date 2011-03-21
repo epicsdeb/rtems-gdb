@@ -1,8 +1,8 @@
 /* Functions specific to running gdb native on IA-64 running
    GNU/Linux.
 
-   Copyright (C) 1999, 2000, 2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008
-   Free Software Foundation, Inc.
+   Copyright (C) 1999, 2000, 2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008,
+   2009, 2010 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -718,7 +718,8 @@ ia64_linux_fetch_register (struct regcache *regcache, int regnum)
    for all registers.  */
 
 static void
-ia64_linux_fetch_registers (struct regcache *regcache, int regnum)
+ia64_linux_fetch_registers (struct target_ops *ops,
+			    struct regcache *regcache, int regnum)
 {
   if (regnum == -1)
     for (regnum = 0;
@@ -775,7 +776,8 @@ ia64_linux_store_register (const struct regcache *regcache, int regnum)
    this for all registers.  */
 
 static void
-ia64_linux_store_registers (struct regcache *regcache, int regnum)
+ia64_linux_store_registers (struct target_ops *ops,
+			    struct regcache *regcache, int regnum)
 {
   if (regnum == -1)
     for (regnum = 0;
@@ -810,7 +812,7 @@ void _initialize_ia64_linux_nat (void);
 void
 _initialize_ia64_linux_nat (void)
 {
-  struct target_ops *t = linux_target ();
+  struct target_ops *t;
 
   /* Fill in the generic GNU/Linux methods.  */
   t = linux_target ();
