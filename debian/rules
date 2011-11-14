@@ -69,20 +69,12 @@ clean:
 
 	dh clean --after auto_clean
 
-tprefix=$(CURDIR)/debian/gdb-$(1)-rtems$(RTEMS_VER)/usr
-
 install: build
 	dh install --before auto_install
 
-	$(MAKE) -C build-powerpc prefix=$(call tprefix,powerpc) install
+	$(MAKE) -C build-powerpc prefix=$(CURDIR)/debian/tmp/usr install
 
-	rm -rf $(call tprefix,powerpc)/lib
-	rm -rf $(call tprefix,powerpc)/share/info
-
-	$(MAKE) -C build-i386 prefix=$(call tprefix,i386) install
-
-	rm -rf $(call tprefix,i386)/lib
-	rm -rf $(call tprefix,i386)/share/info
+	$(MAKE) -C build-i386 prefix=$(CURDIR)/debian/tmp/usr install
 
 	dh install --after auto_install
 
