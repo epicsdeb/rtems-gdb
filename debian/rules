@@ -1,0 +1,97 @@
+#!/usr/bin/make -f
+# -*- makefile -*-
+# Sample debian/rules that uses debhelper.
+# This file was originally written by Joey Hess and Craig Small.
+# As a special exception, when this file is copied by dh-make into a
+# dh-make output file, you may use that output file without restriction.
+# This special exception was added by Craig Small in version 0.37 of dh-make.
+
+# Uncomment this to turn on verbose mode.
+#export DH_VERBOSE=1
+
+ifeq (,$(findstring debug,$(DEB_BUILD_OPTIONS)))
+CFLAGS:=$(filter-out -g,$(CFLAGS))
+endif
+
+ifneq (,$(filter parallel=%,$(DEB_BUILD_OPTIONS)))
+NUMJOBS = $(patsubst parallel=%,%,$(filter parallel=%,$(DEB_BUILD_OPTIONS)))
+PMAKEFLAGS += -j$(NUMJOBS)
+endif
+
+RTEMS_VER =4.10
+
+# These are used for cross-compiling and for saving the configure script
+# from having to guess our platform (since we know it already)
+DEB_HOST_GNU_TYPE   ?= $(shell dpkg-architecture -qDEB_HOST_GNU_TYPE)
+DEB_BUILD_GNU_TYPE  ?= $(shell dpkg-architecture -qDEB_BUILD_GNU_TYPE)
+DEB_TARGET_GNU_TYPE = $(1)-rtems$(RTEMS_VER)
+CONFIG= --target $(call DEB_TARGET_GNU_TYPE,$(1)) --build $(DEB_BUILD_GNU_TYPE) --host $(DEB_HOST_GNU_TYPE) \
+--prefix=/usr --mandir=\$${prefix}/share/man --infodir=\$${prefix}/share/info \
+--disable-nls --with-system-zlib \
+--enable-sim --enable-sim-$(RTEMS_ARCH) --enable-sim-timebase --enable-sim-hardware \
+--disable-werror --with-python --with-expat \
+CFLAGS="$(CFLAGS)" LDFLAGS="-Wl,-z,defs"
+
+
+build: build-stamp
+
+build-stamp:
+
+	dh build --before auto_configure
+
+ifneq "$(wildcard /usr/share/misc/config.sub)" ""
+	cp -f /usr/share/misc/config.sub config.sub
+endif
+ifneq "$(wildcard /usr/share/misc/config.guess)" ""
+	cp -f /usr/share/misc/config.guess config.guess
+endif
+
+	install -d build-powerpc
+	cd build-powerpc && ../configure $(call CONFIG,powerpc)
+	install -d build-i386
+	cd build-i386 && ../configure $(call CONFIG,i386)
+
+	$(MAKE) -C build-powerpc $(PMAKEFLAGS)
+	$(MAKE) -C build-i386 $(PMAKEFLAGS)
+ 
+	dh build --after auto_test
+	touch $@
+
+clean: 
+	dh clean --before auto_clean
+
+	rm -f build-stamp 
+
+	rm -rf build-powerpc
+	rm -rf build-i386
+
+	rm -f config.sub config.guess
+
+	dh clean --after auto_clean
+
+tprefix=$(CURDIR)/debian/gdb-$(1)-rtems$(RTEMS_VER)/usr
+
+install: build
+	dh install --before auto_install
+
+	$(MAKE) -C build-powerpc prefix=$(call tprefix,powerpc) install
+
+	rm -rf $(call tprefix,powerpc)/lib
+	rm -rf $(call tprefix,powerpc)/share/info
+
+	$(MAKE) -C build-i386 prefix=$(call tprefix,i386) install
+
+	rm -rf $(call tprefix,i386)/lib
+	rm -rf $(call tprefix,i386)/share/info
+
+	dh install --after auto_install
+
+
+binary-indep: #install
+	#dh binary-indep
+
+binary-arch: install
+	dh binary-arch
+
+binary: binary-indep binary-arch
+.PHONY: build clean binary-indep binary-arch binary install 

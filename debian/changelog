@@ -1,0 +1,32 @@
+gdb-rtems4.10 (7.1-1) unstable; urgency=low
+
+  * New upstream gdb
+  * New RTEMS version
+  * Apply RTEMS patch 20100812
+  * Switch packaging source format to 3.0 (quilt)
+
+ -- Michael Davidsaver <mdavidsaver@bnl.gov>  Mon, 21 Mar 2011 14:54:46 -0400
+
+gdb-rtems4.9 (6.8-3) unstable; urgency=low
+
+  * Omit -Werror.  Causing (apparently) spurious build failures
+    with sbuild on squeeze.
+
+ -- Michael Davidsaver <mdavidsaver@bnl.gov>  Mon, 21 Mar 2011 09:58:34 -0400
+
+gdb-rtems4.9 (6.8-2) unstable; urgency=low
+
+  * Update Patches:
+     RTEMS gdb 20090923
+
+ -- Michael Davidsaver <mdavidsaver@bnl.gov>  Sun, 31 Jan 2010 14:51:38 -0500
+
+gdb-rtems4.9 (6.8-1) unstable; urgency=low
+
+  * Initial release
+  * Patches:
+  *  RTEMS 20080917 - rtems.com
+  *  GDB remote 20080730 - Till Straumann
+
+ -- Michael Davidsaver <mdavidsaver@bnl.gov>  Thu, 16 Apr 2009 13:41:42 -0400
+
