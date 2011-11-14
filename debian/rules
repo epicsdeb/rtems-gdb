@@ -79,8 +79,8 @@ install: build
 	dh install --after auto_install
 
 
-binary-indep: #install
-	#dh binary-indep
+binary-indep: install
+	dh binary-indep
 
 binary-arch: install
 	dh binary-arch
