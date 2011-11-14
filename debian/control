@@ -2,7 +2,7 @@ Source: gdb-rtems4.10
 Section: devel
 Priority: extra
 Maintainer: Michael Davidsaver <mdavidsaver@bnl.gov>
-Build-Depends: debhelper (>= 7), autotools-dev,
+Build-Depends: debhelper (>= 7), autotools-dev, texinfo,
                libncurses5-dev, libexpat1-dev,
                python-dev,
                gcc-powerpc-rtems4.10,
