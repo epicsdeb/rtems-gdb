@@ -56,7 +56,7 @@ m32c.c : m32c.opc opc2c
 	./opc2c -l m32c.out $(srcdir)/m32c.opc > m32c.c
 
 opc2c : opc2c.o safe-fgets.o
-	$(CC_FOR_BUILD) $(BUILD_CFLAGS) $(BUILD_LDFLAGS) $^ -o $@ $(BUILD_LIBS)
+	$(CC_FOR_BUILD) $(CFLAGS_FOR_BUILD) $(LDFLAGS_FOR_BUILD) $^ -o $@ $(BUILD_LIBS)
 
 sample.x : $(srcdir)/sample.S $(srcdir)/sample.ld
 	../../gcc/xgcc $(CPUFLAGS) -B../../gcc/ -c $(srcdir)/sample.S -o sample.o
@@ -90,8 +90,8 @@ syscalls.c : cpu.h mem.h syscalls.h
 r8c.o : cpu.h mem.h misc.h int.h
 
 opc2c.o : opc2c.c safe-fgets.h
-	$(CC_FOR_BUILD) $(BUILD_CFLAGS) -c $(srcdir)/opc2c.c
+	$(CC_FOR_BUILD) $(CFLAGS_FOR_BUILD) -o $@ -c $(srcdir)/opc2c.c
 
 safe-fgets.o : safe-fgets.c safe-fgets.h
-	$(CC_FOR_BUILD) $(BUILD_CFLAGS) -c $(srcdir)/safe-fgets.c
+	$(CC_FOR_BUILD) $(CFLAGS_FOR_BUILD) -o $@ -c $(srcdir)/safe-fgets.c
 

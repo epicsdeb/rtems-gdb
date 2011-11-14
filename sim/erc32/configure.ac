@@ -11,27 +11,32 @@ sinclude(../common/common.m4)
 
 AC_CHECK_HEADERS(stdlib.h)
 
-# In the Cygwin environment, we need some additional flags.
-AC_CACHE_CHECK([for cygwin], sim_cv_os_cygwin,
-[AC_EGREP_CPP(lose, [
-#ifdef __CYGWIN__
-lose
-#endif],[sim_cv_os_cygwin=yes],[sim_cv_os_cygwin=no])])
+AC_ARG_WITH([system-readline],
+  [AS_HELP_STRING([--with-system-readline],
+                  [use installed readline library])])
 
-if test x$sim_cv_os_cygwin = xyes; then
-  TERMCAP='`if test -r ../../libtermcap/libtermcap.a; then echo ../../libtermcap/libtermcap.a; else echo -ltermcap; fi` -luser32'
+if test "$with_system_readline" = yes; then
+  AC_MSG_CHECKING([for readline])
+  save_LIBS="$LIBS"
+  LIBS="-lreadline $save_LIBS"
+  AC_LINK_IFELSE([AC_LANG_CALL([],
+    [add_history])], [READLINE=-lreadline], 
+    [ LIBS="-lreadline -lncurses $save_LIBS"
+      AC_LINK_IFELSE([AC_LANG_CALL([],
+        [add_history])], [READLINE="-lreadline -lncurses"],
+        [AC_MSG_ERROR([unable to detect readline])])
+    ])
+  LIBS="$save_LIBS"
+  AC_MSG_RESULT($READLINE)
+  READLINE_DEPS=
+  READLINE_CFLAGS=
 else
-  AC_CHECK_LIB(termcap, main, TERMCAP=-ltermcap, TERMCAP="")
-fi
-AC_SUBST(TERMCAP)
-
-# We prefer the in-tree readline.  Top-level dependencies make sure
-# src/readline (if it's there) is configured before src/sim.
-if test -r ../../readline/Makefile; then
-  READLINE=../../readline/libreadline.a
-else
-  AC_CHECK_LIB(readline, readline, READLINE=-lreadline,
-	       AC_ERROR([the required "readline" library is missing]), $TERMCAP)
+  READLINE='../../readline/libreadline.a -lncurses'
+  READLINE_DEPS='$(READLINE)'
+  READLINE_CFLAGS='-I$(READLINE_SRC)/..'
 fi
 AC_SUBST(READLINE)
+AC_SUBST(READLINE_DEPS)
+AC_SUBST(READLINE_CFLAGS)
+
 SIM_AC_OUTPUT
