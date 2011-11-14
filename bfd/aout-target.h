@@ -1,6 +1,6 @@
 /* Define a target vector and some small routines for a variant of a.out.
    Copyright 1990, 1991, 1992, 1993, 1994, 1995, 1996, 1997, 1998, 1999,
-   2000, 2001, 2002, 2003, 2004, 2005, 2007, 2009
+   2000, 2001, 2002, 2003, 2004, 2005, 2007, 2009, 2010
    Free Software Foundation, Inc.
 
    This file is part of BFD, the Binary File Descriptor library.
@@ -400,6 +400,9 @@ MY_bfd_final_link (bfd *abfd, struct bfd_link_info *info)
 #ifndef	MY_core_file_matches_executable_p
 #define	MY_core_file_matches_executable_p	\
 				_bfd_nocore_core_file_matches_executable_p
+#endif
+#ifndef	MY_core_file_pid
+#define	MY_core_file_pid _bfd_nocore_core_file_pid
 #endif
 #ifndef	MY_core_file_p
 #define	MY_core_file_p		_bfd_dummy_target

@@ -373,6 +373,7 @@ CODE_FRAGMENT
 
 #define DOT_DEBUG	".debug"
 #define GNU_LINKONCE_WI ".gnu.linkonce.wi."
+#define GNU_LINKONCE_WT ".gnu.linkonce.wt."
 #define DOT_RELOC	".reloc"
 
 #if defined (COFF_LONG_SECTION_NAMES)
@@ -557,7 +558,8 @@ sec_to_styp_flags (const char *sec_name, flagword sec_flags)
       styp_flags = STYP_DEBUG_INFO;
     }
 #ifdef COFF_LONG_SECTION_NAMES
-  else if (CONST_STRNEQ (sec_name, GNU_LINKONCE_WI))
+  else if (CONST_STRNEQ (sec_name, GNU_LINKONCE_WI)
+  	   || CONST_STRNEQ (sec_name, GNU_LINKONCE_WT))
     {
       styp_flags = STYP_DEBUG_INFO;
     }
@@ -636,6 +638,15 @@ static long
 sec_to_styp_flags (const char *sec_name, flagword sec_flags)
 {
   long styp_flags = 0;
+  bfd_boolean is_dbg = FALSE;
+
+  if (CONST_STRNEQ (sec_name, DOT_DEBUG)
+#ifdef COFF_LONG_SECTION_NAMES
+      || CONST_STRNEQ (sec_name, GNU_LINKONCE_WI)
+      || CONST_STRNEQ (sec_name, GNU_LINKONCE_WT)
+#endif
+      || CONST_STRNEQ (sec_name, ".stab"))
+    is_dbg = TRUE;
 
   /* caution: there are at least three groups of symbols that have
      very similar bits and meanings: IMAGE_SCN*, SEC_*, and STYP_*.
@@ -646,16 +657,15 @@ sec_to_styp_flags (const char *sec_name, flagword sec_flags)
      but there are more IMAGE_SCN_* flags.  */
 
   /* FIXME: There is no gas syntax to specify the debug section flag.  */
-  if (CONST_STRNEQ (sec_name, DOT_DEBUG)
-      || CONST_STRNEQ (sec_name, GNU_LINKONCE_WI))
-    sec_flags = SEC_DEBUGGING | SEC_READONLY;
+  if (is_dbg)
+      sec_flags = SEC_DEBUGGING | SEC_READONLY;
 
   /* skip LOAD */
   /* READONLY later */
   /* skip RELOC */
   if ((sec_flags & SEC_CODE) != 0)
     styp_flags |= IMAGE_SCN_CNT_CODE;
-  if ((sec_flags & SEC_DATA) != 0)
+  if ((sec_flags & (SEC_DATA | SEC_DEBUGGING)) != 0)
     styp_flags |= IMAGE_SCN_CNT_INITIALIZED_DATA;
   if ((sec_flags & SEC_ALLOC) != 0 && (sec_flags & SEC_LOAD) == 0)
     styp_flags |= IMAGE_SCN_CNT_UNINITIALIZED_DATA;  /* ==STYP_BSS */
@@ -666,9 +676,9 @@ sec_to_styp_flags (const char *sec_name, flagword sec_flags)
     styp_flags |= IMAGE_SCN_LNK_COMDAT;
   if ((sec_flags & SEC_DEBUGGING) != 0)
     styp_flags |= IMAGE_SCN_MEM_DISCARDABLE;
-  if ((sec_flags & SEC_EXCLUDE) != 0)
+  if ((sec_flags & SEC_EXCLUDE) != 0 && !is_dbg)
     styp_flags |= IMAGE_SCN_LNK_REMOVE;
-  if ((sec_flags & SEC_NEVER_LOAD) != 0)
+  if ((sec_flags & SEC_NEVER_LOAD) != 0 && !is_dbg)
     styp_flags |= IMAGE_SCN_LNK_REMOVE;
   /* skip IN_MEMORY */
   /* skip SORT */
@@ -792,6 +802,7 @@ styp_to_sec_flags (bfd *abfd ATTRIBUTE_UNUSED,
 #endif
 #ifdef COFF_LONG_SECTION_NAMES
 	   || CONST_STRNEQ (name, GNU_LINKONCE_WI)
+	   || CONST_STRNEQ (name, GNU_LINKONCE_WT)
 #endif
 	   || CONST_STRNEQ (name, ".stab"))
     {
@@ -949,7 +960,7 @@ handle_COMDAT (bfd * abfd,
 
 		if (! ((isym.n_sclass == C_STAT
 			|| isym.n_sclass == C_EXT)
-		       && isym.n_type == T_NULL
+		       && BTYPE (isym.n_type) == T_NULL
 		       && isym.n_value == 0))
 		  abort ();
 
@@ -1120,7 +1131,15 @@ styp_to_sec_flags (bfd *abfd,
   long styp_flags = internal_s->s_flags;
   flagword sec_flags;
   bfd_boolean result = TRUE;
+  bfd_boolean is_dbg = FALSE;
 
+  if (CONST_STRNEQ (name, DOT_DEBUG)
+#ifdef COFF_LONG_SECTION_NAMES
+      || CONST_STRNEQ (name, GNU_LINKONCE_WI)
+      || CONST_STRNEQ (name, GNU_LINKONCE_WT)
+#endif
+      || CONST_STRNEQ (name, ".stab"))
+    is_dbg = TRUE;
   /* Assume read only unless IMAGE_SCN_MEM_WRITE is specified.  */
   sec_flags = SEC_READONLY;
 
@@ -1190,27 +1209,30 @@ styp_to_sec_flags (bfd *abfd,
 	     mean that a given section contains debug information.  Thus
 	     we only set the SEC_DEBUGGING flag on sections that we
 	     recognise as containing debug information.  */
-	     if (CONST_STRNEQ (name, DOT_DEBUG)
+	     if (is_dbg
 #ifdef _COMMENT
 	      || strcmp (name, _COMMENT) == 0
 #endif
-#ifdef COFF_LONG_SECTION_NAMES
-  	      || CONST_STRNEQ (name, GNU_LINKONCE_WI)
-#endif
-	      || CONST_STRNEQ (name, ".stab"))
-	    sec_flags |= SEC_DEBUGGING;
+	      )
+	    {
+	      sec_flags |= SEC_DEBUGGING | SEC_READONLY;
+	    }
 	  break;
 	case IMAGE_SCN_MEM_SHARED:
 	  sec_flags |= SEC_COFF_SHARED;
 	  break;
 	case IMAGE_SCN_LNK_REMOVE:
-	  sec_flags |= SEC_EXCLUDE;
+	  if (!is_dbg)
+	    sec_flags |= SEC_EXCLUDE;
 	  break;
 	case IMAGE_SCN_CNT_CODE:
 	  sec_flags |= SEC_CODE | SEC_ALLOC | SEC_LOAD;
 	  break;
 	case IMAGE_SCN_CNT_INITIALIZED_DATA:
-	  sec_flags |= SEC_DATA | SEC_ALLOC | SEC_LOAD;
+	  if (is_dbg)
+	    sec_flags |= SEC_DEBUGGING;
+	  else
+	    sec_flags |= SEC_DATA | SEC_ALLOC | SEC_LOAD;
 	  break;
 	case IMAGE_SCN_CNT_UNINITIALIZED_DATA:
 	  sec_flags |= SEC_ALLOC;
@@ -1838,12 +1860,14 @@ coff_set_alignment_hook (bfd * abfd ATTRIBUTE_UNUSED,
       file_ptr oldpos = bfd_tell (abfd);
       bfd_size_type relsz = bfd_coff_relsz (abfd);
 
-      bfd_seek (abfd, (file_ptr) hdr->s_relptr, 0);
+      if (bfd_seek (abfd, (file_ptr) hdr->s_relptr, 0) != 0)
+	return;
       if (bfd_bread (& dst, relsz, abfd) != relsz)
 	return;
 
       coff_swap_reloc_in (abfd, &dst, &n);
-      bfd_seek (abfd, oldpos, 0);
+      if (bfd_seek (abfd, oldpos, 0) != 0)
+	return;
       section->reloc_count = hdr->s_nreloc = n.r_vaddr - 1;
       section->rel_filepos += relsz;
     }
@@ -2092,22 +2116,6 @@ coff_set_arch_mach_hook (bfd *abfd, void * filehdr)
 #endif
       arch = bfd_arch_m68k;
       machine = bfd_mach_m68020;
-      break;
-#endif
-#ifdef MAXQ20MAGIC
-    case MAXQ20MAGIC:
-      arch = bfd_arch_maxq;
-      switch (internal_f->f_flags & F_MACHMASK)
-	{
-	case F_MAXQ10:
-	  machine = bfd_mach_maxq10;
-	  break;
-	case F_MAXQ20:
-	  machine = bfd_mach_maxq20;
-	  break;
-	default:
-	  return FALSE;
-	}
       break;
 #endif
 #ifdef MC88MAGIC
@@ -2648,7 +2656,7 @@ coff_write_relocs (bfd * abfd, int first_undef)
 	     entries know which symbol index they point to.  So we
 	     have to look up the output symbol here.  */
 
-	  if (q->sym_ptr_ptr[0]->the_bfd != abfd)
+	  if (q->sym_ptr_ptr[0] != NULL && q->sym_ptr_ptr[0]->the_bfd != abfd)
 	    {
 	      int j;
 	      const char *sname = q->sym_ptr_ptr[0]->name;
@@ -2677,7 +2685,7 @@ coff_write_relocs (bfd * abfd, int first_undef)
 	    n.r_symndx = q->addend;
 	  else
 #endif
-	    if (q->sym_ptr_ptr)
+	    if (q->sym_ptr_ptr && q->sym_ptr_ptr[0] != NULL)
 	      {
 #ifdef SECTION_RELATIVE_ABSOLUTE_SYMBOL_P
 		if (SECTION_RELATIVE_ABSOLUTE_SYMBOL_P (q, s))
@@ -3018,17 +3026,6 @@ coff_set_flags (bfd * abfd,
       return TRUE;
 #endif
 
-#ifdef MAXQ20MAGIC
-    case bfd_arch_maxq:
-      * magicp = MAXQ20MAGIC;
-      switch (bfd_get_mach (abfd))
-	{
-	case bfd_mach_maxq10: * flagsp = F_MAXQ10; return TRUE;
-	case bfd_mach_maxq20: * flagsp = F_MAXQ20; return TRUE;
-	default:	      return FALSE;
-	}
-#endif
-
     default:			/* Unknown architecture.  */
       /* Fall through to "return FALSE" below, to avoid
 	 "statement never reached" errors on the one below.  */
@@ -3090,11 +3087,11 @@ static bfd_boolean
 coff_compute_section_file_positions (bfd * abfd)
 {
   asection *current;
-  asection *previous = NULL;
   file_ptr sofar = bfd_coff_filhsz (abfd);
   bfd_boolean align_adjust;
   int target_index;
 #ifdef ALIGN_SECTIONS_IN_FILE
+  asection *previous = NULL;
   file_ptr old_sofar;
 #endif
 
@@ -3408,7 +3405,9 @@ coff_compute_section_file_positions (bfd * abfd)
 	bfd_set_section_vma (abfd, current, 0);
 #endif
 
+#ifdef ALIGN_SECTIONS_IN_FILE
       previous = current;
+#endif
     }
 
   /* It is now safe to write to the output file.  If we needed an
@@ -3533,7 +3532,9 @@ coff_write_object_contents (bfd * abfd)
   asection *current;
   bfd_boolean hasrelocs = FALSE;
   bfd_boolean haslinno = FALSE;
+#ifdef COFF_IMAGE_WITH_PE
   bfd_boolean hasdebug = FALSE;
+#endif
   file_ptr scn_base;
   file_ptr reloc_base;
   file_ptr lineno_base;
@@ -3636,9 +3637,9 @@ coff_write_object_contents (bfd * abfd)
        current = current->next)
     {
       struct internal_scnhdr section;
+#ifdef COFF_IMAGE_WITH_PE
       bfd_boolean is_reloc_section = FALSE;
 
-#ifdef COFF_IMAGE_WITH_PE
       if (strcmp (current->name, DOT_RELOC) == 0)
 	{
 	  is_reloc_section = TRUE;
@@ -3737,9 +3738,11 @@ coff_write_object_contents (bfd * abfd)
 #endif
       if (current->lineno_count != 0)
 	haslinno = TRUE;
+#ifdef COFF_IMAGE_WITH_PE
       if ((current->flags & SEC_DEBUGGING) != 0
 	  && ! is_reloc_section)
 	hasdebug = TRUE;
+#endif
 
 #ifdef RS6000COFF_C
 #ifndef XCOFF64
@@ -4103,11 +4106,6 @@ coff_write_object_contents (bfd * abfd)
 #ifdef OR32
 #define __A_MAGIC_SET__
     internal_a.magic = NMAGIC; /* Assume separate i/d.  */
-#endif
-
-#ifdef MAXQ20MAGIC
-#define __A_MAGIC_SET__
-      internal_a.magic = MAXQ20MAGIC;
 #endif
 
 #ifndef __A_MAGIC_SET__
@@ -4513,7 +4511,7 @@ coff_slurp_line_table (bfd *abfd, asection *asect)
 	    {
 	      (*_bfd_error_handler)
 		(_("%B: warning: illegal symbol index %ld in line numbers"),
-		 abfd, dst.l_addr.l_symndx);
+		 abfd, (long) symndx);
 	      symndx = 0;
 	      warned = TRUE;
 	    }
@@ -4856,7 +4854,7 @@ coff_slurp_symbol_table (bfd * abfd)
 		 to the symbol instead of the index.  FIXME: This
 		 should use a union.  */
 	      src->u.syment.n_value =
-		(long) (native_symbols + src->u.syment.n_value);
+		(long) (intptr_t) (native_symbols + src->u.syment.n_value);
 	      dst->symbol.value = src->u.syment.n_value;
 	      src->fix_value = 1;
 	      break;
@@ -4898,6 +4896,11 @@ coff_slurp_symbol_table (bfd * abfd)
 		  && src->u.syment.n_value == 0
 		  && src->u.syment.n_scnum == 0)
 		break;
+#ifdef RS6000COFF_C
+              /* XCOFF specific: deleted entry.  */
+              if (src->u.syment.n_value == C_NULL_VALUE)
+                break;
+#endif
 	      /* Fall through.  */
 	    case C_EXTDEF:	/* External definition.  */
 	    case C_ULABEL:	/* Undefined label.  */
@@ -5149,7 +5152,7 @@ coff_slurp_reloc_table (bfd * abfd, sec_ptr asect, asymbol ** symbols)
 	    {
 	      (*_bfd_error_handler)
 		(_("%B: warning: illegal symbol index %ld in relocs"),
-		 abfd, dst.r_symndx);
+		 abfd, (long) dst.r_symndx);
 	      cache_ptr->sym_ptr_ptr = bfd_abs_section_ptr->symbol_ptr_ptr;
 	      ptr = NULL;
 	    }
@@ -5175,6 +5178,7 @@ coff_slurp_reloc_table (bfd * abfd, sec_ptr asect, asymbol ** symbols)
 
       /* Calculate any reloc addend by looking at the symbol.  */
       CALC_ADDEND (abfd, ptr, dst, cache_ptr);
+      (void) ptr;
 
       cache_ptr->address -= asect->vma;
       /* !! cache_ptr->section = NULL;*/

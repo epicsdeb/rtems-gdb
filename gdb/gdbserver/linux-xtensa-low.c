@@ -1,5 +1,5 @@
 /* GNU/Linux/Xtensa specific low level interface, for the remote server for GDB.
-   Copyright 2007, 2008, 2009, 2010 Free Software Foundation, Inc.
+   Copyright 2007, 2008, 2009, 2010, 2011 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -131,13 +131,13 @@ xtensa_store_xtregset (struct regcache *regcache, const void *buf)
 }
 
 struct regset_info target_regsets[] = {
-  { PTRACE_GETREGS, PTRACE_SETREGS, sizeof (elf_gregset_t),
+  { PTRACE_GETREGS, PTRACE_SETREGS, 0, sizeof (elf_gregset_t),
     GENERAL_REGS,
     xtensa_fill_gregset, xtensa_store_gregset },
-  { PTRACE_GETXTREGS, PTRACE_SETXTREGS, XTENSA_ELF_XTREG_SIZE,
+  { PTRACE_GETXTREGS, PTRACE_SETXTREGS, 0, XTENSA_ELF_XTREG_SIZE,
     EXTENDED_REGS,
     xtensa_fill_xtregset, xtensa_store_xtregset },
-  { 0, 0, -1, -1, NULL, NULL }
+  { 0, 0, 0, -1, -1, NULL, NULL }
 };
 
 #if XCHAL_HAVE_BE
@@ -172,7 +172,8 @@ xtensa_breakpoint_at (CORE_ADDR where)
 
     (*the_target->read_memory) (where, (unsigned char *) &insn,
 				xtensa_breakpoint_len);
-    return memcmp((char *)&insn, xtensa_breakpoint, xtensa_breakpoint_len) == 0;
+    return memcmp((char *) &insn,
+		  xtensa_breakpoint, xtensa_breakpoint_len) == 0;
 }
 
 struct linux_target_ops the_low_target = {

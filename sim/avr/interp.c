@@ -1,5 +1,5 @@
 /* Simulator for Atmel's AVR core.
-   Copyright (C) 2009, 2010 Free Software Foundation, Inc.
+   Copyright (C) 2009, 2010, 2011 Free Software Foundation, Inc.
    Written by Tristan Gingold, AdaCore.
 
    This file is part of GDB, the GNU debugger.
@@ -1622,7 +1622,7 @@ sim_trace (SIM_DESC sd)
 }
 
 int
-sim_write (SIM_DESC sd, SIM_ADDR addr, unsigned char *buffer, int size)
+sim_write (SIM_DESC sd, SIM_ADDR addr, const unsigned char *buffer, int size)
 {
   int osize = size;
 

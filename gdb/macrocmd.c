@@ -1,5 +1,6 @@
 /* C preprocessor macro expansion commands for GDB.
-   Copyright (C) 2002, 2007, 2008, 2009, 2010 Free Software Foundation, Inc.
+   Copyright (C) 2002, 2007, 2008, 2009, 2010, 2011
+   Free Software Foundation, Inc.
    Contributed by Red Hat, Inc.
 
    This file is part of GDB.
@@ -50,6 +51,7 @@ macro_expand_command (char *exp, int from_tty)
   struct macro_scope *ms = NULL;
   char *expanded = NULL;
   struct cleanup *cleanup_chain = make_cleanup (free_current_contents, &ms);
+
   make_cleanup (free_current_contents, &expanded);
 
   /* You know, when the user doesn't specify any expression, it would be
@@ -249,6 +251,7 @@ free_macro_definition_ptr (void *ptr)
 {
   int i;
   struct macro_definition *loc = (struct macro_definition *) ptr;
+
   for (i = 0; i < loc->argc; ++i)
     xfree ((char *) loc->argv[i]);
   xfree ((char *) loc->argv);
@@ -296,7 +299,7 @@ macro_define_command (char *exp, int from_tty)
 	    {
 	      alloced *= 2;
 	      argv = (char **) xrealloc (argv, alloced * sizeof (char *));
-	      /* Must update new_macro as well... */
+	      /* Must update new_macro as well...  */
 	      new_macro.argv = (const char * const *) argv;
 	    }
 	  argv[new_macro.argc] = extract_identifier (&exp, 1);
@@ -362,6 +365,7 @@ print_one_macro (const char *name, const struct macro_definition *macro,
   if (macro->kind == macro_function_like)
     {
       int i;
+
       fprintf_filtered (gdb_stdout, "(");
       for (i = 0; i < macro->argc; ++i)
 	fprintf_filtered (gdb_stdout, "%s%s", (i > 0) ? ", " : "",
@@ -387,8 +391,6 @@ extern initialize_file_ftype _initialize_macrocmd; /* -Wmissing-prototypes */
 void
 _initialize_macrocmd (void)
 {
-  struct cmd_list_element *c;
-
   /* We introduce a new command prefix, `macro', under which we'll put
      the various commands for working with preprocessor macros.  */
   add_prefix_cmd ("macro", class_info, macro_command,

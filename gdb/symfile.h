@@ -1,7 +1,7 @@
 /* Definitions for reading symbol files into GDB.
 
    Copyright (C) 1990, 1991, 1992, 1993, 1994, 1995, 1996, 1997, 1998, 1999,
-   2000, 2001, 2002, 2003, 2004, 2007, 2008, 2009, 2010
+   2000, 2001, 2002, 2003, 2004, 2007, 2008, 2009, 2010, 2011
    Free Software Foundation, Inc.
 
    This file is part of GDB.
@@ -31,6 +31,11 @@ struct objfile;
 struct obj_section;
 struct obstack;
 struct block;
+
+/* Comparison function for symbol look ups.  */
+
+typedef int (symbol_compare_ftype) (const char *string1,
+				    const char *string2);
 
 /* Partial symbols are stored in the psymbol_cache and pointers to
    them are kept in a dynamically grown array that is obtained from
@@ -75,7 +80,7 @@ struct section_addr_info
   /* The number of sections for which address information is
      available.  */
   size_t num_sections;
-  /* Sections whose names are file format dependent. */
+  /* Sections whose names are file format dependent.  */
   struct other_sections
   {
     CORE_ADDR addr;
@@ -111,6 +116,180 @@ struct symfile_segment_data
   int *segment_info;
 };
 
+/* The "quick" symbol functions exist so that symbol readers can
+   avoiding an initial read of all the symbols.  For example, symbol
+   readers might choose to use the "partial symbol table" utilities,
+   which is one implementation of the quick symbol functions.
+
+   The quick symbol functions are generally opaque: the underlying
+   representation is hidden from the caller.
+
+   In general, these functions should only look at whatever special
+   index the symbol reader creates -- looking through the symbol
+   tables themselves is handled by generic code.  If a function is
+   defined as returning a "symbol table", this means that the function
+   should only return a newly-created symbol table; it should not
+   examine pre-existing ones.
+
+   The exact list of functions here was determined in an ad hoc way
+   based on gdb's history.  */
+
+struct quick_symbol_functions
+{
+  /* Return true if this objfile has any "partial" symbols
+     available.  */
+  int (*has_symbols) (struct objfile *objfile);
+
+  /* Return the symbol table for the "last" file appearing in
+     OBJFILE.  */
+  struct symtab *(*find_last_source_symtab) (struct objfile *objfile);
+
+  /* Forget all cached full file names for OBJFILE.  */
+  void (*forget_cached_source_info) (struct objfile *objfile);
+
+  /* Look up the symbol table, in OBJFILE, of a source file named
+     NAME.  If there is no '/' in the name, a match after a '/' in the
+     symbol table's file name will also work.  FULL_PATH is the
+     absolute file name, and REAL_PATH is the same, run through
+     gdb_realpath.
+
+     If no such symbol table can be found, returns 0.
+
+     Otherwise, sets *RESULT to the symbol table and returns 1.  This
+     might return 1 and set *RESULT to NULL if the requested file is
+     an include file that does not have a symtab of its own.  */
+  int (*lookup_symtab) (struct objfile *objfile,
+			const char *name,
+			const char *full_path,
+			const char *real_path,
+			struct symtab **result);
+
+  /* Check to see if the symbol is defined in a "partial" symbol table
+     of OBJFILE.  KIND should be either GLOBAL_BLOCK or STATIC_BLOCK,
+     depending on whether we want to search global symbols or static
+     symbols.  NAME is the name of the symbol to look for.  DOMAIN
+     indicates what sort of symbol to search for.
+
+     Returns the newly-expanded symbol table in which the symbol is
+     defined, or NULL if no such symbol table exists.  */
+  struct symtab *(*lookup_symbol) (struct objfile *objfile,
+				   int kind, const char *name,
+				   domain_enum domain);
+
+  /* This is called to expand symbol tables before looking up a
+     symbol.  A backend can choose to implement this and then have its
+     `lookup_symbol' hook always return NULL, or the reverse.  (It
+     doesn't make sense to implement both.)  The arguments are as for
+     `lookup_symbol'.  */
+  void (*pre_expand_symtabs_matching) (struct objfile *objfile,
+				       int kind, const char *name,
+				       domain_enum domain);
+
+  /* Print statistics about any indices loaded for OBJFILE.  The
+     statistics should be printed to gdb_stdout.  This is used for
+     "maint print statistics".  */
+  void (*print_stats) (struct objfile *objfile);
+
+  /* Dump any indices loaded for OBJFILE.  The dump should go to
+     gdb_stdout.  This is used for "maint print objfiles".  */
+  void (*dump) (struct objfile *objfile);
+
+  /* This is called by objfile_relocate to relocate any indices loaded
+     for OBJFILE.  */
+  void (*relocate) (struct objfile *objfile,
+		    struct section_offsets *new_offsets,
+		    struct section_offsets *delta);
+
+  /* Find all the symbols in OBJFILE named FUNC_NAME, and ensure that
+     the corresponding symbol tables are loaded.  */
+  void (*expand_symtabs_for_function) (struct objfile *objfile,
+				       const char *func_name);
+
+  /* Read all symbol tables associated with OBJFILE.  */
+  void (*expand_all_symtabs) (struct objfile *objfile);
+
+  /* Read all symbol tables associated with OBJFILE which have the
+     file name FILENAME.
+     This is for the purposes of examining code only, e.g., expand_line_sal.
+     The routine may ignore debug info that is known to not be useful with
+     code, e.g., DW_TAG_type_unit for dwarf debug info.  */
+  void (*expand_symtabs_with_filename) (struct objfile *objfile,
+					const char *filename);
+
+  /* Return the file name of the file holding the symbol in OBJFILE
+     named NAME.  If no such symbol exists in OBJFILE, return NULL.  */
+  const char *(*find_symbol_file) (struct objfile *objfile, const char *name);
+
+  /* Find global or static symbols in all tables that are in NAMESPACE 
+     and for which MATCH (symbol name, NAME) == 0, passing each to 
+     CALLBACK, reading in partial symbol symbol tables as needed.  Look
+     through global symbols if GLOBAL and otherwise static symbols.
+     Passes NAME, NAMESPACE, and DATA to CALLBACK with each symbol
+     found.  After each block is processed, passes NULL to CALLBACK.
+     MATCH must be weaker than strcmp_iw in the sense that
+     strcmp_iw(x,y) == 0 --> MATCH(x,y) == 0.  ORDERED_COMPARE, if
+     non-null, must be an ordering relation compatible with strcmp_iw
+     in the sense that  
+            strcmp(x,y) == 0 --> ORDERED_COMPARE(x,y) == 0 
+     and 
+            strcmp(x,y) <= 0 --> ORDERED_COMPARE(x,y) <= 0
+     (allowing strcmp(x,y) < 0 while ORDERED_COMPARE(x, y) == 0).
+     CALLBACK returns 0 to indicate that the scan should continue, or
+     non-zero to indicate that the scan should be terminated.  */
+
+  void (*map_matching_symbols) (const char *name, domain_enum namespace,
+				struct objfile *, int global,
+				int (*callback) (struct block *,
+						 struct symbol *, void *),
+				void *data,
+				symbol_compare_ftype *match,
+				symbol_compare_ftype *ordered_compare);
+
+  /* Expand all symbol tables in OBJFILE matching some criteria.
+
+     FILE_MATCHER is called for each file in OBJFILE.  The file name
+     and the DATA argument are passed to it.  If it returns zero, this
+     file is skipped.  If FILE_MATCHER is NULL such file is not skipped.
+
+     Otherwise, if KIND does not match this symbol is skipped.
+     
+     If even KIND matches, then NAME_MATCHER is called for each symbol defined
+     in the file.  The symbol's "natural" name and DATA are passed to
+     NAME_MATCHER.
+
+     If NAME_MATCHER returns zero, then this symbol is skipped.
+
+     Otherwise, this symbol's symbol table is expanded.
+
+     DATA is user data that is passed unmodified to the callback
+     functions.  */
+  void (*expand_symtabs_matching) (struct objfile *objfile,
+				   int (*file_matcher) (const char *, void *),
+				   int (*name_matcher) (const char *, void *),
+				   domain_enum kind,
+				   void *data);
+
+  /* Return the symbol table from OBJFILE that contains PC and
+     SECTION.  Return NULL if there is no such symbol table.  This
+     should return the symbol table that contains a symbol whose
+     address exactly matches PC, or, if there is no exact match, the
+     symbol table that contains a symbol whose address is closest to
+     PC.  */
+  struct symtab *(*find_pc_sect_symtab) (struct objfile *objfile,
+					 struct minimal_symbol *msymbol,
+					 CORE_ADDR pc,
+					 struct obj_section *section,
+					 int warn_if_readin);
+
+  /* Call a callback for every file defined in OBJFILE whose symtab is
+     not already read in.  FUN is the callback.  It is passed the file's name,
+     the file's full name, and the DATA passed to this function.  */
+  void (*map_symbol_filenames) (struct objfile *objfile,
+				void (*fun) (const char *, const char *,
+					     void *),
+				void *data);
+};
+
 /* Structure to keep track of symbol reading functions for various
    object file types.  */
 
@@ -140,6 +319,13 @@ struct sym_fns
      symbol_file_add & co.  */
 
   void (*sym_read) (struct objfile *, int);
+
+  /* Read the partial symbols for an objfile.  This may be NULL, in which case
+     gdb has to check other ways if this objfile has any symbols.  This may
+     only be non-NULL if the objfile actually does have debuginfo available.
+     */
+
+  void (*sym_read_psymbols) (struct objfile *);
 
   /* Called when we are finished with an objfile.  Should do all
      cleanup that is specific to the object file format for the
@@ -174,17 +360,13 @@ struct sym_fns
 
   bfd_byte *(*sym_relocate) (struct objfile *, asection *sectp, bfd_byte *buf);
 
-  /* Finds the next struct sym_fns.  They are allocated and
-     initialized in whatever module implements the functions pointed
-     to; an initializer calls add_symtab_fns to add them to the global
-     chain.  */
-
-  struct sym_fns *next;
-
+  /* The "quick" (aka partial) symbol functions for this symbol
+     reader.  */
+  const struct quick_symbol_functions *qf;
 };
 
 extern struct section_addr_info *
-	   build_section_addr_info_from_objfile (const struct objfile *objfile);
+  build_section_addr_info_from_objfile (const struct objfile *objfile);
 
 extern void relative_addr_info_to_section_offsets
   (struct section_offsets *section_offsets, int num_sections,
@@ -210,27 +392,9 @@ extern struct symfile_segment_data *default_symfile_segments (bfd *abfd);
 extern bfd_byte *default_symfile_relocate (struct objfile *objfile,
                                            asection *sectp, bfd_byte *buf);
 
-extern void extend_psymbol_list (struct psymbol_allocation_list *,
-				 struct objfile *);
+extern struct symtab *allocate_symtab (const char *, struct objfile *);
 
-/* Add any kind of symbol to a psymbol_allocation_list.  */
-
-/* #include "demangle.h" */
-
-extern const
-struct partial_symbol *add_psymbol_to_list (char *, int, int, domain_enum,
-					    enum address_class,
-					    struct psymbol_allocation_list *,
-					    long, CORE_ADDR,
-					    enum language, struct objfile *);
-
-extern void init_psymbol_list (struct objfile *, int);
-
-extern void sort_pst_symbols (struct partial_symtab *);
-
-extern struct symtab *allocate_symtab (char *, struct objfile *);
-
-extern void add_symtab_fns (struct sym_fns *);
+extern void add_symtab_fns (const struct sym_fns *);
 
 /* This enum encodes bit-flags passed as ADD_FLAGS parameter to
    syms_from_objfile, symbol_file_add, etc.  */
@@ -245,7 +409,11 @@ enum symfile_add_flags
     SYMFILE_MAINLINE = 1 << 2,
 
     /* Do not call breakpoint_re_set when adding this symbol file.  */
-    SYMFILE_DEFER_BP_RESET = 1 << 3
+    SYMFILE_DEFER_BP_RESET = 1 << 3,
+
+    /* Do not immediately read symbols for this file.  By default,
+       symbols are read when the objfile is created.  */
+    SYMFILE_NO_READ = 1 << 4
   };
 
 extern void syms_from_objfile (struct objfile *,
@@ -285,23 +453,18 @@ extern struct section_addr_info
 extern void free_section_addr_info (struct section_addr_info *);
 
 
-extern struct partial_symtab *start_psymtab_common (struct objfile *,
-						    struct section_offsets *,
-						    const char *, CORE_ADDR,
-						    struct partial_symbol **,
-						    struct partial_symbol **);
-
 /* Make a copy of the string at PTR with SIZE characters in the symbol
    obstack (and add a null character at the end in the copy).  Returns
    the address of the copy.  */
 
 extern char *obsavestring (const char *, int, struct obstack *);
 
-/* Concatenate strings S1, S2 and S3; return the new string.  Space is
-   found in the OBSTACKP  */
+/* Concatenate NULL terminated variable argument list of `const char
+   *' strings; return the new string.  Space is found in the OBSTACKP.
+   Argument list must be terminated by a sentinel expression `(char *)
+   NULL'.  */
 
-extern char *obconcat (struct obstack *obstackp, const char *, const char *,
-		       const char *);
+extern char *obconcat (struct obstack *obstackp, ...) ATTRIBUTE_SENTINEL;
 
 			/*   Variables   */
 
@@ -317,23 +480,9 @@ extern char *obconcat (struct obstack *obstackp, const char *, const char *,
 
 extern int auto_solib_add;
 
-/* For systems that support it, a threshold size in megabytes.  If
-   automatically adding a new library's symbol table to those already
-   known to the debugger would cause the total shared library symbol
-   size to exceed this threshhold, then the shlib's symbols are not
-   added.  The threshold is ignored if the user explicitly asks for a
-   shlib to be added, such as when using the "sharedlibrary" command.  */
-
-extern int auto_solib_limit;
-
 /* From symfile.c */
 
 extern void set_initial_language (void);
-
-extern struct partial_symtab *allocate_psymtab (const char *,
-						struct objfile *);
-
-extern void discard_psymtab (struct partial_symtab *);
 
 extern void find_lowest_section (bfd *, asection *, void *);
 
@@ -399,10 +548,13 @@ extern int symfile_map_offsets_to_segments (bfd *,
 struct symfile_segment_data *get_symfile_segment_data (bfd *abfd);
 void free_symfile_segment_data (struct symfile_segment_data *data);
 
+extern struct cleanup *increment_reading_symtab (void);
+
 /* From dwarf2read.c */
 
 extern int dwarf2_has_info (struct objfile *);
 
+extern int dwarf2_initialize_objfile (struct objfile *);
 extern void dwarf2_build_psymtabs (struct objfile *);
 extern void dwarf2_build_frame_info (struct objfile *);
 

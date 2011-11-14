@@ -7,12 +7,12 @@ START-INFO-DIR-ENTRY
 END-INFO-DIR-ENTRY
 
    Copyright (C) 1990, 1991, 1992, 1993, 1994, 1996, 1998, 1999, 2000,
-2001, 2002, 2003, 2004, 2005, 2006, 2008, 2009, 2010 Free Software
-Foundation, Inc.  Contributed by Cygnus Solutions.  Written by John
-Gilmore.  Second Edition by Stan Shebs.
+2001, 2002, 2003, 2004, 2005, 2006, 2008, 2009, 2010, 2011 Free
+Software Foundation, Inc.  Contributed by Cygnus Solutions.  Written by
+John Gilmore.  Second Edition by Stan Shebs.
 
    Permission is granted to copy, distribute and/or modify this document
-under the terms of the GNU Free Documentation License, Version 1.1 or
+under the terms of the GNU Free Documentation License, Version 1.3 or
 any later version published by the Free Software Foundation; with no
 Invariant Sections, with no Front-Cover Texts, and with no Back-Cover
 Texts.  A copy of the license is included in the section entitled "GNU
@@ -21,12 +21,12 @@ Free Documentation License".
    This file documents the internals of the GNU debugger GDB.
 
    Copyright (C) 1990, 1991, 1992, 1993, 1994, 1996, 1998, 1999, 2000,
-2001, 2002, 2003, 2004, 2005, 2006, 2008, 2009, 2010 Free Software
-Foundation, Inc.  Contributed by Cygnus Solutions.  Written by John
-Gilmore.  Second Edition by Stan Shebs.
+2001, 2002, 2003, 2004, 2005, 2006, 2008, 2009, 2010, 2011 Free
+Software Foundation, Inc.  Contributed by Cygnus Solutions.  Written by
+John Gilmore.  Second Edition by Stan Shebs.
 
    Permission is granted to copy, distribute and/or modify this document
-under the terms of the GNU Free Documentation License, Version 1.1 or
+under the terms of the GNU Free Documentation License, Version 1.3 or
 any later version published by the Free Software Foundation; with no
 Invariant Sections, with no Front-Cover Texts, and with no Back-Cover
 Texts.  A copy of the license is included in the section entitled "GNU
@@ -200,12 +200,20 @@ emitted.
      The thread's ptid has changed.  The OLD_PTID parameter specifies
      the old value, and NEW_PTID specifies the new value.
 
- -- Function: void inferior_appeared (int PID)
-     GDB has attached to a new inferior identified by PID.
+ -- Function: void inferior_added (struct inferior *INF)
+     The inferior INF has been added to the list of inferiors.  At this
+     point, it might not be associated with any process.
 
- -- Function: void inferior_exit (int PID)
-     Either GDB detached from the inferior, or the inferior exited.
-     The argument PID identifies the inferior.
+ -- Function: void inferior_appeared (struct inferior *INF)
+     The inferior identified by INF has been attached to a process.
+
+ -- Function: void inferior_exit (struct inferior *INF)
+     Either the inferior associated with INF has been detached from the
+     process, or the process has exited.
+
+ -- Function: void inferior_removed (struct inferior *INF)
+     The inferior INF has been removed from the list of inferiors.
+     This method is called immediately before freeing INF.
 
  -- Function: void memory_changed (CORE_ADDR ADDR, int LEN, const
           bfd_byte *DATA)
@@ -222,10 +230,10 @@ File: gdbint.info,  Node: GNU Free Documentation License,  Next: Index,  Prev: G
 Appendix B GNU Free Documentation License
 *****************************************
 
-                      Version 1.2, November 2002
+                     Version 1.3, 3 November 2008
 
-     Copyright (C) 2000,2001,2002 Free Software Foundation, Inc.
-     51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
+     Copyright (C) 2000, 2001, 2002, 2007, 2008 Free Software Foundation, Inc.
+     `http://fsf.org/'
 
      Everyone is permitted to copy and distribute verbatim copies
      of this license document, but changing it is not allowed.
@@ -326,6 +334,9 @@ Appendix B GNU Free Documentation License
      works in formats which do not have any title page as such, "Title
      Page" means the text near the most prominent appearance of the
      work's title, preceding the beginning of the body of the text.
+
+     The "publisher" means any person or entity that distributes copies
+     of the Document to the public.
 
      A section "Entitled XYZ" means a named subunit of the Document
      whose title either is precisely XYZ or contains XYZ in parentheses
@@ -592,12 +603,29 @@ Appendix B GNU Free Documentation License
   9. TERMINATION
 
      You may not copy, modify, sublicense, or distribute the Document
-     except as expressly provided for under this License.  Any other
-     attempt to copy, modify, sublicense or distribute the Document is
-     void, and will automatically terminate your rights under this
-     License.  However, parties who have received copies, or rights,
-     from you under this License will not have their licenses
-     terminated so long as such parties remain in full compliance.
+     except as expressly provided under this License.  Any attempt
+     otherwise to copy, modify, sublicense, or distribute it is void,
+     and will automatically terminate your rights under this License.
+
+     However, if you cease all violation of this License, then your
+     license from a particular copyright holder is reinstated (a)
+     provisionally, unless and until the copyright holder explicitly
+     and finally terminates your license, and (b) permanently, if the
+     copyright holder fails to notify you of the violation by some
+     reasonable means prior to 60 days after the cessation.
+
+     Moreover, your license from a particular copyright holder is
+     reinstated permanently if the copyright holder notifies you of the
+     violation by some reasonable means, this is the first time you have
+     received notice of violation of this License (for any work) from
+     that copyright holder, and you cure the violation prior to 30 days
+     after your receipt of the notice.
+
+     Termination of your rights under this section does not terminate
+     the licenses of parties who have received copies or rights from
+     you under this License.  If your rights have been terminated and
+     not permanently reinstated, receipt of a copy of some or all of
+     the same material does not give you any rights to use it.
 
  10. FUTURE REVISIONS OF THIS LICENSE
 
@@ -615,10 +643,44 @@ Appendix B GNU Free Documentation License
      published (not as a draft) by the Free Software Foundation.  If
      the Document does not specify a version number of this License,
      you may choose any version ever published (not as a draft) by the
-     Free Software Foundation.
+     Free Software Foundation.  If the Document specifies that a proxy
+     can decide which future versions of this License can be used, that
+     proxy's public statement of acceptance of a version permanently
+     authorizes you to choose that version for the Document.
 
-B.1 ADDENDUM: How to use this License for your documents
-========================================================
+ 11. RELICENSING
+
+     "Massive Multiauthor Collaboration Site" (or "MMC Site") means any
+     World Wide Web server that publishes copyrightable works and also
+     provides prominent facilities for anybody to edit those works.  A
+     public wiki that anybody can edit is an example of such a server.
+     A "Massive Multiauthor Collaboration" (or "MMC") contained in the
+     site means any set of copyrightable works thus published on the MMC
+     site.
+
+     "CC-BY-SA" means the Creative Commons Attribution-Share Alike 3.0
+     license published by Creative Commons Corporation, a not-for-profit
+     corporation with a principal place of business in San Francisco,
+     California, as well as future copyleft versions of that license
+     published by that same organization.
+
+     "Incorporate" means to publish or republish a Document, in whole or
+     in part, as part of another Document.
+
+     An MMC is "eligible for relicensing" if it is licensed under this
+     License, and if all works that were first published under this
+     License somewhere other than this MMC, and subsequently
+     incorporated in whole or in part into the MMC, (1) had no cover
+     texts or invariant sections, and (2) were thus incorporated prior
+     to November 1, 2008.
+
+     The operator of an MMC Site may republish an MMC contained in the
+     site under CC-BY-SA on the same site at any time before August 1,
+     2009, provided the MMC is eligible for relicensing.
+
+
+ADDENDUM: How to use this License for your documents
+====================================================
 
 To use this License in a document you have written, include a copy of
 the License in the document and put the following copyright and license
@@ -626,7 +688,7 @@ notices just after the title page:
 
        Copyright (C)  YEAR  YOUR NAME.
        Permission is granted to copy, distribute and/or modify this document
-       under the terms of the GNU Free Documentation License, Version 1.2
+       under the terms of the GNU Free Documentation License, Version 1.3
        or any later version published by the Free Software Foundation;
        with no Invariant Sections, no Front-Cover Texts, and no Back-Cover
        Texts.  A copy of the license is included in the section entitled ``GNU
@@ -669,7 +731,7 @@ Index
 * _initialize_ARCH_tdep:                 How an Architecture is Represented.
                                                               (line  13)
 * _initialize_language:                  Language Support.    (line  79)
-* a.out format:                          Symbol Handling.     (line 213)
+* a.out format:                          Symbol Handling.     (line 218)
 * about_to_proceed:                      GDB Observers.       (line 133)
 * abstract interpretation of function prologues: Algorithms.  (line  48)
 * add_cmd:                               User Interface.      (line  21)
@@ -680,7 +742,7 @@ Index
 * adding a new host:                     Host Definition.     (line  13)
 * adding a symbol-reading module:        Symbol Handling.     (line  37)
 * adding a target:                       Adding a New Target. (line   6)
-* adding debugging info reader:          Symbol Handling.     (line 360)
+* adding debugging info reader:          Symbol Handling.     (line 365)
 * adding source language:                Language Support.    (line  17)
 * address classes:                       Address Classes.     (line   6)
 * address representation:                Pointers and Addresses.
@@ -703,8 +765,7 @@ Index
                                                               (line   6)
 * architecture_changed:                  GDB Observers.       (line 160)
 * Array Containers:                      Support Libraries.   (line 131)
-* assumptions about targets:             Coding.              (line 514)
-* ATTR_NORETURN:                         Host Definition.     (line 126)
+* assumptions about targets:             Misc Guidelines.     (line 334)
 * base of a frame:                       Frame Handling Terminology.
                                                               (line  28)
 * BFD library:                           Support Libraries.   (line   9)
@@ -724,26 +785,25 @@ Index
 * breakpoints:                           Algorithms.          (line 151)
 * bug-gdb mailing list:                  Getting Started.     (line  72)
 * build script:                          Debugging GDB.       (line  94)
-* C data types:                          Coding.              (line 389)
+* C data types:                          Coding Standards.    (line 105)
 * call frame information:                Algorithms.          (line  14)
 * call stack frame:                      Stack Frames.        (line   6)
 * calls to the inferior:                 Inferior Call Setup. (line   6)
-* CANNOT_STEP_HW_WATCHPOINTS:            Algorithms.          (line 408)
 * CC_HAS_LONG_LONG:                      Host Definition.     (line 105)
 * CFI (call frame information):          Algorithms.          (line  14)
-* checkpoints:                           Algorithms.          (line 604)
-* cleanups:                              Coding.              (line  12)
+* checkpoints:                           Algorithms.          (line 600)
+* cleanups:                              Misc Guidelines.     (line  12)
 * CLI:                                   User Interface.      (line  12)
 * code pointers, word-addressed:         Pointers and Addresses.
                                                               (line   6)
-* coding standards:                      Coding.              (line 215)
-* COFF debugging info:                   Symbol Handling.     (line 310)
-* COFF format:                           Symbol Handling.     (line 228)
+* coding standards:                      Coding Standards.    (line   6)
+* COFF debugging info:                   Symbol Handling.     (line 315)
+* COFF format:                           Symbol Handling.     (line 233)
 * command implementation:                Getting Started.     (line  60)
 * command interpreter:                   User Interface.      (line  12)
-* comment formatting:                    Coding.              (line 363)
-* compiler warnings:                     Coding.              (line 271)
-* Compressed DWARF 2 debugging info:     Symbol Handling.     (line 330)
+* comment formatting:                    Coding Standards.    (line  79)
+* compiler warnings:                     Misc Guidelines.     (line 252)
+* Compressed DWARF 2 debugging info:     Symbol Handling.     (line 335)
 * computed values:                       Values.              (line  35)
 * configure.tgt:                         How an Architecture is Represented.
                                                               (line  19)
@@ -764,29 +824,29 @@ Index
 * D10V addresses:                        Pointers and Addresses.
                                                               (line   6)
 * data output:                           User Interface.      (line 254)
-* data-pointer, per-architecture/per-module: Coding.          (line 100)
+* data-pointer, per-architecture/per-module: Misc Guidelines. (line 100)
 * debugging GDB:                         Debugging GDB.       (line   6)
 * DEFAULT_PROMPT:                        Host Definition.     (line  93)
 * deprecate_cmd:                         User Interface.      (line  32)
 * DEPRECATED_IBM6000_TARGET:             Defining Other Architecture Features.
                                                               (line 242)
 * deprecating commands:                  User Interface.      (line  32)
-* design:                                Coding.              (line 509)
+* design:                                Misc Guidelines.     (line 329)
 * DEV_TTY:                               Host Definition.     (line  96)
-* DIRNAME_SEPARATOR:                     Coding.              (line 579)
+* DIRNAME_SEPARATOR:                     Misc Guidelines.     (line 399)
 * DISABLE_UNSETTABLE_BREAK:              Defining Other Architecture Features.
                                                               (line 211)
-* discard_cleanups:                      Coding.              (line  39)
-* do_cleanups:                           Coding.              (line  35)
+* discard_cleanups:                      Misc Guidelines.     (line  39)
+* do_cleanups:                           Misc Guidelines.     (line  35)
 * DOS text files:                        Host Definition.     (line  87)
 * dummy frames:                          About Dummy Frames.  (line   6)
 * DW_AT_address_class:                   Address Classes.     (line   6)
 * DW_AT_byte_size:                       Address Classes.     (line   6)
-* DWARF 2 debugging info:                Symbol Handling.     (line 323)
-* DWARF 3 debugging info:                Symbol Handling.     (line 350)
-* ECOFF debugging info:                  Symbol Handling.     (line 316)
-* ECOFF format:                          Symbol Handling.     (line 243)
-* ELF format:                            Symbol Handling.     (line 276)
+* DWARF 2 debugging info:                Symbol Handling.     (line 328)
+* DWARF 3 debugging info:                Symbol Handling.     (line 355)
+* ECOFF debugging info:                  Symbol Handling.     (line 321)
+* ECOFF format:                          Symbol Handling.     (line 248)
+* ELF format:                            Symbol Handling.     (line 281)
 * evaluate_subexp:                       Language Support.    (line  58)
 * executable_changed:                    GDB Observers.       (line  85)
 * execution state:                       Managing Execution State.
@@ -797,11 +857,9 @@ Index
 * expression parser:                     Language Support.    (line  21)
 * extract_typed_address:                 Pointers and Addresses.
                                                               (line  52)
-* FDL, GNU Free Documentation License:   GNU Free Documentation License.
-                                                              (line   6)
 * field output functions:                User Interface.      (line 254)
-* file names, portability:               Coding.              (line 547)
-* FILENAME_CMP:                          Coding.              (line 573)
+* file names, portability:               Misc Guidelines.     (line 367)
+* FILENAME_CMP:                          Misc Guidelines.     (line 393)
 * find_pc_function:                      Symbol Handling.     (line 136)
 * find_pc_line:                          Symbol Handling.     (line 136)
 * find_sym_fns:                          Symbol Handling.     (line  32)
@@ -859,9 +917,9 @@ Index
 * frame_unwind_prepend_unwinder:         Stack Frames.        (line  30)
 * full symbol table:                     Symbol Handling.     (line 104)
 * function prologue:                     Prologue Caches.     (line   6)
-* function prototypes:                   Coding.              (line 411)
-* function usage:                        Coding.              (line 393)
-* fundamental types:                     Symbol Handling.     (line 178)
+* function prototypes:                   Coding Standards.    (line 127)
+* function usage:                        Coding Standards.    (line 109)
+* fundamental types:                     Symbol Handling.     (line 183)
 * GCC2_COMPILED_FLAG_SYMBOL:             Defining Other Architecture Features.
                                                               (line 225)
 * GCC_COMPILED_FLAG_SYMBOL:              Defining Other Architecture Features.
@@ -959,9 +1017,9 @@ Index
                                                               (line 195)
 * gdbarch_convert_register_p:            Register and Memory Data.
                                                               (line  30)
-* gdbarch_data:                          Coding.              (line 133)
-* gdbarch_data_register_post_init:       Coding.              (line 118)
-* gdbarch_data_register_pre_init:        Coding.              (line 108)
+* gdbarch_data:                          Misc Guidelines.     (line 133)
+* gdbarch_data_register_post_init:       Misc Guidelines.     (line 118)
+* gdbarch_data_register_pre_init:        Misc Guidelines.     (line 108)
 * gdbarch_decr_pc_after_break:           Defining Other Architecture Features.
                                                               (line 205)
 * gdbarch_deprecated_fp_regnum:          Defining Other Architecture Features.
@@ -1066,28 +1124,30 @@ Index
 * hardware breakpoints:                  Algorithms.          (line 158)
 * hardware watchpoints:                  Algorithms.          (line 280)
 * HAVE_CONTINUABLE_WATCHPOINT:           Algorithms.          (line 402)
-* HAVE_DOS_BASED_FILE_SYSTEM:            Coding.              (line 556)
+* HAVE_DOS_BASED_FILE_SYSTEM:            Misc Guidelines.     (line 376)
 * HAVE_STEPPABLE_WATCHPOINT:             Algorithms.          (line 386)
 * host:                                  Overall Structure.   (line  50)
 * host, adding:                          Host Definition.     (line  13)
-* i386_cleanup_dregs:                    Algorithms.          (line 580)
-* I386_DR_LOW_GET_STATUS:                Algorithms.          (line 493)
-* I386_DR_LOW_RESET_ADDR:                Algorithms.          (line 489)
-* I386_DR_LOW_SET_ADDR:                  Algorithms.          (line 486)
-* I386_DR_LOW_SET_CONTROL:               Algorithms.          (line 483)
-* i386_insert_hw_breakpoint:             Algorithms.          (line 568)
-* i386_insert_watchpoint:                Algorithms.          (line 540)
-* i386_region_ok_for_watchpoint:         Algorithms.          (line 518)
-* i386_remove_hw_breakpoint:             Algorithms.          (line 568)
-* i386_remove_watchpoint:                Algorithms.          (line 540)
-* i386_stopped_by_watchpoint:            Algorithms.          (line 532)
-* i386_stopped_data_address:             Algorithms.          (line 525)
-* I386_USE_GENERIC_WATCHPOINTS:          Algorithms.          (line 465)
+* i386_cleanup_dregs:                    Algorithms.          (line 576)
+* I386_DR_LOW_GET_STATUS:                Algorithms.          (line 489)
+* I386_DR_LOW_RESET_ADDR:                Algorithms.          (line 485)
+* I386_DR_LOW_SET_ADDR:                  Algorithms.          (line 482)
+* I386_DR_LOW_SET_CONTROL:               Algorithms.          (line 479)
+* i386_insert_hw_breakpoint:             Algorithms.          (line 564)
+* i386_insert_watchpoint:                Algorithms.          (line 536)
+* i386_region_ok_for_watchpoint:         Algorithms.          (line 514)
+* i386_remove_hw_breakpoint:             Algorithms.          (line 564)
+* i386_remove_watchpoint:                Algorithms.          (line 536)
+* i386_stopped_by_watchpoint:            Algorithms.          (line 528)
+* i386_stopped_data_address:             Algorithms.          (line 521)
+* I386_USE_GENERIC_WATCHPOINTS:          Algorithms.          (line 461)
 * in_dynsym_resolve_code:                Defining Other Architecture Features.
                                                               (line 263)
-* inferior_appeared:                     GDB Observers.       (line 169)
+* inferior_added:                        GDB Observers.       (line 169)
+* inferior_appeared:                     GDB Observers.       (line 173)
 * inferior_created:                      GDB Observers.       (line  92)
-* inferior_exit:                         GDB Observers.       (line 172)
+* inferior_exit:                         GDB Observers.       (line 176)
+* inferior_removed:                      GDB Observers.       (line 180)
 * inner_than:                            Functions and Variable to Analyze Frames.
                                                               (line  30)
 * innermost frame:                       Frame Handling Terminology.
@@ -1095,8 +1155,8 @@ Index
 * insert or remove hardware breakpoint:  Algorithms.          (line 234)
 * insert or remove hardware watchpoint:  Algorithms.          (line 347)
 * insert or remove software breakpoint:  Algorithms.          (line 211)
-* IS_ABSOLUTE_PATH:                      Coding.              (line 567)
-* IS_DIR_SEPARATOR:                      Coding.              (line 562)
+* IS_ABSOLUTE_PATH:                      Misc Guidelines.     (line 387)
+* IS_DIR_SEPARATOR:                      Misc Guidelines.     (line 382)
 * ISATTY:                                Host Definition.     (line  99)
 * item output functions:                 User Interface.      (line 254)
 * language parser:                       Language Support.    (line  25)
@@ -1105,8 +1165,8 @@ Index
 * length_of_subexp:                      Language Support.    (line  58)
 * libgdb:                                libgdb.              (line   9)
 * libiberty library:                     Support Libraries.   (line  52)
-* line wrap in output:                   Coding.              (line 191)
-* lint:                                  Host Definition.     (line 133)
+* line wrap in output:                   Misc Guidelines.     (line 191)
+* lint:                                  Host Definition.     (line 119)
 * list output functions:                 User Interface.      (line 131)
 * LITTLE_BREAKPOINT:                     Defining Other Architecture Features.
                                                               (line 100)
@@ -1115,16 +1175,16 @@ Index
 * lookup_symbol:                         Symbol Handling.     (line 142)
 * LSEEK_NOT_LINEAR:                      Host Definition.     (line 114)
 * lval_type enumeration, for values.:    Values.              (line  19)
-* make_cleanup:                          Coding.              (line  28)
+* make_cleanup:                          Misc Guidelines.     (line  28)
 * make_cleanup_ui_out_list_begin_end:    User Interface.      (line 247)
 * make_cleanup_ui_out_tuple_begin_end:   User Interface.      (line 223)
 * making a new release of gdb:           Releasing GDB.       (line   6)
 * memory representation:                 Register and Memory Data.
                                                               (line   6)
-* memory_changed:                        GDB Observers.       (line 177)
+* memory_changed:                        GDB Observers.       (line 185)
 * minimal symbol table:                  Symbol Handling.     (line 111)
 * minsymtabs:                            Symbol Handling.     (line 111)
-* multi-arch data:                       Coding.              (line 100)
+* multi-arch data:                       Misc Guidelines.     (line 100)
 * NATDEPFILES:                           Native Debugging.    (line   8)
 * native conditionals:                   Native Debugging.    (line  75)
 * native debugging:                      Native Debugging.    (line   6)
@@ -1135,13 +1195,12 @@ Index
 * new_thread:                            GDB Observers.       (line 114)
 * NEXT frame:                            Frame Handling Terminology.
                                                               (line  11)
-* NORETURN:                              Host Definition.     (line 119)
 * normal_stop:                           GDB Observers.       (line  76)
 * normal_stop observer:                  GDB Observers.       (line  48)
 * notification about inferior execution stop: GDB Observers.  (line  48)
-* notifications about changes in internals: Algorithms.       (line 634)
-* object file formats:                   Symbol Handling.     (line 210)
-* observer pattern interface:            Algorithms.          (line 634)
+* notifications about changes in internals: Algorithms.       (line 630)
+* object file formats:                   Symbol Handling.     (line 215)
+* observer pattern interface:            Algorithms.          (line 630)
 * observers implementation rationale:    GDB Observers.       (line   9)
 * obstacks:                              Support Libraries.   (line  69)
 * op_print_tab:                          Language Support.    (line  91)
@@ -1152,12 +1211,12 @@ Index
 * partial symbol table:                  Symbol Handling.     (line 114)
 * pc_regnum:                             Register Architecture Functions & Variables.
                                                               (line  58)
-* PE-COFF format:                        Symbol Handling.     (line 267)
-* per-architecture module data:          Coding.              (line 100)
+* PE-COFF format:                        Symbol Handling.     (line 272)
+* per-architecture module data:          Misc Guidelines.     (line 100)
 * pointer representation:                Pointers and Addresses.
                                                               (line   6)
-* portability:                           Coding.              (line 530)
-* portable file name handling:           Coding.              (line 547)
+* portability:                           Misc Guidelines.     (line 350)
+* portable file name handling:           Misc Guidelines.     (line 367)
 * porting to new machines:               Porting GDB.         (line   6)
 * prefixify_subexp:                      Language Support.    (line  58)
 * PREVIOUS frame:                        Frame Handling Terminology.
@@ -1234,7 +1293,7 @@ Index
 * representations, register and memory:  Register and Memory Data.
                                                               (line   6)
 * requirements for GDB:                  Requirements.        (line   6)
-* restart:                               Algorithms.          (line 604)
+* restart:                               Algorithms.          (line 600)
 * running the test suite:                Testsuite.           (line  19)
 * secondary symbol file:                 Symbol Handling.     (line  47)
 * sentinel frame <1>:                    Frame Handling Terminology.
@@ -1256,7 +1315,7 @@ Index
                                                               (line  12)
 * SKIP_SOLIB_RESOLVER:                   Defining Other Architecture Features.
                                                               (line 267)
-* SLASH_STRING:                          Coding.              (line 584)
+* SLASH_STRING:                          Misc Guidelines.     (line 404)
 * sniffing:                              Frame Handling Terminology.
                                                               (line  46)
 * software breakpoints:                  Algorithms.          (line 184)
@@ -1269,14 +1328,14 @@ Index
 * SOLIB_CREATE_INFERIOR_HOOK:            Native Debugging.    (line  92)
 * solib_loaded:                          GDB Observers.       (line  99)
 * solib_unloaded:                        GDB Observers.       (line 104)
-* SOM debugging info:                    Symbol Handling.     (line 355)
-* SOM format:                            Symbol Handling.     (line 286)
-* source code formatting:                Coding.              (line 323)
+* SOM debugging info:                    Symbol Handling.     (line 360)
+* SOM format:                            Symbol Handling.     (line 291)
+* source code formatting:                Coding Standards.    (line  28)
 * sp_regnum:                             Register Architecture Functions & Variables.
                                                               (line  49)
 * spaces, separate data and code address: Pointers and Addresses.
                                                               (line   6)
-* stabs debugging info:                  Symbol Handling.     (line 300)
+* stabs debugging info:                  Symbol Handling.     (line 305)
 * stack frame, definition of base of a frame: Frame Handling Terminology.
                                                               (line  28)
 * stack frame, definition of innermost frame: Frame Handling Terminology.
@@ -1298,7 +1357,7 @@ Index
 * START_INFERIOR_TRAPS_EXPECTED:         Native Debugging.    (line  96)
 * status register:                       Register Architecture Functions & Variables.
                                                               (line  69)
-* STOPPED_BY_WATCHPOINT:                 Algorithms.          (line 412)
+* STOPPED_BY_WATCHPOINT:                 Algorithms.          (line 408)
 * store_typed_address:                   Pointers and Addresses.
                                                               (line  70)
 * struct:                                GDB Observers.       (line  62)
@@ -1315,7 +1374,7 @@ Index
 * SYMBOL_RELOADING_DEFAULT:              Defining Other Architecture Features.
                                                               (line 454)
 * symtabs:                               Symbol Handling.     (line 104)
-* system dependencies:                   Coding.              (line 534)
+* system dependencies:                   Misc Guidelines.     (line 354)
 * table output functions:                User Interface.      (line 131)
 * target:                                Overall Structure.   (line  50)
 * target architecture definition:        Target Architecture Definition.
@@ -1347,7 +1406,7 @@ Index
 * terminal device:                       Host Definition.     (line  97)
 * test suite:                            Testsuite.           (line   6)
 * test suite organization:               Testsuite.           (line 195)
-* test_notification:                     GDB Observers.       (line 181)
+* test_notification:                     GDB Observers.       (line 189)
 * Testsuite Configuration:               Testsuite.           (line 167)
 * THIS frame:                            Frame Handling Terminology.
                                                               (line   9)
@@ -1358,8 +1417,8 @@ Index
 * tracepoint_deleted:                    GDB Observers.       (line 152)
 * tracepoint_modified:                   GDB Observers.       (line 156)
 * tuple output functions:                User Interface.      (line 131)
-* type codes:                            Symbol Handling.     (line 186)
-* types:                                 Coding.              (line 405)
+* type codes:                            Symbol Handling.     (line 191)
+* types:                                 Coding Standards.    (line 121)
 * ui_out functions:                      User Interface.      (line  47)
 * ui_out functions, usage examples:      User Interface.      (line 398)
 * ui_out_field_core_addr:                User Interface.      (line 287)
@@ -1404,17 +1463,17 @@ Index
 * vendor branches:                       Versions and Branches.
                                                               (line 108)
 * void:                                  GDB Observers.       (line  67)
-* volatile:                              Host Definition.     (line 136)
+* volatile:                              Host Definition.     (line 122)
 * watchpoints:                           Algorithms.          (line 274)
-* watchpoints, on x86:                   Algorithms.          (line 453)
-* watchpoints, with threads:             Algorithms.          (line 429)
+* watchpoints, on x86:                   Algorithms.          (line 449)
+* watchpoints, with threads:             Algorithms.          (line 425)
 * word-addressed machines:               Pointers and Addresses.
                                                               (line   6)
-* wrap_here:                             Coding.              (line 191)
+* wrap_here:                             Misc Guidelines.     (line 191)
 * write_pc:                              Register Architecture Functions & Variables.
                                                               (line  13)
 * writing tests:                         Testsuite.           (line 247)
-* x86 debug registers:                   Algorithms.          (line 453)
-* XCOFF format:                          Symbol Handling.     (line 251)
+* x86 debug registers:                   Algorithms.          (line 449)
+* XCOFF format:                          Symbol Handling.     (line 256)
 
 

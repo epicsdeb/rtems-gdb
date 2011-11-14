@@ -1,6 +1,6 @@
 /* opncls.c -- open and close a BFD.
    Copyright 1990, 1991, 1992, 1993, 1994, 1995, 1996, 1997, 1998, 2000,
-   2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008, 2009
+   2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008, 2009, 2010
    Free Software Foundation, Inc.
 
    Written by Cygnus Support.
@@ -38,9 +38,17 @@
 #define S_IXOTH 0001	/* Execute by others.  */
 #endif
 
-/* Counter used to initialize the bfd identifier.  */
+/* Counters used to initialize the bfd identifier.  */
 
-static unsigned int _bfd_id_counter = 0;
+static unsigned int bfd_id_counter = 0;
+static unsigned int bfd_reserved_id_counter = 0;
+
+/*
+CODE_FRAGMENT
+.{* Set to N to open the next N BFDs using an alternate id space.  *}
+.extern unsigned int bfd_use_reserved_id;
+*/
+unsigned int bfd_use_reserved_id = 0;
 
 /* fdopen is a loser -- we should use stdio exclusively.  Unfortunately
    if we do that we can't use fcntl.  */
@@ -56,7 +64,13 @@ _bfd_new_bfd (void)
   if (nbfd == NULL)
     return NULL;
 
-  nbfd->id = _bfd_id_counter++;
+  if (bfd_use_reserved_id)
+    {
+      nbfd->id = --bfd_reserved_id_counter;
+      --bfd_use_reserved_id;
+    }
+  else
+    nbfd->id = bfd_id_counter++;
 
   nbfd->memory = objalloc_create ();
   if (nbfd->memory == NULL)
@@ -696,20 +710,7 @@ bfd_close (bfd *abfd)
   if (! BFD_SEND (abfd, _close_and_cleanup, (abfd)))
     return FALSE;
 
-  if ((abfd->flags & BFD_IN_MEMORY) != 0)
-    {
-      /* FIXME: cagney/2004-02-15: Need to implement a BFD_IN_MEMORY io
-	 vector.
-	 Until that's done, at least don't leak memory.  */
-      struct bfd_in_memory *bim = (struct bfd_in_memory *) abfd->iostream;
-
-      if (bim->buffer != NULL)
-	free (bim->buffer);
-      free (bim);
-      ret = TRUE;
-    }
-  else
-    ret = abfd->iovec->bclose (abfd);
+  ret = abfd->iovec->bclose (abfd);
 
   if (ret)
     _maybe_make_executable (abfd);
@@ -766,7 +767,7 @@ SYNOPSIS
 DESCRIPTION
 	Create a new BFD in the manner of <<bfd_openw>>, but without
 	opening a file. The new BFD takes the target from the target
-	used by @var{template}. The format is always set to <<bfd_object>>.
+	used by @var{templ}. The format is always set to <<bfd_object>>.
 */
 
 bfd *
@@ -823,6 +824,8 @@ bfd_make_writable (bfd *abfd)
   bim->buffer = 0;
 
   abfd->flags |= BFD_IN_MEMORY;
+  abfd->iovec = &_bfd_memory_iovec;
+  abfd->origin = 0;
   abfd->direction = write_direction;
   abfd->where = 0;
 
@@ -861,7 +864,6 @@ bfd_make_readable (bfd *abfd)
   if (! BFD_SEND (abfd, _close_and_cleanup, (abfd)))
     return FALSE;
 
-
   abfd->arch_info = &bfd_default_arch_struct;
 
   abfd->where = 0;
@@ -890,7 +892,7 @@ bfd_make_readable (bfd *abfd)
 }
 
 /*
-INTERNAL_FUNCTION
+FUNCTION
 	bfd_alloc
 
 SYNOPSIS
@@ -958,7 +960,7 @@ bfd_alloc2 (bfd *abfd, bfd_size_type nmemb, bfd_size_type size)
 }
 
 /*
-INTERNAL_FUNCTION
+FUNCTION
 	bfd_zalloc
 
 SYNOPSIS

@@ -1,7 +1,8 @@
 /* Target-dependent code for the ALPHA architecture, for GDB, the GNU Debugger.
 
    Copyright (C) 1993, 1994, 1995, 1996, 1997, 1998, 1999, 2000, 2001, 2002,
-   2003, 2005, 2006, 2007, 2008, 2009, 2010 Free Software Foundation, Inc.
+   2003, 2005, 2006, 2007, 2008, 2009, 2010, 2011
+   Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -46,11 +47,41 @@
 
 #include "alpha-tdep.h"
 
+/* Instruction decoding.  The notations for registers, immediates and
+   opcodes are the same as the one used in Compaq's Alpha architecture
+   handbook.  */
+
+#define INSN_OPCODE(insn) ((insn & 0xfc000000) >> 26)
+
+/* Memory instruction format */
+#define MEM_RA(insn) ((insn & 0x03e00000) >> 21)
+#define MEM_RB(insn) ((insn & 0x001f0000) >> 16)
+#define MEM_DISP(insn) \
+  (((insn & 0x8000) == 0) ? (insn & 0xffff) : -((-insn) & 0xffff))
+
+static const int lda_opcode = 0x08;
+static const int stq_opcode = 0x2d;
+
+/* Branch instruction format */
+#define BR_RA(insn) MEM_RA(insn)
+
+static const int bne_opcode = 0x3d;
+
+/* Operate instruction format */
+#define OPR_FUNCTION(insn) ((insn & 0xfe0) >> 5)
+#define OPR_HAS_IMMEDIATE(insn) ((insn & 0x1000) == 0x1000)
+#define OPR_RA(insn) MEM_RA(insn)
+#define OPR_RC(insn) ((insn & 0x1f))
+#define OPR_LIT(insn) ((insn & 0x1fe000) >> 13)
+
+static const int subq_opcode = 0x10;
+static const int subq_function = 0x29;
+
 
 /* Return the name of the REGNO register.
 
    An empty name corresponds to a register number that used to
-   be used for a virtual register. That virtual register has
+   be used for a virtual register.  That virtual register has
    been removed, but the index is still reserved to maintain
    compatibility with existing remote alpha targets.  */
 
@@ -80,8 +111,7 @@ alpha_register_name (struct gdbarch *gdbarch, int regno)
 static int
 alpha_cannot_fetch_register (struct gdbarch *gdbarch, int regno)
 {
-  return (regno == ALPHA_ZERO_REGNUM
-          || strlen (alpha_register_name (gdbarch, regno)) == 0);
+  return (strlen (alpha_register_name (gdbarch, regno)) == 0);
 }
 
 static int
@@ -198,30 +228,38 @@ alpha_sts (struct gdbarch *gdbarch, void *out, const void *in)
    register is a floating point register and memory format is float, as the
    register format must be double or memory format is an integer with 4
    bytes or less, as the representation of integers in floating point
-   registers is different. */
+   registers is different.  */
 
 static int
-alpha_convert_register_p (struct gdbarch *gdbarch, int regno, struct type *type)
+alpha_convert_register_p (struct gdbarch *gdbarch, int regno,
+			  struct type *type)
 {
   return (regno >= ALPHA_FP0_REGNUM && regno < ALPHA_FP0_REGNUM + 31
 	  && TYPE_LENGTH (type) != 8);
 }
 
-static void
+static int
 alpha_register_to_value (struct frame_info *frame, int regnum,
-			 struct type *valtype, gdb_byte *out)
+			 struct type *valtype, gdb_byte *out,
+			int *optimizedp, int *unavailablep)
 {
+  struct gdbarch *gdbarch = get_frame_arch (frame);
   gdb_byte in[MAX_REGISTER_SIZE];
 
-  frame_register_read (frame, regnum, in);
-  switch (TYPE_LENGTH (valtype))
+  /* Convert to TYPE.  */
+  if (!get_frame_register_bytes (frame, regnum, 0,
+				 register_size (gdbarch, regnum),
+				 in, optimizedp, unavailablep))
+    return 0;
+
+  if (TYPE_LENGTH (valtype) == 4)
     {
-    case 4:
-      alpha_sts (get_frame_arch (frame), out, in);
-      break;
-    default:
-      error (_("Cannot retrieve value from floating point register"));
+      alpha_sts (gdbarch, out, in);
+      *optimizedp = *unavailablep = 0;
+      return 1;
     }
+
+  error (_("Cannot retrieve value from floating point register"));
 }
 
 static void
@@ -265,7 +303,7 @@ alpha_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
   int accumulate_size = struct_return ? 8 : 0;
   struct alpha_arg
     {
-      gdb_byte *contents;
+      const gdb_byte *contents;
       int len;
       int offset;
     };
@@ -363,7 +401,7 @@ alpha_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
       m_arg->len = TYPE_LENGTH (arg_type);
       m_arg->offset = accumulate_size;
       accumulate_size = (accumulate_size + m_arg->len + 7) & ~7;
-      m_arg->contents = value_contents_writeable (arg);
+      m_arg->contents = value_contents (arg);
     }
 
   /* Determine required argument register loads, loading an argument register
@@ -385,7 +423,7 @@ alpha_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
   /* `Push' arguments on the stack.  */
   for (i = nargs; m_arg--, --i >= 0;)
     {
-      gdb_byte *contents = m_arg->contents;
+      const gdb_byte *contents = m_arg->contents;
       int offset = m_arg->offset;
       int len = m_arg->len;
 
@@ -462,7 +500,8 @@ alpha_extract_return_value (struct type *valtype, struct regcache *regcache,
 	  break;
 
 	default:
-	  internal_error (__FILE__, __LINE__, _("unknown floating point width"));
+	  internal_error (__FILE__, __LINE__,
+			  _("unknown floating point width"));
 	}
       break;
 
@@ -485,7 +524,8 @@ alpha_extract_return_value (struct type *valtype, struct regcache *regcache,
 	  break;
 
 	default:
-	  internal_error (__FILE__, __LINE__, _("unknown floating point width"));
+	  internal_error (__FILE__, __LINE__,
+			  _("unknown floating point width"));
 	}
       break;
 
@@ -530,7 +570,8 @@ alpha_store_return_value (struct type *valtype, struct regcache *regcache,
 	  error (_("Cannot set a 128-bit long double return value."));
 
 	default:
-	  internal_error (__FILE__, __LINE__, _("unknown floating point width"));
+	  internal_error (__FILE__, __LINE__,
+			  _("unknown floating point width"));
 	}
       break;
 
@@ -554,7 +595,8 @@ alpha_store_return_value (struct type *valtype, struct regcache *regcache,
 	  error (_("Cannot set a 128-bit long double return value."));
 
 	default:
-	  internal_error (__FILE__, __LINE__, _("unknown floating point width"));
+	  internal_error (__FILE__, __LINE__,
+			  _("unknown floating point width"));
 	}
       break;
 
@@ -688,7 +730,7 @@ alpha_skip_prologue (struct gdbarch *gdbarch, CORE_ADDR pc)
   /* Can't determine prologue from the symbol table, need to examine
      instructions.  */
 
-  /* Skip the typical prologue instructions. These are the stack adjustment
+  /* Skip the typical prologue instructions.  These are the stack adjustment
      instruction and the instructions that save registers on the stack
      or in the gcc frame.  */
   for (offset = 0; offset < 100; offset += ALPHA_INSN_SIZE)
@@ -893,6 +935,7 @@ alpha_sigtramp_frame_sniffer (const struct frame_unwind *self,
 
 static const struct frame_unwind alpha_sigtramp_frame_unwind = {
   SIGTRAMP_FRAME,
+  default_frame_unwind_stop_reason,
   alpha_sigtramp_frame_this_id,
   alpha_sigtramp_frame_prev_register,
   NULL,
@@ -962,7 +1005,7 @@ alpha_heuristic_proc_start (struct gdbarch *gdbarch, CORE_ADDR pc)
   /* It's not clear to me why we reach this point when stopping quietly,
      but with this test, at least we don't print out warnings for every
      child forked (eg, on decstation).  22apr93 rich@cygnus.com.  */
-  if (inf->stop_soon == NO_STOP_QUIETLY)
+  if (inf->control.stop_soon == NO_STOP_QUIETLY)
     {
       static int blurb_printed = 0;
 
@@ -999,6 +1042,107 @@ struct alpha_heuristic_unwind_cache
   struct trad_frame_saved_reg *saved_regs;
   int return_reg;
 };
+
+/* If a probing loop sequence starts at PC, simulate it and compute
+   FRAME_SIZE and PC after its execution.  Otherwise, return with PC and
+   FRAME_SIZE unchanged.  */
+
+static void
+alpha_heuristic_analyze_probing_loop (struct gdbarch *gdbarch, CORE_ADDR *pc,
+				      int *frame_size)
+{
+  CORE_ADDR cur_pc = *pc;
+  int cur_frame_size = *frame_size;
+  int nb_of_iterations, reg_index, reg_probe;
+  unsigned int insn;
+
+  /* The following pattern is recognized as a probing loop:
+
+        lda     REG_INDEX,NB_OF_ITERATIONS
+        lda     REG_PROBE,<immediate>(sp)
+
+     LOOP_START:
+        stq     zero,<immediate>(REG_PROBE)
+        subq    REG_INDEX,0x1,REG_INDEX
+        lda     REG_PROBE,<immediate>(REG_PROBE)
+        bne     REG_INDEX, LOOP_START
+ 
+        lda     sp,<immediate>(REG_PROBE)
+
+     If anything different is found, the function returns without
+     changing PC and FRAME_SIZE.  Otherwise, PC will point immediately
+     after this sequence, and FRAME_SIZE will be updated.  */
+
+  /* lda     REG_INDEX,NB_OF_ITERATIONS */
+
+  insn = alpha_read_insn (gdbarch, cur_pc);
+  if (INSN_OPCODE (insn) != lda_opcode)
+    return;
+  reg_index = MEM_RA (insn);
+  nb_of_iterations = MEM_DISP (insn);
+
+  /* lda     REG_PROBE,<immediate>(sp) */
+
+  cur_pc += ALPHA_INSN_SIZE;
+  insn = alpha_read_insn (gdbarch, cur_pc);
+  if (INSN_OPCODE (insn) != lda_opcode
+      || MEM_RB (insn) != ALPHA_SP_REGNUM)
+    return;
+  reg_probe = MEM_RA (insn);
+  cur_frame_size -= MEM_DISP (insn);
+
+  /* stq     zero,<immediate>(REG_PROBE) */
+  
+  cur_pc += ALPHA_INSN_SIZE;
+  insn = alpha_read_insn (gdbarch, cur_pc);
+  if (INSN_OPCODE (insn) != stq_opcode
+      || MEM_RA (insn) != 0x1f
+      || MEM_RB (insn) != reg_probe)
+    return;
+  
+  /* subq    REG_INDEX,0x1,REG_INDEX */
+
+  cur_pc += ALPHA_INSN_SIZE;
+  insn = alpha_read_insn (gdbarch, cur_pc);
+  if (INSN_OPCODE (insn) != subq_opcode
+      || !OPR_HAS_IMMEDIATE (insn)
+      || OPR_FUNCTION (insn) != subq_function
+      || OPR_LIT(insn) != 1
+      || OPR_RA (insn) != reg_index
+      || OPR_RC (insn) != reg_index)
+    return;
+  
+  /* lda     REG_PROBE,<immediate>(REG_PROBE) */
+  
+  cur_pc += ALPHA_INSN_SIZE;
+  insn = alpha_read_insn (gdbarch, cur_pc);
+  if (INSN_OPCODE (insn) != lda_opcode
+      || MEM_RA (insn) != reg_probe
+      || MEM_RB (insn) != reg_probe)
+    return;
+  cur_frame_size -= MEM_DISP (insn) * nb_of_iterations;
+
+  /* bne     REG_INDEX, LOOP_START */
+
+  cur_pc += ALPHA_INSN_SIZE;
+  insn = alpha_read_insn (gdbarch, cur_pc);
+  if (INSN_OPCODE (insn) != bne_opcode
+      || MEM_RA (insn) != reg_index)
+    return;
+
+  /* lda     sp,<immediate>(REG_PROBE) */
+
+  cur_pc += ALPHA_INSN_SIZE;
+  insn = alpha_read_insn (gdbarch, cur_pc);
+  if (INSN_OPCODE (insn) != lda_opcode
+      || MEM_RA (insn) != ALPHA_SP_REGNUM
+      || MEM_RB (insn) != reg_probe)
+    return;
+  cur_frame_size -= MEM_DISP (insn);
+
+  *pc = cur_pc;
+  *frame_size = cur_frame_size;
+}
 
 static struct alpha_heuristic_unwind_cache *
 alpha_heuristic_frame_unwind_cache (struct frame_info *this_frame,
@@ -1043,7 +1187,7 @@ alpha_heuristic_frame_unwind_cache (struct frame_info *this_frame,
 	      if (word & 0x8000)
 		{
 		  /* Consider only the first stack allocation instruction
-		     to contain the static size of the frame. */
+		     to contain the static size of the frame.  */
 		  if (frame_size == 0)
 		    frame_size = (-word) & 0xffff;
 		}
@@ -1102,7 +1246,8 @@ alpha_heuristic_frame_unwind_cache (struct frame_info *this_frame,
 		 the return address register from it.
 
 		 FIXME: Rewriting GDB to access the procedure descriptors,
-		 e.g. via the minimal symbol table, might obviate this hack.  */
+		 e.g. via the minimal symbol table, might obviate this
+		 hack.  */
 	      if (return_reg == -1
 		  && cur_pc < (start_pc + 80)
 		  && (reg == ALPHA_T7_REGNUM
@@ -1116,6 +1261,8 @@ alpha_heuristic_frame_unwind_cache (struct frame_info *this_frame,
 	    frame_reg = ALPHA_GCC_FP_REGNUM;
 	  else if (word == 0x47fe040f)			/* bis zero,sp,fp */
 	    frame_reg = ALPHA_GCC_FP_REGNUM;
+
+	  alpha_heuristic_analyze_probing_loop (gdbarch, &cur_pc, &frame_size);
 	}
 
       /* If we haven't found a valid return address register yet, keep
@@ -1204,6 +1351,7 @@ alpha_heuristic_frame_prev_register (struct frame_info *this_frame,
 
 static const struct frame_unwind alpha_heuristic_frame_unwind = {
   NORMAL_FRAME,
+  default_frame_unwind_stop_reason,
   alpha_heuristic_frame_this_id,
   alpha_heuristic_frame_prev_register,
   NULL,
@@ -1275,7 +1423,11 @@ alpha_supply_int_regs (struct regcache *regcache, int regno,
       regcache_raw_supply (regcache, i, regs + i * 8);
 
   if (regno == ALPHA_ZERO_REGNUM || regno == -1)
-    regcache_raw_supply (regcache, ALPHA_ZERO_REGNUM, NULL);
+    {
+      const gdb_byte zero[8] = { 0 };
+
+      regcache_raw_supply (regcache, ALPHA_ZERO_REGNUM, zero);
+    }
 
   if (regno == ALPHA_PC_REGNUM || regno == -1)
     regcache_raw_supply (regcache, ALPHA_PC_REGNUM, pc);
@@ -1376,7 +1528,7 @@ alpha_next_pc (struct frame_info *frame, CORE_ADDR pc)
 
   insn = alpha_read_insn (gdbarch, pc);
 
-  /* Opcode is top 6 bits. */
+  /* Opcode is top 6 bits.  */
   op = (insn >> 26) & 0x3f;
 
   if (op == 0x1a)
@@ -1539,7 +1691,7 @@ alpha_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
   tdep->sc_regs_offset = 4 * 8;
   tdep->sc_fpregs_offset = tdep->sc_regs_offset + 32 * 8 + 8;
 
-  tdep->jb_pc = -1;	/* longjmp support not enabled by default  */
+  tdep->jb_pc = -1;	/* longjmp support not enabled by default.  */
 
   tdep->return_in_memory = alpha_return_in_memory_always;
 
@@ -1645,6 +1797,7 @@ If you are debugging a stripped executable, GDB needs to search through the\n\
 program for the start of a function.  This command sets the distance of the\n\
 search.  The only need to set it is when debugging a stripped executable."),
 			    reinit_frame_cache_sfunc,
-			    NULL, /* FIXME: i18n: The distance searched for the start of a function is \"%d\".  */
+			    NULL, /* FIXME: i18n: The distance searched for
+				     the start of a function is \"%d\".  */
 			    &setlist, &showlist);
 }

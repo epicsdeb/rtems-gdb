@@ -1,7 +1,7 @@
 /* Generate a core file for the inferior process.
 
-   Copyright (C) 2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008, 2009, 2010
-   Free Software Foundation, Inc.
+   Copyright (C) 2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008, 2009, 2010,
+   2011 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -52,6 +52,7 @@ bfd *
 create_gcore_bfd (char *filename)
 {
   bfd *obfd = bfd_openw (filename, default_gcore_target ());
+
   if (!obfd)
     error (_("Failed to open '%s' for output."), filename);
   bfd_set_format (obfd, bfd_core);
@@ -300,7 +301,6 @@ call_target_sbrk (int sbrk_arg)
 static int
 derive_heap_segment (bfd *abfd, bfd_vma *bottom, bfd_vma *top)
 {
-  struct gdbarch *gdbarch;
   bfd_vma top_of_data_memory = 0;
   bfd_vma top_of_heap = 0;
   bfd_size_type sec_size;
@@ -414,6 +414,7 @@ gcore_create_callback (CORE_ADDR vaddr, unsigned long size,
 								    asec);
 	  bfd_vma start = obj_section_addr (objsec) & -align;
 	  bfd_vma end = (obj_section_endaddr (objsec) + align - 1) & -align;
+
 	  /* Match if either the entire memory region lies inside the
 	     section (i.e. a mapping covering some pages of a large
 	     segment) or the entire section lies inside the memory region
@@ -425,9 +426,8 @@ gcore_create_callback (CORE_ADDR vaddr, unsigned long size,
 	       || (start >= vaddr && end <= vaddr + size))
 	      && !(bfd_get_file_flags (abfd) & BFD_IN_MEMORY))
 	    {
-	      flags &= ~SEC_LOAD;
-	      flags |= SEC_NEVER_LOAD;
-	      goto keep;	/* break out of two nested for loops */
+	      flags &= ~(SEC_LOAD | SEC_HAS_CONTENTS);
+	      goto keep;	/* Break out of two nested for loops.  */
 	    }
 	}
 
@@ -461,9 +461,7 @@ gcore_create_callback (CORE_ADDR vaddr, unsigned long size,
 }
 
 static int
-objfile_find_memory_regions (int (*func) (CORE_ADDR, unsigned long,
-					  int, int, int, void *),
-			     void *obfd)
+objfile_find_memory_regions (find_memory_region_ftype func, void *obfd)
 {
   /* Use objfile data to create memory sections.  */
   struct objfile *objfile;
@@ -476,14 +474,13 @@ objfile_find_memory_regions (int (*func) (CORE_ADDR, unsigned long,
       bfd *ibfd = objfile->obfd;
       asection *isec = objsec->the_bfd_section;
       flagword flags = bfd_get_section_flags (ibfd, isec);
-      int ret;
 
       if ((flags & SEC_ALLOC) || (flags & SEC_LOAD))
 	{
 	  int size = bfd_section_size (ibfd, isec);
 	  int ret;
 
-	  ret = (*func) (obj_section_addr (objsec), bfd_section_size (ibfd, isec),
+	  ret = (*func) (obj_section_addr (objsec), size, 
 			 1, /* All sections will be readable.  */
 			 (flags & SEC_READONLY) == 0, /* Writable.  */
 			 (flags & SEC_CODE) != 0, /* Executable.  */
@@ -501,7 +498,7 @@ objfile_find_memory_regions (int (*func) (CORE_ADDR, unsigned long,
 	     0, /* Stack section will not be executable.  */
 	     obfd);
 
-  /* Make a heap segment. */
+  /* Make a heap segment.  */
   if (derive_heap_segment (exec_bfd, &temp_bottom, &temp_top))
     (*func) (temp_bottom, temp_top - temp_bottom,
 	     1, /* Heap section will be readable.  */
@@ -540,7 +537,8 @@ gcore_copy_callback (bfd *obfd, asection *osec, void *ignored)
       if (target_read_memory (bfd_section_vma (obfd, osec) + offset,
 			      memhunk, size) != 0)
 	{
-	  warning (_("Memory read failed for corefile section, %s bytes at %s."),
+	  warning (_("Memory read failed for corefile "
+		     "section, %s bytes at %s."),
 		   plongest (size),
 		   paddress (target_gdbarch, bfd_section_vma (obfd, osec)));
 	  break;

@@ -1,5 +1,6 @@
 /* C preprocessor macro tables for GDB.
-   Copyright (C) 2002, 2007, 2008, 2009, 2010 Free Software Foundation, Inc.
+   Copyright (C) 2002, 2007, 2008, 2009, 2010, 2011
+   Free Software Foundation, Inc.
    Contributed by Red Hat, Inc.
 
    This file is part of GDB.
@@ -20,6 +21,7 @@
 #include "defs.h"
 #include "gdb_obstack.h"
 #include "splay-tree.h"
+#include "filenames.h"
 #include "symtab.h"
 #include "symfile.h"
 #include "objfiles.h"
@@ -113,6 +115,7 @@ macro_bcache (struct macro_table *t, const void *addr, int len)
   else
     {
       void *copy = xmalloc (len);
+
       memcpy (copy, addr, len);
       return copy;
     }
@@ -158,7 +161,7 @@ struct macro_key
   struct macro_table *table;
 
   /* The name of the macro.  This is in the table's bcache, if it has
-     one. */
+     one.  */
   const char *name;
 
   /* The source file and line number where the definition's scope
@@ -316,6 +319,7 @@ key_compare (struct macro_key *key,
              const char *name, struct macro_source_file *file, int line)
 {
   int names = strcmp (key->name, name);
+
   if (names)
     return names;
 
@@ -467,8 +471,8 @@ macro_include (struct macro_source_file *source,
 
          First, squawk.  */
       complaint (&symfile_complaints,
-		 _("both `%s' and `%s' allegedly #included at %s:%d"), included,
-		 (*link)->filename, source->filename, line);
+		 _("both `%s' and `%s' allegedly #included at %s:%d"),
+		 included, (*link)->filename, source->filename, line);
 
       /* Now, choose a new, unoccupied line number for this
          #inclusion, after the alleged #inclusion line.  */
@@ -497,7 +501,7 @@ struct macro_source_file *
 macro_lookup_inclusion (struct macro_source_file *source, const char *name)
 {
   /* Is SOURCE itself named NAME?  */
-  if (strcmp (name, source->filename) == 0)
+  if (filename_cmp (name, source->filename) == 0)
     return source;
 
   /* The filename in the source structure is probably a full path, but
@@ -507,11 +511,12 @@ macro_lookup_inclusion (struct macro_source_file *source, const char *name)
     int src_name_len = strlen (source->filename);
 
     /* We do mean < here, and not <=; if the lengths are the same,
-       then the strcmp above should have triggered, and we need to
+       then the filename_cmp above should have triggered, and we need to
        check for a slash here.  */
     if (name_len < src_name_len
-        && source->filename[src_name_len - name_len - 1] == '/'
-        && strcmp (name, source->filename + src_name_len - name_len) == 0)
+        && IS_DIR_SEPARATOR (source->filename[src_name_len - name_len - 1])
+        && filename_cmp (name,
+			 source->filename + src_name_len - name_len) == 0)
       return source;
   }
 
@@ -726,7 +731,8 @@ check_for_redefinition (struct macro_source_file *source, int line,
       if (! same)
         {
 	  complaint (&symfile_complaints,
-		     _("macro `%s' redefined at %s:%d; original definition at %s:%d"),
+		     _("macro `%s' redefined at %s:%d; "
+		       "original definition at %s:%d"),
 		     name, source->filename, line,
 		     found_key->start_file->filename, found_key->start_line);
         }
@@ -879,6 +885,7 @@ macro_definition_location (struct macro_source_file *source,
   if (n)
     {
       struct macro_key *key = (struct macro_key *) n->key;
+
       *definition_line = key->start_line;
       return key->start_file;
     }
@@ -905,6 +912,7 @@ foreach_macro (splay_tree_node node, void *arg)
   struct macro_for_each_data *datum = (struct macro_for_each_data *) arg;
   struct macro_key *key = (struct macro_key *) node->key;
   struct macro_definition *def = (struct macro_definition *) node->value;
+
   (*datum->fn) (key->name, def, datum->user_data);
   return 0;
 }
@@ -915,6 +923,7 @@ macro_for_each (struct macro_table *table, macro_callback_fn fn,
 		void *user_data)
 {
   struct macro_for_each_data datum;
+
   datum.fn = fn;
   datum.user_data = user_data;
   datum.file = NULL;
@@ -946,6 +955,7 @@ macro_for_each_in_scope (struct macro_source_file *file, int line,
 			 macro_callback_fn fn, void *user_data)
 {
   struct macro_for_each_data datum;
+
   datum.fn = fn;
   datum.user_data = user_data;
   datum.file = file;

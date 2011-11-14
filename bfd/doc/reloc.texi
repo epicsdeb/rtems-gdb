@@ -281,10 +281,7 @@ struct reloc_howto_struct
       when doing overflow checking.  */
   unsigned int bitsize;
 
-  /*  Notes that the relocation is relative to the location in the
-      data section of the addend.  The relocation function will
-      subtract from the relocation value the address of the location
-      being relocated.  */
+  /*  The relocation is relative to the field being relocated.  */
   bfd_boolean pc_relative;
 
   /*  The bit position of the reloc value in the destination.
@@ -1246,6 +1243,7 @@ Low and High halfword relocations for MOVW and MOVT instructions.
 @deffnx {} BFD_RELOC_ARM_RELATIVE
 @deffnx {} BFD_RELOC_ARM_GOTOFF
 @deffnx {} BFD_RELOC_ARM_GOTPC
+@deffnx {} BFD_RELOC_ARM_GOT_PREL
 Relocations for setting up GOTs and PLTs for shared libraries.
 @end deffn
 @deffn {} BFD_RELOC_ARM_TLS_GD32
@@ -1256,6 +1254,12 @@ Relocations for setting up GOTs and PLTs for shared libraries.
 @deffnx {} BFD_RELOC_ARM_TLS_TPOFF32
 @deffnx {} BFD_RELOC_ARM_TLS_IE32
 @deffnx {} BFD_RELOC_ARM_TLS_LE32
+@deffnx {} BFD_RELOC_ARM_TLS_GOTDESC
+@deffnx {} BFD_RELOC_ARM_TLS_CALL
+@deffnx {} BFD_RELOC_ARM_THM_TLS_CALL
+@deffnx {} BFD_RELOC_ARM_TLS_DESCSEQ
+@deffnx {} BFD_RELOC_ARM_THM_TLS_DESCSEQ
+@deffnx {} BFD_RELOC_ARM_TLS_DESC
 ARM thread-local storage relocations.
 @end deffn
 @deffn {} BFD_RELOC_ARM_ALU_PC_G0_NC
@@ -1291,6 +1295,9 @@ ARM group relocations.
 @deffn {} BFD_RELOC_ARM_V4BX
 Annotation of BX instructions.
 @end deffn
+@deffn {} BFD_RELOC_ARM_IRELATIVE
+ARM support for STT_GNU_IFUNC.
+@end deffn
 @deffn {} BFD_RELOC_ARM_IMMEDIATE
 @deffnx {} BFD_RELOC_ARM_ADRL_IMMEDIATE
 @deffnx {} BFD_RELOC_ARM_T32_IMMEDIATE
@@ -1299,6 +1306,7 @@ Annotation of BX instructions.
 @deffnx {} BFD_RELOC_ARM_T32_ADD_PC12
 @deffnx {} BFD_RELOC_ARM_SHIFT_IMM
 @deffnx {} BFD_RELOC_ARM_SMC
+@deffnx {} BFD_RELOC_ARM_HVC
 @deffnx {} BFD_RELOC_ARM_SWI
 @deffnx {} BFD_RELOC_ARM_MULTI
 @deffnx {} BFD_RELOC_ARM_CP_OFF_IMM
@@ -1409,6 +1417,13 @@ These relocs are only used within the ARM assembler.  They are not
 @deffnx {} BFD_RELOC_SH_TLS_DTPMOD32
 @deffnx {} BFD_RELOC_SH_TLS_DTPOFF32
 @deffnx {} BFD_RELOC_SH_TLS_TPOFF32
+@deffnx {} BFD_RELOC_SH_GOT20
+@deffnx {} BFD_RELOC_SH_GOTOFF20
+@deffnx {} BFD_RELOC_SH_GOTFUNCDESC
+@deffnx {} BFD_RELOC_SH_GOTFUNCDESC20
+@deffnx {} BFD_RELOC_SH_GOTOFFFUNCDESC
+@deffnx {} BFD_RELOC_SH_GOTOFFFUNCDESC20
+@deffnx {} BFD_RELOC_SH_FUNCDESC
 Renesas / SuperH SH relocs.  Not all of these appear in object files.
 @end deffn
 @deffn {} BFD_RELOC_ARC_B22_PCREL
@@ -1735,6 +1750,72 @@ Used to maintain alignment whilst relaxing.
 This is a variation of BFD_RELOC_LO16 that can be used in v850e ld.bu
 instructions.
 @end deffn
+@deffn {} BFD_RELOC_V850_16_PCREL
+This is a 16-bit reloc.
+@end deffn
+@deffn {} BFD_RELOC_V850_17_PCREL
+This is a 17-bit reloc.
+@end deffn
+@deffn {} BFD_RELOC_V850_23
+This is a 23-bit reloc.
+@end deffn
+@deffn {} BFD_RELOC_V850_32_PCREL
+This is a 32-bit reloc.
+@end deffn
+@deffn {} BFD_RELOC_V850_32_ABS
+This is a 32-bit reloc.
+@end deffn
+@deffn {} BFD_RELOC_V850_16_SPLIT_OFFSET
+This is a 16-bit reloc.
+@end deffn
+@deffn {} BFD_RELOC_V850_16_S1
+This is a 16-bit reloc.
+@end deffn
+@deffn {} BFD_RELOC_V850_LO16_S1
+Low 16 bits. 16 bit shifted by 1.
+@end deffn
+@deffn {} BFD_RELOC_V850_CALLT_15_16_OFFSET
+This is a 16 bit offset from the call table base pointer.
+@end deffn
+@deffn {} BFD_RELOC_V850_32_GOTPCREL
+DSO relocations.
+@end deffn
+@deffn {} BFD_RELOC_V850_16_GOT
+DSO relocations.
+@end deffn
+@deffn {} BFD_RELOC_V850_32_GOT
+DSO relocations.
+@end deffn
+@deffn {} BFD_RELOC_V850_22_PLT_PCREL
+DSO relocations.
+@end deffn
+@deffn {} BFD_RELOC_V850_32_PLT_PCREL
+DSO relocations.
+@end deffn
+@deffn {} BFD_RELOC_V850_COPY
+DSO relocations.
+@end deffn
+@deffn {} BFD_RELOC_V850_GLOB_DAT
+DSO relocations.
+@end deffn
+@deffn {} BFD_RELOC_V850_JMP_SLOT
+DSO relocations.
+@end deffn
+@deffn {} BFD_RELOC_V850_RELATIVE
+DSO relocations.
+@end deffn
+@deffn {} BFD_RELOC_V850_16_GOTOFF
+DSO relocations.
+@end deffn
+@deffn {} BFD_RELOC_V850_32_GOTOFF
+DSO relocations.
+@end deffn
+@deffn {} BFD_RELOC_V850_CODE
+start code.
+@end deffn
+@deffn {} BFD_RELOC_V850_DATA
+start data in text.
+@end deffn
 @deffn {} BFD_RELOC_MN10300_32_PCREL
 This is a 32bit pcrel reloc for the mn10300, offset by two bytes in the
 instruction.
@@ -1770,6 +1851,38 @@ the opcode.
 This is a reloc for the tms320c54x, where the most
 significant 7 bits of a 23-bit extended address are placed into
 the opcode.
+@end deffn
+@deffn {} BFD_RELOC_C6000_PCR_S21
+@deffnx {} BFD_RELOC_C6000_PCR_S12
+@deffnx {} BFD_RELOC_C6000_PCR_S10
+@deffnx {} BFD_RELOC_C6000_PCR_S7
+@deffnx {} BFD_RELOC_C6000_ABS_S16
+@deffnx {} BFD_RELOC_C6000_ABS_L16
+@deffnx {} BFD_RELOC_C6000_ABS_H16
+@deffnx {} BFD_RELOC_C6000_SBR_U15_B
+@deffnx {} BFD_RELOC_C6000_SBR_U15_H
+@deffnx {} BFD_RELOC_C6000_SBR_U15_W
+@deffnx {} BFD_RELOC_C6000_SBR_S16
+@deffnx {} BFD_RELOC_C6000_SBR_L16_B
+@deffnx {} BFD_RELOC_C6000_SBR_L16_H
+@deffnx {} BFD_RELOC_C6000_SBR_L16_W
+@deffnx {} BFD_RELOC_C6000_SBR_H16_B
+@deffnx {} BFD_RELOC_C6000_SBR_H16_H
+@deffnx {} BFD_RELOC_C6000_SBR_H16_W
+@deffnx {} BFD_RELOC_C6000_SBR_GOT_U15_W
+@deffnx {} BFD_RELOC_C6000_SBR_GOT_L16_W
+@deffnx {} BFD_RELOC_C6000_SBR_GOT_H16_W
+@deffnx {} BFD_RELOC_C6000_DSBT_INDEX
+@deffnx {} BFD_RELOC_C6000_PREL31
+@deffnx {} BFD_RELOC_C6000_COPY
+@deffnx {} BFD_RELOC_C6000_JUMP_SLOT
+@deffnx {} BFD_RELOC_C6000_EHTYPE
+@deffnx {} BFD_RELOC_C6000_PCR_H16
+@deffnx {} BFD_RELOC_C6000_PCR_L16
+@deffnx {} BFD_RELOC_C6000_ALIGN
+@deffnx {} BFD_RELOC_C6000_FPHEAD
+@deffnx {} BFD_RELOC_C6000_NOCMP
+TMS320C6000 relocations.
 @end deffn
 @deffn {} BFD_RELOC_FR30_48
 This is a 48 bit reloc for the FR30 that stores 32 bits.
@@ -1998,9 +2111,12 @@ instructions
 @deffnx {} BFD_RELOC_RX_GPRELL
 @deffnx {} BFD_RELOC_RX_SYM
 @deffnx {} BFD_RELOC_RX_OP_SUBTRACT
+@deffnx {} BFD_RELOC_RX_OP_NEG
 @deffnx {} BFD_RELOC_RX_ABS8
 @deffnx {} BFD_RELOC_RX_ABS16
+@deffnx {} BFD_RELOC_RX_ABS16_REV
 @deffnx {} BFD_RELOC_RX_ABS32
+@deffnx {} BFD_RELOC_RX_ABS32_REV
 @deffnx {} BFD_RELOC_RX_ABS16U
 @deffnx {} BFD_RELOC_RX_ABS16UW
 @deffnx {} BFD_RELOC_RX_ABS16UL

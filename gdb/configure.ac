@@ -1,6 +1,6 @@
 dnl Autoconf configure script for GDB, the GNU debugger.
-dnl Copyright (C) 1995, 1996, 1997, 1998, 1999, 2000, 2001, 2002, 2003, 2004,
-dnl 2005, 2006, 2007, 2008, 2009, 2010
+dnl Copyright (C) 1995, 1996, 1997, 1998, 1999, 2000, 2001, 2002, 2003,
+dnl 2004, 2005, 2006, 2007, 2008, 2009, 2010, 2011
 dnl Free Software Foundation, Inc.
 dnl
 dnl This file is part of GDB.
@@ -108,7 +108,7 @@ AS_HELP_STRING([--with-relocated-sources=PATH], [automatically relocate this pat
               [Relocated directory for source files. ])
 ])
 
-AC_CONFIG_SUBDIRS(doc testsuite)
+AC_CONFIG_SUBDIRS(testsuite)
 
 # Check whether to support alternative target configurations
 AC_ARG_ENABLE(targets,
@@ -538,6 +538,7 @@ if test "$with_system_readline" = yes; then
   READLINE=-lreadline
   READLINE_DEPS=
   READLINE_CFLAGS=
+  READLINE_TEXI_INCFLAG=
 
   # readline-6.0 started to use the name `_rl_echoing_p'.
   # `$(READLINE_DIR)/' of bundled readline would not resolve in configure.
@@ -557,10 +558,12 @@ else
   READLINE='$(READLINE_DIR)/libreadline.a'
   READLINE_DEPS='$(READLINE)'
   READLINE_CFLAGS='-I$(READLINE_SRC)/..'
+  READLINE_TEXI_INCFLAG='-I $(READLINE_DIR)'
 fi
 AC_SUBST(READLINE)
 AC_SUBST(READLINE_DEPS)
 AC_SUBST(READLINE_CFLAGS)
+AC_SUBST(READLINE_TEXI_INCFLAG)
 
 AC_ARG_WITH(expat,
   AS_HELP_STRING([--with-expat], [include expat support (auto/yes/no)]),
@@ -589,26 +592,69 @@ else
 fi
 
 dnl Utility to simplify finding libpython.
+dnl $1 = pythonX.Y
+dnl $2 = the shell variable to assign the result to
+dnl      If libpython is found we store $version here.
+dnl $3 = additional flags to add to CPPFLAGS
+dnl $4 = additional flags to add to LIBS
+
 AC_DEFUN([AC_TRY_LIBPYTHON],
 [
   version=$1
   define([have_libpython_var],$2)
-  define([VERSION],[translit([$1],[abcdefghijklmnopqrstuvwxyz./-],
-                                  [ABCDEFGHIJKLMNOPQRSTUVWXYZ___])])
-  [HAVE_LIB]VERSION=no
+  new_CPPFLAGS=$3
+  new_LIBS=$4
   AC_MSG_CHECKING([for ${version}])
+  save_CPPFLAGS=$CPPFLAGS
   save_LIBS=$LIBS
-  LIBS="$LIBS -l${version}"
-  AC_LINK_IFELSE(AC_LANG_PROGRAM([[#include "${version}/Python.h"]],
+  CPPFLAGS="$CPPFLAGS $new_CPPFLAGS"
+  LIBS="$LIBS $new_LIBS"
+  found_usable_python=no
+  AC_LINK_IFELSE(AC_LANG_PROGRAM([[#include "Python.h"]],
                                  [[Py_Initialize ();]]),
-                 [[HAVE_LIB]VERSION=yes
-                  have_libpython_var=yes],
-                 [LIBS=$save_LIBS])
-  AC_MSG_RESULT([$[HAVE_LIB]VERSION])
+                 [have_libpython_var=${version}
+                  found_usable_python=yes
+                  PYTHON_CPPFLAGS=$new_CPPFLAGS
+                  PYTHON_LIBS=$new_LIBS])
+  CPPFLAGS=$save_CPPFLAGS
+  LIBS=$save_LIBS
+  AC_MSG_RESULT([${found_usable_python}])
 ])
 
+dnl There are several different values for --with-python:
+dnl
+dnl no -   Don't include python support.
+dnl yes -  Include python support, error if it's missing.
+dnl        If we find python in $PATH, use it to fetch configure options,
+dnl        otherwise assume the compiler can find it with no help from us.
+dnl        Python 2.7, 2.6, 2.5, and then 2.4 are tried in turn.
+dnl auto - Same as "yes", but if python is missing from the system,
+dnl        fall back to "no".
+dnl /path/to/python/exec-prefix -
+dnl        Use the python located in this directory.
+dnl        If /path/to/python/exec-prefix/bin/python exists, use it to find
+dnl        the compilation parameters.  Otherwise use
+dnl        -I/path/to/python/exec-prefix/include,
+dnl        -L/path/to/python/exec-prefix/lib.
+dnl        Python 2.7, 2.6, 2.5, and then 2.4 are tried in turn.
+dnl        NOTE: This case is historical.  It is what was done for 7.0/7.1
+dnl        but is deprecated.
+dnl /path/to/python/executable -
+dnl        Run python-config.py with this version of python to fetch the
+dnl        compilation parameters.
+dnl        NOTE: This needn't be the real python executable.
+dnl        In a cross-compilation scenario (build != host), this could be
+dnl        a shell script that provides what python-config.py provides for
+dnl        --ldflags, --includes, --exec-prefix.
+dnl python-executable -
+dnl        Find python-executable in $PATH, and then handle the same as
+dnl        /path/to/python/executable.
+dnl
+dnl If a python program is specified, it is used to run python-config.py and
+dnl is passed --ldflags, --includes, --exec-prefix.
+
 AC_ARG_WITH(python,
-  AS_HELP_STRING([--with-python], [include python support (auto/yes/no/<path>)]),
+  AS_HELP_STRING([--with-python@<:@=PYTHON@:>@], [include python support (auto/yes/no/<python-program>)]),
   [], [with_python=auto])
 AC_MSG_CHECKING([whether to use python])
 AC_MSG_RESULT([$with_python])
@@ -618,44 +664,166 @@ if test "${with_python}" = no; then
   have_libpython=no
 else
   case "${with_python}" in
-  yes | auto)
-    # Leave as empty, use defaults.
-    python_includes=
-    python_libs=
-    ;;
   /*)
-    python_includes="-I${with_python}/include"
-    python_libs="-L${with_python}/lib"
+    if test -d ${with_python}; then
+      # Assume the python binary is ${with_python}/bin/python.
+      python_prog="${with_python}/bin/python"
+      python_prefix=
+      # If python does not exit ${with_python}/bin, then try in
+      # ${with_python}.  On Windows/MinGW, this is where the Python
+      # executable is.
+      if test ! -x "${python_prog}"; then
+        python_prog="${with_python}/python"
+        python_prefix=
+      fi
+      if test ! -x "${python_prog}"; then
+        # Fall back to gdb 7.0/7.1 behaviour.
+        python_prog=missing
+        python_prefix=${with_python}
+      fi
+    elif test -x "${with_python}"; then
+      # While we can't run python compiled for $host (unless host == build),
+      # the user could write a script that provides the needed information,
+      # so we support that.
+      python_prog=${with_python}
+      python_prefix=
+    else
+      AC_ERROR(invalid value for --with-python)
+    fi
     ;;
-  *)
+  */*)
+    # Disallow --with-python=foo/bar.
     AC_ERROR(invalid value for --with-python)
     ;;
+  *)
+    # The user has either specified auto, yes, or the name of the python
+    # program assumed to be in $PATH.
+    python_prefix=
+    case "${with_python}" in
+    yes | auto)
+      if test ${build} = ${host}; then
+        AC_PATH_PROG(python_prog_path, python, missing)
+        if test "${python_prog_path}" = missing; then
+          python_prog=missing
+        else
+          python_prog=${python_prog_path}
+        fi
+      else
+        # Not much we can do except assume the cross-compiler will find the
+        # right files.
+        python_prog=missing
+      fi
+      ;;
+    *)
+      # While we can't run python compiled for $host (unless host == build),
+      # the user could write a script that provides the needed information,
+      # so we support that.
+      python_prog="${with_python}"
+      AC_PATH_PROG(python_prog_path, ${python_prog}, missing)
+      if test "${python_prog_path}" = missing; then
+        AC_ERROR(unable to find python program ${python_prog})
+      fi
+      ;;
+    esac
   esac
 
-  save_CPPFLAGS=$CPPFLAGS
-  CPPFLAGS="$CPPFLAGS ${python_includes}"
-  save_LIBS=$LIBS
-  LIBS="$LIBS ${python_libs}"
+  if test "${python_prog}" != missing; then
+    # We have a python program to use, but it may be too old.
+    # Don't flag an error for --with-python=auto (the default).
+    have_python_config=yes
+    python_includes=`${python_prog} ${srcdir}/python/python-config.py --includes`
+    if test $? != 0; then
+      have_python_config=failed
+      if test "${with_python}" != auto; then
+        AC_ERROR(failure running python-config --includes)
+      fi
+    fi
+    python_libs=`${python_prog} ${srcdir}/python/python-config.py --ldflags`
+    if test $? != 0; then
+      have_python_config=failed
+      if test "${with_python}" != auto; then
+        AC_ERROR(failure running python-config --ldflags)
+      fi
+    fi
+    python_prefix=`${python_prog} ${srcdir}/python/python-config.py --exec-prefix`
+    if test $? != 0; then
+      have_python_config=failed
+      if test "${with_python}" != auto; then
+        AC_ERROR(failure running python-config --exec-prefix)
+      fi
+    fi
+  else
+    # We do not have a python executable we can use to determine where
+    # to find the Python headers and libs.  We cannot guess the include
+    # path from the python_prefix either, because that include path
+    # depends on the Python version.  So, there is nothing much we can
+    # do except assume that the compiler will be able to find those files.
+    python_includes=
+    python_libs=
+    have_python_config=no
+  fi
+
+  # If we have python-config, only try the configuration it provides.
+  # Otherwise fallback on the old way of trying different versions of
+  # python in turn.
+
   have_libpython=no
+  if test "${have_python_config}" = yes; then
+    # Determine the Python version by extracting "-lpython<version>"
+    # part of the python_libs. <version> is usually X.Y with X and Y
+    # being decimal numbers, but can also be XY (seen on Windows).
+    #
+    # The extraction is performed using sed with a regular expression.
+    # Initially, the regexp used was using the '?' quantifier to make
+    # the dot in the version number optional.  Unfortunately, this
+    # does not work with non-GNU versions of sed because, because of
+    # what looks like a limitation (the '?' quantifier does not work
+    # with back-references).  We work around this limitation by using
+    # the '*' quantifier instead.  It means that, in theory, we might
+    # match unexpected version strings such as "-lpython2..7", but
+    # this seems unlikely in practice.  And even if that happens,
+    # an error will be triggered later on, when checking that version
+    # number.
+    python_version=`echo " ${python_libs} " \
+                         | sed -e 's,^.* -l\(python[[0-9]]*[[.]]*[[0-9]]*\).*$,\1,'`
+    case "${python_version}" in
+    python*)
+      AC_TRY_LIBPYTHON(${python_version}, have_libpython,
+                       ${python_includes}, ${python_libs})
+      ;;
+    *)
+      AC_MSG_ERROR([unable to determine python version from ${python_libs}])
+      ;;
+    esac
+  elif test "${have_python_config}" != failed; then
+    if test "${have_libpython}" = no; then
+      AC_TRY_LIBPYTHON(python2.7, have_libpython,
+                       ${python_includes}, "${python_libs} -lpython2.7")
+    fi
+    if test "${have_libpython}" = no; then
+      AC_TRY_LIBPYTHON(python2.6, have_libpython,
+                       ${python_includes}, "${python_libs} -lpython2.6")
+    fi
+    if test ${have_libpython} = no; then
+      AC_TRY_LIBPYTHON(python2.5, have_libpython,
+                       ${python_includes}, "${python_libs} -lpython2.5")
+    fi
+    if test ${have_libpython} = no; then
+      AC_TRY_LIBPYTHON(python2.4, have_libpython,
+                       ${python_includes}, "${python_libs} -lpython2.4")
+    fi
+  fi
+  if test "${have_libpython}" = python2.7 -o "${have_libpython}" = python27; then
+    AC_DEFINE(HAVE_LIBPYTHON2_7, 1, [Define if Python 2.7 is being used.])
+  elif test "${have_libpython}" = python2.6 -o "${have_libpython}" = python26; then
+    AC_DEFINE(HAVE_LIBPYTHON2_6, 1, [Define if Python 2.6 is being used.])
+  elif test "${have_libpython}" = python2.5 -o "${have_libpython}" = python25; then
+    AC_DEFINE(HAVE_LIBPYTHON2_5, 1, [Define if Python 2.5 is being used.])
+  elif test "${have_libpython}" = python2.4 -o "${have_libpython}" = python24; then
+    AC_DEFINE(HAVE_LIBPYTHON2_4, 1, [Define if Python 2.4 is being used.])
+  fi
+
   if test "${have_libpython}" = no; then
-    AC_TRY_LIBPYTHON(python2.6, have_libpython)
-    if test "${HAVE_LIBPYTHON2_6}" = yes; then
-      AC_DEFINE(HAVE_LIBPYTHON2_6, 1, [Define if Python 2.6 is being used.])
-    fi
-  fi
-  if test ${have_libpython} = no; then
-    AC_TRY_LIBPYTHON(python2.5, have_libpython)
-    if test "${HAVE_LIBPYTHON2_5}" = yes; then
-      AC_DEFINE(HAVE_LIBPYTHON2_5, 1, [Define if Python 2.5 is being used.])
-    fi
-  fi
-  if test ${have_libpython} = no; then
-    AC_TRY_LIBPYTHON(python2.4, have_libpython)
-    if test "${HAVE_LIBPYTHON2_4}" = yes; then
-      AC_DEFINE(HAVE_LIBPYTHON2_4, 1, [Define if Python 2.4 is being used.])
-    fi
-  fi
-  if test ${have_libpython} = no; then
     case "${with_python}" in
     yes)
       AC_MSG_ERROR([python is missing or unusable])
@@ -667,16 +835,21 @@ else
       AC_MSG_ERROR([no usable python found at ${with_python}])
       ;;
     esac
-    CPPFLAGS=$save_CPPFLAGS
-    LIBS=$save_LIBS
+  else
+    if test -n "${python_prefix}"; then
+      AC_DEFINE_UNQUOTED(WITH_PYTHON_PATH, "${python_prefix}",
+                         [Define if --with-python provides a path, either directly or via python-config.py --exec-prefix.])
+      GDB_AC_DEFINE_RELOCATABLE(PYTHON_PATH, python, ${python_prefix})
+    fi
   fi
 fi
 
-if test "${have_libpython}" = yes; then
+if test "${have_libpython}" != no; then
   AC_DEFINE(HAVE_PYTHON, 1, [Define if Python interpreter is being linked in.])
   CONFIG_OBS="$CONFIG_OBS \$(SUBDIR_PYTHON_OBS)"
   CONFIG_DEPS="$CONFIG_DEPS \$(SUBDIR_PYTHON_DEPS)"
   CONFIG_SRCS="$CONFIG_SRCS \$(SUBDIR_PYTHON_SRCS)"
+  CONFIG_INSTALL="$CONFIG_INSTALL install-python"
   ENABLE_CFLAGS="$ENABLE_CFLAGS \$(SUBDIR_PYTHON_CFLAGS)"
 
   # Flags needed to compile Python code (taken from python-config --cflags).
@@ -699,13 +872,31 @@ if test "${have_libpython}" = yes; then
     done
     AC_MSG_RESULT(${PYTHON_CFLAGS})
   fi
+
+  # On IRIX, type siginfo is not defined.  Instead, sys/siginfo.h provides:
+  #    #if _SGIAPI
+  #    #define siginfo __siginfo
+  #    #endif
+  # The problem is that including Python causes some XOPEN macros to be
+  # unilaterally defined, and that in turn causes _SGIAPI to evaluate
+  # to false.  So, we work around this issue by defining siginfo ourself
+  # though the command-line.
+  case "$gdb_host" in
+    irix*) if test "${GCC}" = yes; then
+             CPPFLAGS="$CPPFLAGS -Dsiginfo=__siginfo"
+           fi
+           ;;
+  esac
 else
   # Even if Python support is not compiled in, we need to have these files
-  # included in order to recognize the GDB command "python".
-  CONFIG_OBS="$CONFIG_OBS python.o py-value.o py-prettyprint.o"
-  CONFIG_SRCS="$CONFIG_SRCS python/python.c python/py-value.c python/py-prettyprint.c"
+  # included.
+  CONFIG_OBS="$CONFIG_OBS python.o py-value.o py-prettyprint.o py-auto-load.o"
+  CONFIG_SRCS="$CONFIG_SRCS python/python.c python/py-value.c \
+	python/py-prettyprint.c python/py-auto-load.c"
 fi
 AC_SUBST(PYTHON_CFLAGS)
+AC_SUBST(PYTHON_CPPFLAGS)
+AC_SUBST(PYTHON_LIBS)
 
 # ------------------------- #
 # Checks for header files.  #
@@ -802,10 +993,10 @@ AC_FUNC_ALLOCA
 AC_FUNC_MMAP
 AC_FUNC_VFORK
 AC_CHECK_FUNCS([canonicalize_file_name realpath getrusage getuid \
-		getgid pipe poll pread64 sbrk setpgid setpgrp setsid \
+		getgid pipe poll pread64 resize_term sbrk setpgid setpgrp setsid \
 		sigaction sigprocmask sigsetmask socketpair syscall \
-		ttrace wborder setlocale iconvlist libiconvlist btowc \
-		setrlimit getrlimit])
+		ttrace wborder wresize setlocale iconvlist libiconvlist btowc \
+		setrlimit getrlimit posix_madvise waitpid])
 AM_LANGINFO_CODESET
 
 # Check the return and argument types of ptrace.  No canned test for
@@ -1303,6 +1494,47 @@ aix*)
   ;;
 esac
 
+AC_MSG_CHECKING(for the dynamic export flag)
+dynamic_list=false
+if test "${gdb_native}" = yes; then
+   # The dynamically loaded libthread_db needs access to symbols in the gdb
+   # executable.  Older GNU ld supports --export-dynamic but --dynamic-list
+   # may not be supported there.
+   old_LDFLAGS="$LDFLAGS"
+   # Older GNU ld supports --export-dynamic but --dynamic-list it does not.
+   RDYNAMIC="-Wl,--dynamic-list=${srcdir}/proc-service.list"
+   LDFLAGS="$LDFLAGS $RDYNAMIC"
+   if test "${have_libpython}" = no; then
+     AC_TRY_LINK([], [], [dynamic_list=true])
+   else
+     # Workaround http://bugs.python.org/issue4434 where static
+     # libpythonX.Y.a would get its symbols required for
+     # pythonX.Y/lib-dynload/*.so modules hidden by -Wl,--dynamic-list.
+     # Problem does not happen for the recommended libpythonX.Y.so linkage.
+     old_CFLAGS="$CFLAGS"
+     CFLAGS="$CFLAGS $PYTHON_CFLAGS"
+     AC_RUN_IFELSE(
+       AC_LANG_PROGRAM(
+         [#include "]${have_libpython}[/Python.h"],
+         [int err;
+          Py_Initialize ();
+          err = PyRun_SimpleString ("import itertools\n");
+          Py_Finalize ();
+          return err == 0 ? 0 : 1;]),
+       [dynamic_list=true], [], [true])
+     CFLAGS="$old_CFLAGS"
+   fi
+   LDFLAGS="$old_LDFLAGS"
+fi
+if $dynamic_list; then
+  found="-Wl,--dynamic-list"
+  RDYNAMIC='-Wl,--dynamic-list=$(srcdir)/proc-service.list'
+else
+  found="-rdynamic"
+  RDYNAMIC="-rdynamic"
+fi
+AC_SUBST(RDYNAMIC)
+AC_MSG_RESULT($found)
 
 dnl For certain native configurations, we need to check whether thread
 dnl support can be built in or not.
@@ -1312,22 +1544,6 @@ dnl and not doing a canadian cross build (build == host).
 
 if test ${build} = ${host} -a ${host} = ${target} ; then
    case ${host_os} in
-   hpux*)
-      AC_MSG_CHECKING(for HPUX/OSF thread support)
-      if test -f /usr/include/dce/cma_config.h ; then
-         if test "$GCC" = "yes" ; then
-            AC_MSG_RESULT(yes)
-            AC_DEFINE(HAVE_HPUX_THREAD_SUPPORT, 1,
-	    [Define if you have HPUX threads])
-            CONFIG_OBS="${CONFIG_OBS} hpux-thread.o"
-            CONFIG_SRCS="${CONFIG_SRCS} hpux-thread.c"
-         else
-            AC_MSG_RESULT(no (suppressed because you are not using GCC))
-         fi
-      else
-         AC_MSG_RESULT(no)
-      fi
-      ;;
    solaris*)
       # See if thread_db library is around for Solaris thread debugging.
       # Note that we must explicitly test for version 1 of the library
@@ -1341,19 +1557,7 @@ if test ${build} = ${host} -a ${host} = ${target} ; then
          CONFIG_OBS="${CONFIG_OBS} sol-thread.o"
          CONFIG_SRCS="${CONFIG_SRCS} sol-thread.c"
          AC_CHECK_LIB(dl, dlopen)
-         if test "$GCC" = "yes" ; then
-            # The GNU linker requires the -export-dynamic option to make
-            # all symbols visible in the dynamic symbol table.
-            hold_ldflags=$LDFLAGS
-            AC_MSG_CHECKING(for the ld -export-dynamic flag)
-            LDFLAGS="${LDFLAGS} -Wl,-export-dynamic"
-            AC_TRY_LINK(, [int i;], found=yes, found=no)
-            LDFLAGS=$hold_ldflags
-            AC_MSG_RESULT($found)
-            if test $found = yes; then
-               CONFIG_LDFLAGS="${CONFIG_LDFLAGS} -Wl,-export-dynamic"
-            fi
-         fi
+	 CONFIG_LDFLAGS="${CONFIG_LDFLAGS} $RDYNAMIC"
 	 # Sun randomly tweaked the prototypes in <proc_service.h>
 	 # at one point.
 	 AC_MSG_CHECKING(if <proc_service.h> is old)
@@ -1389,6 +1593,11 @@ if test ${build} = ${host} -a ${host} = ${target} ; then
          CONFIG_SRCS="${CONFIG_SRCS} aix-thread.c"
          CONFIG_OBS="${CONFIG_OBS} aix-thread.o"
          CONFIG_LDFLAGS="${CONFIG_LDFLAGS} -lpthdebug"
+
+         # Older versions of AIX do not provide the declaration for
+         # the getthrds function (it appears that it was introduced
+         # with AIX 6.x).
+         AC_CHECK_DECLS(getthrds, [], [], [[#include <procinfo.h>]])
       fi
       ;;
    esac
@@ -1647,6 +1856,10 @@ OLD_LIBS=$LIBS
 CFLAGS="$CFLAGS -I${srcdir}/../include -I../bfd -I${srcdir}/../bfd"
 LDFLAGS="$LDFLAGS -L../bfd -L../libiberty"
 intl=`echo $LIBINTL | sed 's,${top_builddir}/,,g'`
+# -ldl is provided by bfd/Makfile.am (LIBDL) <PLUGINS>.
+if test "$plugins" = "yes"; then
+  LIBS="-ldl $LIBS"
+fi
 LIBS="-lbfd -liberty $intl $LIBS"
 AC_CACHE_CHECK([for ELF support in BFD], gdb_cv_var_elf,
 [AC_TRY_LINK(
@@ -1660,6 +1873,10 @@ if test $gdb_cv_var_elf = yes; then
   CONFIG_OBS="$CONFIG_OBS elfread.o"
   AC_DEFINE(HAVE_ELF, 1,
 	    [Define if ELF support should be included.])
+  # -ldl is provided by bfd/Makfile.am (LIBDL) <PLUGINS>.
+  if test "$plugins" = "yes"; then
+    OLD_LIBS="-ldl $OLD_LIBS"
+  fi
 fi
 CFLAGS=$OLD_CFLAGS
 LDFLAGS=$OLD_LDFLAGS
@@ -1894,15 +2111,31 @@ if test "x$enable_multi_ice" = xyes; then
    AC_CONFIG_SUBDIRS(multi-ice)
 fi
 
-# We only build gdbserver automatically in a native configuration. 
-if test "$gdb_native" = "yes"; then
+AC_ARG_ENABLE(gdbserver,
+AS_HELP_STRING([--enable-gdbserver],
+               [automatically build gdbserver (yes/no/auto, default is auto)]),
+[case "${enableval}" in
+  yes| no|auto) ;;
+  *) AC_MSG_ERROR(bad value ${enableval} for --enable-gdbserver option) ;;
+esac],[enable_gdbserver=auto])
+
+# We only build gdbserver automatically in a native configuration, and
+# only if the user did not explicitly disable its build.
+if test "$gdb_native" = "yes" -a "$enable_gdbserver" != "no"; then
   AC_MSG_CHECKING(whether gdbserver is supported on this host)
   if test "x$build_gdbserver" = xyes; then
     AC_MSG_RESULT(yes)
     AC_CONFIG_SUBDIRS(gdbserver)
+    gdbserver_build_enabled=yes
   else
     AC_MSG_RESULT(no)
   fi
+fi
+
+# If the user explicitly request the gdbserver to be built, verify that
+# we were in fact able to enable it.
+if test "$enable_gdbserver" = "yes" -a "$gdbserver_build_enabled" != "yes"; then
+  AC_MSG_ERROR(Automatic gdbserver build is not supported for this configuration)
 fi
 
 # If nativefile (NAT_FILE) is not set in config/*/*.m[ht] files, we link
@@ -1933,7 +2166,7 @@ dnl  At the moment, we just assume it's UTF-8.
 AC_DEFINE(GDB_DEFAULT_HOST_CHARSET, "UTF-8",
           [Define to be a string naming the default host character set.])
 
-AC_OUTPUT(Makefile .gdbinit:gdbinit.in gnulib/Makefile,
+AC_OUTPUT(Makefile .gdbinit:gdbinit.in doc/Makefile gnulib/Makefile data-directory/Makefile,
 [
 case x$CONFIG_HEADERS in
 xconfig.h:config.in)

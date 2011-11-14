@@ -1,6 +1,6 @@
 /* Portable <sys/ptrace.h>
 
-   Copyright (C) 2004, 2005, 2007, 2008, 2009, 2010
+   Copyright (C) 2004, 2005, 2007, 2008, 2009, 2010, 2011
    Free Software Foundation, Inc.
 
    This file is part of GDB.
@@ -115,7 +115,11 @@
    and there is probably no special request that we would be required
    to use when resuming the execution of our program.  */
 #ifndef PT_SYSCALL
-# define PT_SYSCALL PT_CONTINUE
+# ifdef PTRACE_SYSCALL
+#  define PT_SYSCALL PTRACE_SYSCALL
+#else
+#  define PT_SYSCALL PT_CONTINUE
+# endif
 #endif
 
 /* Some systems, in particular DEC OSF/1, Digital Unix, Compaq Tru64

@@ -1,6 +1,6 @@
 /* GNU/Linux/SH specific low level interface, for the remote server for GDB.
    Copyright (C) 1995, 1996, 1998, 1999, 2000, 2001, 2002, 2003, 2005, 2007,
-   2008, 2009, 2010 Free Software Foundation, Inc.
+   2008, 2009, 2010, 2011 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -104,8 +104,8 @@ static void sh_fill_gregset (struct regcache *regcache, void *buf)
 }
 
 struct regset_info target_regsets[] = {
-  { 0, 0, 0, GENERAL_REGS, sh_fill_gregset, NULL },
-  { 0, 0, -1, -1, NULL, NULL }
+  { 0, 0, 0, 0, GENERAL_REGS, sh_fill_gregset, NULL },
+  { 0, 0, 0, -1, -1, NULL, NULL }
 };
 
 struct linux_target_ops the_low_target = {

@@ -28,6 +28,7 @@
 #include "elf/ia64.h"
 #include "objalloc.h"
 #include "hashtab.h"
+#include "bfd_stdint.h"
 
 #define ARCH_SIZE	NN
 
@@ -66,6 +67,15 @@
 
   MIN_PLT	Created by PLTOFF entries against dynamic symbols.  This
  		does not require dynamic relocations.  */
+
+/* Only add code for vms when the vms target is enabled.  This is required
+   because it depends on vms-lib.c for its archive format and we don't want
+   to compile that code if it is not used.  */
+#if ARCH_SIZE == 64 && \
+  (defined (HAVE_bfd_elf64_ia64_vms_vec) || defined (HAVE_all_vecs))
+#define INCLUDE_IA64_VMS
+#endif
+
 
 #define NELEMS(a)	((int) (sizeof (a) / sizeof ((a)[0])))
 
@@ -627,7 +637,7 @@ elfNN_ia64_relax_br (bfd_byte *contents, bfd_vma off)
   bfd_byte *hit_addr;
 
   hit_addr = (bfd_byte *) (contents + off);
-  br_slot = (long) hit_addr & 0x3;
+  br_slot = (intptr_t) hit_addr & 0x3;
   hit_addr -= br_slot;
   t0 = bfd_getl64 (hit_addr + 0);
   t1 = bfd_getl64 (hit_addr + 8);
@@ -729,7 +739,7 @@ elfNN_ia64_relax_brl (bfd_byte *contents, bfd_vma off)
   bfd_vma t0, t1, i0, i1, i2;
 
   hit_addr = (bfd_byte *) (contents + off);
-  hit_addr -= (long) hit_addr & 0x3;
+  hit_addr -= (intptr_t) hit_addr & 0x3;
   t0 = bfd_getl64 (hit_addr);
   t1 = bfd_getl64 (hit_addr + 8);
 
@@ -1400,8 +1410,6 @@ elfNN_ia64_section_from_shdr (bfd *abfd,
 			      const char *name,
 			      int shindex)
 {
-  asection *newsect;
-
   /* There ought to be a place to keep ELF backend specific flags, but
      at the moment there isn't one.  We just keep track of the
      sections by their name, instead.  Fortunately, the ABI gives
@@ -1424,7 +1432,6 @@ elfNN_ia64_section_from_shdr (bfd *abfd,
 
   if (! _bfd_elf_make_section_from_shdr (abfd, hdr, name, shindex))
     return FALSE;
-  newsect = hdr->bfd_section;
 
   return TRUE;
 }
@@ -2592,16 +2599,9 @@ get_reloc_section (bfd *abfd,
 
   srel_name = (bfd_elf_string_from_elf_section
 	       (abfd, elf_elfheader(abfd)->e_shstrndx,
-		elf_section_data(sec)->rel_hdr.sh_name));
+		_bfd_elf_single_rel_hdr (sec)->sh_name));
   if (srel_name == NULL)
     return NULL;
-
-  BFD_ASSERT ((CONST_STRNEQ (srel_name, ".rela")
-	       && strcmp (bfd_get_section_name (abfd, sec),
-			  srel_name+5) == 0)
-	      || (CONST_STRNEQ (srel_name, ".rel")
-		  && strcmp (bfd_get_section_name (abfd, sec),
-			     srel_name+4) == 0));
 
   dynobj = ia64_info->root.dynobj;
   if (!dynobj)
@@ -3875,7 +3875,7 @@ elfNN_ia64_install_value (bfd_byte *hit_addr, bfd_vma v,
   switch (opnd)
     {
     case IA64_OPND_IMMU64:
-      hit_addr -= (long) hit_addr & 0x3;
+      hit_addr -= (intptr_t) hit_addr & 0x3;
       t0 = bfd_getl64 (hit_addr);
       t1 = bfd_getl64 (hit_addr + 8);
 
@@ -3904,7 +3904,7 @@ elfNN_ia64_install_value (bfd_byte *hit_addr, bfd_vma v,
       break;
 
     case IA64_OPND_TGT64:
-      hit_addr -= (long) hit_addr & 0x3;
+      hit_addr -= (intptr_t) hit_addr & 0x3;
       t0 = bfd_getl64 (hit_addr);
       t1 = bfd_getl64 (hit_addr + 8);
 
@@ -3929,7 +3929,7 @@ elfNN_ia64_install_value (bfd_byte *hit_addr, bfd_vma v,
       break;
 
     default:
-      switch ((long) hit_addr & 0x3)
+      switch ((intptr_t) hit_addr & 0x3)
 	{
 	case 0: shift =  5; break;
 	case 1: shift = 14; hit_addr += 3; break;
@@ -4656,16 +4656,9 @@ elfNN_ia64_relocate_section (bfd *output_bfd,
 	    continue;
 	}
 
-      /* For relocs against symbols from removed linkonce sections,
-	 or sections discarded by a linker script, we just want the
-	 section contents zeroed.  Avoid any special processing.  */
       if (sym_sec != NULL && elf_discarded_section (sym_sec))
-	{
-	  _bfd_clear_contents (howto, input_bfd, contents + rel->r_offset);
-	  rel->r_info = 0;
-	  rel->r_addend = 0;
-	  continue;
-	}
+	RELOC_AGAINST_DISCARDED_SECTION (info, input_bfd, input_section,
+					 rel, relend, howto, contents);
 
       if (info->relocatable)
 	continue;
@@ -4689,7 +4682,7 @@ elfNN_ia64_relocate_section (bfd *output_bfd,
 	case R_IA64_DIR64LSB:
 	  /* Install a dynamic relocation for this reloc.  */
 	  if ((dynamic_symbol_p || info->shared)
-	      && r_symndx != 0
+	      && r_symndx != STN_UNDEF
 	      && (input_section->flags & SEC_ALLOC) != 0)
 	    {
 	      unsigned int dyn_r_type;
@@ -4918,7 +4911,7 @@ elfNN_ia64_relocate_section (bfd *output_bfd,
 	case R_IA64_PCREL64MSB:
 	case R_IA64_PCREL64LSB:
 	  /* Install a dynamic relocation for this reloc.  */
-	  if (dynamic_symbol_p && r_symndx != 0)
+	  if (dynamic_symbol_p && r_symndx != STN_UNDEF)
 	    {
 	      BFD_ASSERT (srel != NULL);
 
@@ -5723,14 +5716,14 @@ elfNN_hpux_backend_symbol_processing (bfd *abfd ATTRIBUTE_UNUSED,
     }
 }
 
+#ifdef INCLUDE_IA64_VMS
+
 static bfd_boolean
 elfNN_vms_section_from_shdr (bfd *abfd,
 			     Elf_Internal_Shdr *hdr,
 			     const char *name,
 			     int shindex)
 {
-  asection *newsect;
-
   switch (hdr->sh_type)
     {
     case SHT_IA_64_VMS_TRACE:
@@ -5744,7 +5737,6 @@ elfNN_vms_section_from_shdr (bfd *abfd,
 
   if (! _bfd_elf_make_section_from_shdr (abfd, hdr, name, shindex))
     return FALSE;
-  newsect = hdr->bfd_section;
 
   return TRUE;
 }
@@ -5984,12 +5976,14 @@ elfNN_vms_close_and_cleanup (bfd *abfd)
 
   return _bfd_generic_close_and_cleanup (abfd);
 }
+#endif /* INCLUDE_IA64_VMS */
 
 #define TARGET_LITTLE_SYM		bfd_elfNN_ia64_little_vec
 #define TARGET_LITTLE_NAME		"elfNN-ia64-little"
 #define TARGET_BIG_SYM			bfd_elfNN_ia64_big_vec
 #define TARGET_BIG_NAME			"elfNN-ia64-big"
 #define ELF_ARCH			bfd_arch_ia64
+#define ELF_TARGET_ID			IA64_ELF_DATA
 #define ELF_MACHINE_CODE		EM_IA_64
 #define ELF_MACHINE_ALT1		1999	/* EAS2.3 */
 #define ELF_MACHINE_ALT2		1998	/* EAS2.2 */
@@ -6117,6 +6111,7 @@ elfNN_vms_close_and_cleanup (bfd *abfd)
 #include "elfNN-target.h"
 
 /* VMS-specific vectors.  */
+#ifdef INCLUDE_IA64_VMS
 
 #undef  TARGET_LITTLE_SYM
 #define TARGET_LITTLE_SYM		bfd_elfNN_ia64_vms_vec
@@ -6160,4 +6155,40 @@ elfNN_vms_close_and_cleanup (bfd *abfd)
 #undef  elfNN_bed
 #define elfNN_bed elfNN_ia64_vms_bed
 
+/* Use VMS-style archives (in particular, don't use the standard coff
+   archive format).  */
+#define bfd_elfNN_archive_functions
+
+#undef bfd_elfNN_archive_p
+#define bfd_elfNN_archive_p _bfd_vms_lib_ia64_archive_p
+#undef bfd_elfNN_write_archive_contents
+#define bfd_elfNN_write_archive_contents _bfd_vms_lib_write_archive_contents
+#undef bfd_elfNN_mkarchive
+#define bfd_elfNN_mkarchive _bfd_vms_lib_ia64_mkarchive
+
+#define bfd_elfNN_archive_slurp_armap \
+  _bfd_vms_lib_slurp_armap
+#define bfd_elfNN_archive_slurp_extended_name_table \
+  _bfd_vms_lib_slurp_extended_name_table
+#define bfd_elfNN_archive_construct_extended_name_table \
+  _bfd_vms_lib_construct_extended_name_table
+#define bfd_elfNN_archive_truncate_arname \
+  _bfd_vms_lib_truncate_arname
+#define bfd_elfNN_archive_write_armap \
+  _bfd_vms_lib_write_armap
+#define bfd_elfNN_archive_read_ar_hdr \
+  _bfd_vms_lib_read_ar_hdr
+#define bfd_elfNN_archive_write_ar_hdr \
+  _bfd_vms_lib_write_ar_hdr
+#define bfd_elfNN_archive_openr_next_archived_file \
+  _bfd_vms_lib_openr_next_archived_file
+#define bfd_elfNN_archive_get_elt_at_index \
+  _bfd_vms_lib_get_elt_at_index
+#define bfd_elfNN_archive_generic_stat_arch_elt \
+  _bfd_vms_lib_generic_stat_arch_elt
+#define bfd_elfNN_archive_update_armap_timestamp \
+  _bfd_vms_lib_update_armap_timestamp
+
 #include "elfNN-target.h"
+
+#endif /* INCLUDE_IA64_VMS */

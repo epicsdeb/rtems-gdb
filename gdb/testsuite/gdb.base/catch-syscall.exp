@@ -1,4 +1,5 @@
-#   Copyright 1997, 1999, 2007, 2008, 2010 Free Software Foundation, Inc.
+#   Copyright 1997, 1999, 2007, 2008, 2010, 2011
+#   Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -23,8 +24,6 @@ if { [is_remote target] || ![isnative] } then {
     continue
 }
 
-set prms_id 0
-set bug_id 0
 
 global srcfile
 set testfile "catch-syscall"
@@ -54,7 +53,9 @@ if {![istarget "hppa*-hp-hpux*"] && ![istarget "*-linux*"]} then {
 # on some architecture.
 #if { ![istarget "i\[34567\]86-*-linux*"]
 if { ![istarget "x86_64-*-linux*"] && ![istarget "i\[34567\]86-*-linux*"]
-     && ![istarget "powerpc-*-linux*"] && ![istarget "powerpc64-*-linux*"] } {
+     && ![istarget "powerpc-*-linux*"] && ![istarget "powerpc64-*-linux*"]
+     && ![istarget "sparc-*-linux*"] && ![istarget "sparc64-*-linux*"]
+     && ![istarget "mips*-linux*"] } {
      continue
 }
 
@@ -165,8 +166,7 @@ proc check_for_program_end {} {
     # Deleting the catchpoints
     delete_breakpoints
 
-    set thistest "successful program end"
-    gdb_test "continue" "Program exited normally.*" $thistest
+    gdb_continue_to_end
 
 }
 
@@ -230,7 +230,7 @@ proc test_catch_syscall_with_wrong_args {} {
     # If it doesn't, everything is right (since we don't have
     # a syscall named "mlock" in it).  Otherwise, this is a failure.
     set thistest "catch syscall with unused syscall ($syscall_name)"
-    gdb_test "continue" "Program exited normally.*" $thistest
+    gdb_continue_to_end $thistest
 }
 
 proc test_catch_syscall_restarting_inferior {} {
@@ -260,7 +260,7 @@ proc test_catch_syscall_fail_nodatadir {} {
 
     # Make sure GDB doesn't load the syscalls xml from the system data
     # directory.
-    gdb_test "set data-directory /the/path/to/nowhere" ""
+    gdb_test_no_output "set data-directory /the/path/to/nowhere"
 
     # Testing to see if we receive a warning when calling "catch syscall"
     # without XML support (without datadir).
@@ -278,16 +278,8 @@ proc test_catch_syscall_fail_nodatadir {} {
 proc do_syscall_tests {} {
     global gdb_prompt srcdir
 
-    # First, we need to set GDB datadir.
-    send_gdb "set data-directory $srcdir/..\n"
-    gdb_expect 10 {
-	-re "$gdb_prompt $" {
-	    verbose "Setting GDB datadir to $srcdir/..." 2
-	}
-	timeout {
-	    error "Couldn't set GDB datadir."
-	}
-    }
+    # NOTE: We don't have to point gdb at the correct data-directory.
+    # For the build tree that is handled by INTERNAL_GDBFLAGS.
 
     # Verify that the 'catch syscall' help is available
     set thistest "help catch syscall"
@@ -388,7 +380,7 @@ proc do_syscall_tests_without_xml {} {
 
     # Make sure GDB doesn't load the syscalls xml from the system data
     # directory.
-    gdb_test "set data-directory /the/path/to/nowhere" ""
+    gdb_test_no_output "set data-directory /the/path/to/nowhere"
 
     # Let's test if we can catch syscalls without XML support.
     # We should succeed, but GDB is not supposed to print syscall names.
@@ -415,10 +407,11 @@ proc do_syscall_tests_without_xml {} {
 proc fill_all_syscalls_numbers {} {
     global all_syscalls_numbers
 
-    # For Linux on x86, PPC and PPC64, the numbers for the syscalls "close" and
-    # "chroot" are the same.
-    if { ![istarget "i\[34567\]86-*-linux*"]
-         || ![istarget "powerpc-*-linux*"] || ![istarget "powerpc64-*-linux*"] } {
+    # For Linux on x86, PPC, PPC64, SPARC and SPARC64, the numbers for the syscalls
+    # "close" and "chroot" are the same.
+    if { [istarget "i\[34567\]86-*-linux*"]
+         || [istarget "powerpc-*-linux*"] || [istarget "powerpc64-*-linux*"]
+         || [istarget "sparc-*-linux*"] || [istarget "sparc64-*-linux*"] } {
          set all_syscalls_numbers { "6" "61" }
     }
 }

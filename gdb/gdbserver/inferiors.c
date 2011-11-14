@@ -1,5 +1,5 @@
 /* Inferior process information for the remote server for GDB.
-   Copyright (C) 2002, 2005, 2007, 2008, 2009, 2010
+   Copyright (C) 2002, 2005, 2007, 2008, 2009, 2010, 2011
    Free Software Foundation, Inc.
 
    Contributed by MontaVista Software.
@@ -22,14 +22,6 @@
 #include <stdlib.h>
 
 #include "server.h"
-
-struct thread_info
-{
-  struct inferior_list_entry entry;
-  void *target_data;
-  void *regcache_data;
-  unsigned int gdb_id;
-};
 
 struct inferior_list all_processes;
 struct inferior_list all_threads;
@@ -179,6 +171,8 @@ add_thread (ptid_t thread_id, void *target_data)
   memset (new_thread, 0, sizeof (*new_thread));
 
   new_thread->entry.id = thread_id;
+  new_thread->last_resume_kind = resume_continue;
+  new_thread->last_status.kind = TARGET_WAITKIND_IGNORE;
 
   add_inferior_to_list (&all_threads, & new_thread->entry);
 

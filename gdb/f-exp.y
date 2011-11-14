@@ -1,6 +1,6 @@
 /* YACC parser for Fortran expressions, for GDB.
    Copyright (C) 1986, 1989, 1990, 1991, 1993, 1994, 1995, 1996, 2000, 2001,
-   2002, 2003, 2004, 2005, 2006, 2007, 2008, 2009, 2010
+   2002, 2003, 2004, 2005, 2006, 2007, 2008, 2009, 2010, 2011
    Free Software Foundation, Inc.
 
    Contributed by Motorola.  Adapted from the C parser by Farooq Butt
@@ -64,7 +64,7 @@
    yacc generated parsers in gdb.  Note that these are only the variables
    produced by yacc.  If other parser generators (bison, byacc, etc) produce
    additional global names that conflict at link time, then those parser
-   generators need to be fixed instead of adding those names to this list. */
+   generators need to be fixed instead of adding those names to this list.  */
 
 #define	yymaxdepth f_maxdepth
 #define	yyparse	f_parse
@@ -196,6 +196,7 @@ static int parse_number (char *, int, int, YYSTYPE *);
 /* Special type cases, put in to allow the parser to distinguish different
    legal basetypes.  */
 %token INT_KEYWORD INT_S2_KEYWORD LOGICAL_S1_KEYWORD LOGICAL_S2_KEYWORD 
+%token LOGICAL_S8_KEYWORD
 %token LOGICAL_KEYWORD REAL_KEYWORD REAL_S8_KEYWORD REAL_S16_KEYWORD 
 %token COMPLEX_S8_KEYWORD COMPLEX_S16_KEYWORD COMPLEX_S32_KEYWORD 
 %token BOOL_AND BOOL_OR BOOL_NOT   
@@ -516,9 +517,9 @@ variable:	name_not_typename
 			      if (msymbol != NULL)
 				write_exp_msymbol (msymbol);
 			      else if (!have_full_symbols () && !have_partial_symbols ())
-				error ("No symbol table is loaded.  Use the \"file\" command.");
+				error (_("No symbol table is loaded.  Use the \"file\" command."));
 			      else
-				error ("No symbol \"%s\" in current context.",
+				error (_("No symbol \"%s\" in current context."),
 				       copy_name ($1.stoken));
 			    }
 			}
@@ -606,6 +607,8 @@ typebase  /* Implements (approximately): (type-qualifier)* type-specifier */
 			{ $$ = parse_f_type->builtin_integer_s2; }
 	|	CHARACTER 
 			{ $$ = parse_f_type->builtin_character; }
+	|	LOGICAL_S8_KEYWORD
+			{ $$ = parse_f_type->builtin_logical_s8; }
 	|	LOGICAL_KEYWORD 
 			{ $$ = parse_f_type->builtin_logical; }
 	|	LOGICAL_S2_KEYWORD
@@ -755,7 +758,7 @@ parse_number (p, len, parsed_float, putithere)
       if (RANGE_CHECK && n != 0)
 	{
 	  if ((unsigned_p && (unsigned)prevn >= (unsigned)n))
-	    range_error("Overflow on numeric constant.");	 
+	    range_error (_("Overflow on numeric constant."));
 	}
       prevn = n;
     }
@@ -791,7 +794,7 @@ parse_number (p, len, parsed_float, putithere)
   putithere->typed_val.val = n;
   
   /* If the high bit of the worked out type is set then this number
-     has to be unsigned. */
+     has to be unsigned.  */
   
   if (unsigned_p || (n & high_bit)) 
     putithere->typed_val.type = unsigned_type;
@@ -858,6 +861,7 @@ static const struct token f77_keywords[] =
   { "integer_2", INT_S2_KEYWORD, BINOP_END },
   { "logical_1", LOGICAL_S1_KEYWORD, BINOP_END },
   { "logical_2", LOGICAL_S2_KEYWORD, BINOP_END },
+  { "logical_8", LOGICAL_S8_KEYWORD, BINOP_END },
   { "complex_8", COMPLEX_S8_KEYWORD, BINOP_END },
   { "integer", INT_KEYWORD, BINOP_END },
   { "logical", LOGICAL_KEYWORD, BINOP_END },
@@ -871,7 +875,7 @@ static const struct token f77_keywords[] =
 
 /* Implementation of a dynamically expandable buffer for processing input
    characters acquired through lexptr and building a value to return in
-   yylval. Ripped off from ch-exp.y */ 
+   yylval.  Ripped off from ch-exp.y */ 
 
 static char *tempbuf;		/* Current buffer contents */
 static int tempbufsize;		/* Size of allocated buffer */
@@ -888,8 +892,8 @@ static int tempbufindex;	/* Current index into buffer */
   } while (0);
 
 
-/* Grow the static temp buffer if necessary, including allocating the first one
-   on demand. */
+/* Grow the static temp buffer if necessary, including allocating the
+   first one on demand.  */
 
 static void
 growbuf_by_size (count)
@@ -906,7 +910,7 @@ growbuf_by_size (count)
 }
 
 /* Blatantly ripped off from ch-exp.y. This routine recognizes F77 
-   string-literals. 
+   string-literals.
    
    Recognize a string literal.  A string literal is a nonzero sequence
    of characters enclosed in matching single quotes, except that
@@ -915,7 +919,7 @@ growbuf_by_size (count)
    a string, it is simply doubled (I.E. 'this''is''one''string') */
 
 static int
-match_string_literal ()
+match_string_literal (void)
 {
   char *tokptr = lexptr;
 
@@ -947,7 +951,7 @@ match_string_literal ()
 /* Read one token, getting characters through lexptr.  */
 
 static int
-yylex ()
+yylex (void)
 {
   int c;
   int namelen;
@@ -980,7 +984,8 @@ yylex ()
   /* See if it is a special .foo. operator.  */
   
   for (i = 0; dot_ops[i].operator != NULL; i++)
-    if (strncmp (tokstart, dot_ops[i].operator, strlen (dot_ops[i].operator)) == 0)
+    if (strncmp (tokstart, dot_ops[i].operator,
+		 strlen (dot_ops[i].operator)) == 0)
       {
 	lexptr += strlen (dot_ops[i].operator);
 	yylval.opcode = dot_ops[i].opcode;
@@ -1034,7 +1039,7 @@ yylex ()
     case '.':
       /* Might be a floating point number.  */
       if (lexptr[1] < '0' || lexptr[1] > '9')
-	goto symbol;		/* Nope, must be a symbol. */
+	goto symbol;		/* Nope, must be a symbol.  */
       /* FALL THRU into number case.  */
       
     case '0':
@@ -1058,7 +1063,8 @@ yylex ()
 	    p += 2;
 	    hex = 1;
 	  }
-	else if (c == '0' && (p[1]=='t' || p[1]=='T' || p[1]=='d' || p[1]=='D'))
+	else if (c == '0' && (p[1]=='t' || p[1]=='T'
+			      || p[1]=='d' || p[1]=='D'))
 	  {
 	    p += 2;
 	    hex = 0;
@@ -1093,7 +1099,7 @@ yylex ()
 	    
 	    memcpy (err_copy, tokstart, p - tokstart);
 	    err_copy[p - tokstart] = 0;
-	    error ("Invalid number \"%s\".", err_copy);
+	    error (_("Invalid number \"%s\"."), err_copy);
 	  }
 	lexptr = p;
 	return toktype;
@@ -1124,14 +1130,14 @@ yylex ()
       return c;
     }
   
-  if (!(c == '_' || c == '$'
+  if (!(c == '_' || c == '$' || c ==':'
 	|| (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')))
     /* We must have come across a bad character (e.g. ';').  */
-    error ("Invalid character '%c' in expression.", c);
+    error (_("Invalid character '%c' in expression."), c);
   
   namelen = 0;
   for (c = tokstart[namelen];
-       (c == '_' || c == '$' || (c >= '0' && c <= '9') 
+       (c == '_' || c == '$' || c == ':' || (c >= '0' && c <= '9')
 	|| (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')); 
        c = tokstart[++namelen]);
   
@@ -1146,8 +1152,8 @@ yylex ()
   /* Catch specific keywords.  */
   
   for (i = 0; f77_keywords[i].operator != NULL; i++)
-    if (strncmp (tokstart, f77_keywords[i].operator,
-		 strlen(f77_keywords[i].operator)) == 0)
+    if (strlen (f77_keywords[i].operator) == namelen
+	&& strncmp (tokstart, f77_keywords[i].operator, namelen) == 0)
       {
 	/* 	lexptr += strlen(f77_keywords[i].operator); */ 
 	yylval.opcode = f77_keywords[i].opcode;
@@ -1218,5 +1224,5 @@ yyerror (msg)
   if (prev_lexptr)
     lexptr = prev_lexptr;
 
-  error ("A %s in expression, near `%s'.", (msg ? msg : "error"), lexptr);
+  error (_("A %s in expression, near `%s'."), (msg ? msg : "error"), lexptr);
 }

@@ -1,7 +1,7 @@
 /* Support for printing Java values for GDB, the GNU debugger.
 
    Copyright (C) 1997, 1998, 1999, 2000, 2001, 2002, 2003, 2004, 2005, 2007,
-   2008, 2009, 2010 Free Software Foundation, Inc.
+   2008, 2009, 2010, 2011 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -53,7 +53,7 @@ java_value_print (struct value *val, struct ui_file *stream,
     {
       CORE_ADDR obj_addr;
 
-      /* Get the run-time type, and cast the object into that */
+      /* Get the run-time type, and cast the object into that.  */
 
       obj_addr = unpack_pointer (type, value_contents (val));
 
@@ -79,6 +79,7 @@ java_value_print (struct value *val, struct ui_file *stream,
       int reps;
       struct type *el_type
 	= java_primitive_type_from_name (gdbarch, name, i - 2);
+
       i = 0;
       read_memory (address + get_java_object_header_size (gdbarch), buf4, 4);
 
@@ -88,9 +89,9 @@ java_value_print (struct value *val, struct ui_file *stream,
       if (el_type == NULL)
 	{
 	  CORE_ADDR element;
-	  CORE_ADDR next_element = -1; /* dummy initial value */
+	  CORE_ADDR next_element = -1; /* Dummy initial value.  */
 
-	  /* Skip object header and length. */
+	  /* Skip object header and length.  */
 	  address += get_java_object_header_size (gdbarch) + 4;
 
 	  while (i < length && things_printed < options->print_max)
@@ -176,9 +177,13 @@ java_value_print (struct value *val, struct ui_file *stream,
 	      for (reps = 1; i + reps < length; reps++)
 		{
 		  set_value_lazy (next_v, 1);
-		  set_value_offset (next_v, value_offset (next_v) + TYPE_LENGTH (el_type));
-		  if (memcmp (value_contents (v), value_contents (next_v),
-			      TYPE_LENGTH (el_type)) != 0)
+		  set_value_offset (next_v, value_offset (next_v)
+				    + TYPE_LENGTH (el_type));
+		  value_fetch_lazy (next_v);
+		  if (!(value_available_contents_eq
+			(v, value_embedded_offset (v),
+			 next_v, value_embedded_offset (next_v),
+			 TYPE_LENGTH (el_type))))
 		    break;
 		}
 
@@ -204,7 +209,7 @@ java_value_print (struct value *val, struct ui_file *stream,
       return 0;
     }
 
-  /* If it's type String, print it */
+  /* If it's type String, print it.  */
 
   if (TYPE_CODE (type) == TYPE_CODE_PTR
       && TYPE_TARGET_TYPE (type)
@@ -224,7 +229,7 @@ java_value_print (struct value *val, struct ui_file *stream,
       unsigned long count;
       struct value *mark;
 
-      mark = value_mark ();	/* Remember start of new values */
+      mark = value_mark ();	/* Remember start of new values.  */
 
       data_val = value_struct_elt (&val, NULL, "data", NULL, NULL);
       data = value_as_address (data_val);
@@ -235,10 +240,11 @@ java_value_print (struct value *val, struct ui_file *stream,
       count_val = value_struct_elt (&val, NULL, "count", NULL, NULL);
       count = value_as_address (count_val);
 
-      value_free_to_mark (mark);	/* Release unnecessary values */
+      value_free_to_mark (mark);	/* Release unnecessary values.  */
 
       char_type = builtin_java_type (gdbarch)->builtin_char;
-      val_print_string (char_type, data + boffset, count, stream, options);
+      val_print_string (char_type, NULL, data + boffset, count, stream,
+			options);
 
       return 0;
     }
@@ -256,8 +262,10 @@ java_value_print (struct value *val, struct ui_file *stream,
 
 static void
 java_print_value_fields (struct type *type, const gdb_byte *valaddr,
+			 int offset,
 			 CORE_ADDR address, struct ui_file *stream,
 			 int recurse,
+			 const struct value *val,
 			 const struct value_print_options *options)
 {
   int i, len, n_baseclasses;
@@ -300,11 +308,11 @@ java_print_value_fields (struct type *type, const gdb_byte *valaddr,
 
 	  base_valaddr = valaddr;
 
-	  java_print_value_fields (baseclass, base_valaddr, address + boffset,
-				   stream, recurse + 1, options);
+	  java_print_value_fields (baseclass, base_valaddr,
+				   offset + boffset, address,
+				   stream, recurse + 1, val, options);
 	  fputs_filtered (", ", stream);
 	}
-
     }
 
   if (!len && n_baseclasses == 1)
@@ -319,6 +327,7 @@ java_print_value_fields (struct type *type, const gdb_byte *valaddr,
 	  if (field_is_static (&TYPE_FIELD (type, i)))
 	    {
 	      char *name = TYPE_FIELD_NAME (type, i);
+
 	      if (!options->static_field_print)
 		continue;
 	      if (name != NULL && strcmp (name, "class") == 0)
@@ -390,12 +399,24 @@ java_print_value_fields (struct type *type, const gdb_byte *valaddr,
 		{
 		  fputs_filtered ("<optimized out or zero length>", stream);
 		}
+	      else if (value_bits_synthetic_pointer (val,
+						     TYPE_FIELD_BITPOS (type,
+									i),
+						     TYPE_FIELD_BITSIZE (type,
+									 i)))
+		{
+		  fputs_filtered (_("<synthetic pointer>"), stream);
+		}
+	      else if (!value_bits_valid (val, TYPE_FIELD_BITPOS (type, i),
+					  TYPE_FIELD_BITSIZE (type, i)))
+		{
+		  val_print_optimized_out (stream);
+		}
 	      else
 		{
 		  struct value_print_options opts;
 
-		  v = value_from_longest (TYPE_FIELD_TYPE (type, i),
-				   unpack_field_as_long (type, valaddr, i));
+		  v = value_field_bitfield (type, i, valaddr, offset, val);
 
 		  opts = *options;
 		  opts.deref_ref = 0;
@@ -412,12 +433,14 @@ java_print_value_fields (struct type *type, const gdb_byte *valaddr,
 	      else if (field_is_static (&TYPE_FIELD (type, i)))
 		{
 		  struct value *v = value_static_field (type, i);
+
 		  if (v == NULL)
-		    fputs_filtered ("<optimized out>", stream);
+		    val_print_optimized_out (stream);
 		  else
 		    {
 		      struct value_print_options opts;
 		      struct type *t = check_typedef (value_type (v));
+
 		      if (TYPE_CODE (t) == TYPE_CODE_STRUCT)
 			v = value_addr (v);
 		      opts = *options;
@@ -431,11 +454,12 @@ java_print_value_fields (struct type *type, const gdb_byte *valaddr,
 	      else
 		{
 		  struct value_print_options opts = *options;
+
 		  opts.deref_ref = 0;
 		  val_print (TYPE_FIELD_TYPE (type, i),
-			     valaddr + TYPE_FIELD_BITPOS (type, i) / 8, 0,
-			     address + TYPE_FIELD_BITPOS (type, i) / 8,
-			     stream, recurse + 1, &opts,
+			     valaddr,
+			     offset + TYPE_FIELD_BITPOS (type, i) / 8,
+			     address, stream, recurse + 1, val, &opts,
 			     current_language);
 		}
 	    }
@@ -451,21 +475,19 @@ java_print_value_fields (struct type *type, const gdb_byte *valaddr,
   fprintf_filtered (stream, "}");
 }
 
-/* Print data of type TYPE located at VALADDR (within GDB), which came from
-   the inferior at address ADDRESS, onto stdio stream STREAM according to
-   OPTIONS.  The data at VALADDR is in target byte order.
-
-   If the data are a string pointer, returns the number of string characters
-   printed.  */
+/* See val_print for a description of the various parameters of this
+   function; they are identical.  The semantics of the return value is
+   also identical to val_print.  */
 
 int
 java_val_print (struct type *type, const gdb_byte *valaddr,
 		int embedded_offset, CORE_ADDR address,
 		struct ui_file *stream, int recurse,
+		const struct value *val,
 		const struct value_print_options *options)
 {
   struct gdbarch *gdbarch = get_type_arch (type);
-  unsigned int i = 0;	/* Number of characters printed */
+  unsigned int i = 0;	/* Number of characters printed.  */
   struct type *target_type;
   CORE_ADDR addr;
 
@@ -475,7 +497,8 @@ java_val_print (struct type *type, const gdb_byte *valaddr,
     case TYPE_CODE_PTR:
       if (options->format && options->format != 's')
 	{
-	  print_scalar_formatted (valaddr, type, options, 0, stream);
+	  val_print_scalar_formatted (type, valaddr, embedded_offset,
+				      val, options, 0, stream);
 	  break;
 	}
 #if 0
@@ -483,15 +506,17 @@ java_val_print (struct type *type, const gdb_byte *valaddr,
 	{
 	  /* Print the unmangled name if desired.  */
 	  /* Print vtable entry - we only get here if we ARE using
-	     -fvtable_thunks.  (Otherwise, look under TYPE_CODE_STRUCT.) */
+	     -fvtable_thunks.  (Otherwise, look under TYPE_CODE_STRUCT.)  */
 	  /* Extract an address, assume that it is unsigned.  */
-	  print_address_demangle (gdbarch,
-				  extract_unsigned_integer (valaddr, TYPE_LENGTH (type)),
-				  stream, demangle);
+	  print_address_demangle
+	    (gdbarch,
+	     extract_unsigned_integer (valaddr + embedded_offset,
+				       TYPE_LENGTH (type)),
+	     stream, demangle);
 	  break;
 	}
 #endif
-      addr = unpack_pointer (type, valaddr);
+      addr = unpack_pointer (type, valaddr + embedded_offset);
       if (addr == 0)
 	{
 	  fputs_filtered ("null", stream);
@@ -522,27 +547,30 @@ java_val_print (struct type *type, const gdb_byte *valaddr,
       if (options->format || options->output_format)
 	{
 	  struct value_print_options opts = *options;
+
 	  opts.format = (options->format ? options->format
 			 : options->output_format);
-	  print_scalar_formatted (valaddr, type, &opts, 0, stream);
+	  val_print_scalar_formatted (type, valaddr, embedded_offset,
+				      val, &opts, 0, stream);
 	}
       else if (TYPE_CODE (type) == TYPE_CODE_CHAR
 	       || (TYPE_CODE (type) == TYPE_CODE_INT
 		   && TYPE_LENGTH (type) == 2
 		   && strcmp (TYPE_NAME (type), "char") == 0))
-	LA_PRINT_CHAR ((int) unpack_long (type, valaddr), type, stream);
+	LA_PRINT_CHAR ((int) unpack_long (type, valaddr + embedded_offset),
+		       type, stream);
       else
-	val_print_type_code_int (type, valaddr, stream);
+	val_print_type_code_int (type, valaddr + embedded_offset, stream);
       break;
 
     case TYPE_CODE_STRUCT:
-      java_print_value_fields (type, valaddr, address, stream, recurse,
-			       options);
+      java_print_value_fields (type, valaddr, embedded_offset,
+			       address, stream, recurse, val, options);
       break;
 
     default:
       return c_val_print (type, valaddr, embedded_offset, address, stream,
-			  recurse, options);
+			  recurse, val, options);
     }
 
   return 0;

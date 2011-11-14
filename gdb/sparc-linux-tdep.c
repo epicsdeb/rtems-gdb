@@ -1,6 +1,6 @@
 /* Target-dependent code for GNU/Linux SPARC.
 
-   Copyright (C) 2003, 2004, 2005, 2007, 2008, 2009, 2010
+   Copyright (C) 2003, 2004, 2005, 2007, 2008, 2009, 2010, 2011
    Free Software Foundation, Inc.
 
    This file is part of GDB.
@@ -32,6 +32,11 @@
 #include "symtab.h"
 #include "trad-frame.h"
 #include "tramp-frame.h"
+#include "xml-syscall.h"
+#include "linux-tdep.h"
+
+/* The syscall's XML filename for sparc 32-bit.  */
+#define XML_SYSCALL_FILENAME_SPARC32 "syscalls/sparc-linux.xml"
 
 #include "sparc-tdep.h"
 
@@ -136,7 +141,7 @@ sparc32_linux_step_trap (struct frame_info *frame, unsigned long insn)
     {
       ULONGEST sc_num = get_frame_register_unsigned (frame, SPARC_G1_REGNUM);
 
-      /* __NR_rt_sigreturn is 101 and __NR_sigreturn is 216  */
+      /* __NR_rt_sigreturn is 101 and __NR_sigreturn is 216.  */
       if (sc_num == 101 || sc_num == 216)
 	{
 	  struct gdbarch *gdbarch = get_frame_arch (frame);
@@ -188,7 +193,8 @@ sparc32_linux_supply_core_gregset (const struct regset *regset,
 				   struct regcache *regcache,
 				   int regnum, const void *gregs, size_t len)
 {
-  sparc32_supply_gregset (&sparc32_linux_core_gregset, regcache, regnum, gregs);
+  sparc32_supply_gregset (&sparc32_linux_core_gregset,
+			  regcache, regnum, gregs);
 }
 
 static void
@@ -196,7 +202,8 @@ sparc32_linux_collect_core_gregset (const struct regset *regset,
 				    const struct regcache *regcache,
 				    int regnum, void *gregs, size_t len)
 {
-  sparc32_collect_gregset (&sparc32_linux_core_gregset, regcache, regnum, gregs);
+  sparc32_collect_gregset (&sparc32_linux_core_gregset,
+			   regcache, regnum, gregs);
 }
 
 static void
@@ -241,12 +248,35 @@ sparc_linux_write_pc (struct regcache *regcache, CORE_ADDR pc)
   regcache_cooked_write_unsigned (regcache, SPARC32_PSR_REGNUM, psr);
 }
 
+static LONGEST
+sparc32_linux_get_syscall_number (struct gdbarch *gdbarch,
+				  ptid_t ptid)
+{
+  struct regcache *regcache = get_thread_regcache (ptid);
+  enum bfd_endian byte_order = gdbarch_byte_order (gdbarch);
+  /* The content of a register.  */
+  gdb_byte buf[4];
+  /* The result.  */
+  LONGEST ret;
+
+  /* Getting the system call number from the register.
+     When dealing with the sparc architecture, this information
+     is stored at the %g1 register.  */
+  regcache_cooked_read (regcache, SPARC_G1_REGNUM, buf);
+
+  ret = extract_signed_integer (buf, 4, byte_order);
+
+  return ret;
+}
+
 
 
 static void
 sparc32_linux_init_abi (struct gdbarch_info info, struct gdbarch *gdbarch)
 {
   struct gdbarch_tdep *tdep = gdbarch_tdep (gdbarch);
+
+  linux_init_abi (info, gdbarch);
 
   tdep->gregset = regset_alloc (gdbarch, sparc32_linux_supply_core_gregset,
 				sparc32_linux_collect_core_gregset);
@@ -279,6 +309,11 @@ sparc32_linux_init_abi (struct gdbarch_info info, struct gdbarch *gdbarch)
   dwarf2_append_unwinders (gdbarch);
 
   set_gdbarch_write_pc (gdbarch, sparc_linux_write_pc);
+
+  /* Functions for 'catch syscall'.  */
+  set_xml_syscall_file_name (XML_SYSCALL_FILENAME_SPARC32);
+  set_gdbarch_get_syscall_number (gdbarch,
+                                  sparc32_linux_get_syscall_number);
 }
 
 /* Provide a prototype to silence -Wmissing-prototypes.  */

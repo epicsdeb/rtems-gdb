@@ -1,6 +1,6 @@
 /* Native-dependent code for the i386.
 
-   Copyright (C) 2001, 2004, 2005, 2007, 2008, 2009, 2010
+   Copyright (C) 2001, 2004, 2005, 2007, 2008, 2009, 2010, 2011
    Free Software Foundation, Inc.
 
    This file is part of GDB.
@@ -46,7 +46,7 @@ struct i386_dr_low_type i386_dr_low;
 /* Debug registers' indices.  */
 #define DR_NADDR	4	/* The number of debug address registers.  */
 #define DR_STATUS	6	/* Index of debug status register (DR6).  */
-#define DR_CONTROL	7	/* Index of debug control register (DR7). */
+#define DR_CONTROL	7	/* Index of debug control register (DR7).  */
 
 /* DR7 Debug Control register fields.  */
 
@@ -268,7 +268,9 @@ i386_length_and_rw_bits (int len, enum target_hw_bp_type type)
 	rw = DR_RW_WRITE;
 	break;
       case hw_read:
-	/* The i386 doesn't support data-read watchpoints.  */
+	internal_error (__FILE__, __LINE__,
+			_("The i386 doesn't support "
+			  "data-read watchpoints.\n"));
       case hw_access:
 	rw = DR_RW_READ;
 	break;
@@ -295,6 +297,7 @@ Invalid hardware breakpoint type %d in i386_length_and_rw_bits.\n"),
       case 8:
         if (TARGET_HAS_DR_LEN_8)
  	  return (DR_LEN_8 | rw);
+	/* ELSE FALL THROUGH */
       default:
 	internal_error (__FILE__, __LINE__, _("\
 Invalid hardware breakpoint length %d in i386_length_and_rw_bits.\n"), len);
@@ -385,7 +388,7 @@ i386_remove_aligned_watchpoint (CORE_ADDR addr, unsigned len_rw_bits)
 	  && dr_mirror[i] == addr
 	  && I386_DR_GET_RW_LEN (i) == len_rw_bits)
 	{
-	  if (--dr_ref_count[i] == 0) /* no longer in use? */
+	  if (--dr_ref_count[i] == 0) /* no longer in use?  */
 	    {
 	      /* Reset our mirror.  */
 	      dr_mirror[i] = 0;
@@ -483,9 +486,13 @@ Invalid value %d of operation in i386_handle_nonaligned_watchpoint.\n"),
    of the type TYPE.  Return 0 on success, -1 on failure.  */
 
 static int
-i386_insert_watchpoint (CORE_ADDR addr, int len, int type)
+i386_insert_watchpoint (CORE_ADDR addr, int len, int type,
+			struct expression *cond)
 {
   int retval;
+
+  if (type == hw_read)
+    return 1; /* unsupported */
 
   if (((len != 1 && len !=2 && len !=4) && !(TARGET_HAS_DR_LEN_8 && len == 8))
       || addr % len != 0)
@@ -507,7 +514,8 @@ i386_insert_watchpoint (CORE_ADDR addr, int len, int type)
    address ADDR, whose length is LEN bytes, and for accesses of the
    type TYPE.  Return 0 on success, -1 on failure.  */
 static int
-i386_remove_watchpoint (CORE_ADDR addr, int len, int type)
+i386_remove_watchpoint (CORE_ADDR addr, int len, int type,
+			struct expression *cond)
 {
   int retval;
 
@@ -542,7 +550,7 @@ i386_region_ok_for_watchpoint (CORE_ADDR addr, int len)
 }
 
 /* If the inferior has some watchpoint that triggered, set the
-   address associated with that watchpoint and return non-zero.  
+   address associated with that watchpoint and return non-zero.
    Otherwise, return zero.  */
 
 static int

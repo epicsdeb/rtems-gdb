@@ -1,6 +1,6 @@
 /* GNU/Linux S/390 specific low level interface, for the remote server
    for GDB.
-   Copyright (C) 2001, 2002, 2005, 2006, 2007, 2008, 2009, 2010
+   Copyright (C) 2001, 2002, 2005, 2006, 2007, 2008, 2009, 2010, 2011
    Free Software Foundation, Inc.
 
    This file is part of GDB.
@@ -73,10 +73,14 @@ static int s390_regmap[] = {
 static int s390_regmap_3264[] = {
   PT_PSWMASK, PT_PSWADDR,
 
-  PT_GPR0, PT_GPR0, PT_GPR1, PT_GPR1, PT_GPR2, PT_GPR2, PT_GPR3, PT_GPR3,
-  PT_GPR4, PT_GPR4, PT_GPR5, PT_GPR5, PT_GPR6, PT_GPR6, PT_GPR7, PT_GPR7,
-  PT_GPR8, PT_GPR8, PT_GPR9, PT_GPR9, PT_GPR10, PT_GPR10, PT_GPR11, PT_GPR11,
-  PT_GPR12, PT_GPR12, PT_GPR13, PT_GPR13, PT_GPR14, PT_GPR14, PT_GPR15, PT_GPR15,
+  PT_GPR0, PT_GPR0, PT_GPR1, PT_GPR1,
+  PT_GPR2, PT_GPR2, PT_GPR3, PT_GPR3,
+  PT_GPR4, PT_GPR4, PT_GPR5, PT_GPR5,
+  PT_GPR6, PT_GPR6, PT_GPR7, PT_GPR7,
+  PT_GPR8, PT_GPR8, PT_GPR9, PT_GPR9,
+  PT_GPR10, PT_GPR10, PT_GPR11, PT_GPR11,
+  PT_GPR12, PT_GPR12, PT_GPR13, PT_GPR13,
+  PT_GPR14, PT_GPR14, PT_GPR15, PT_GPR15,
 
   PT_ACR0, PT_ACR1, PT_ACR2, PT_ACR3,
   PT_ACR4, PT_ACR5, PT_ACR6, PT_ACR7,
@@ -138,7 +142,8 @@ s390_collect_ptrace_register (struct regcache *regcache, int regno, char *buf)
 }
 
 static void
-s390_supply_ptrace_register (struct regcache *regcache, int regno, const char *buf)
+s390_supply_ptrace_register (struct regcache *regcache,
+			     int regno, const char *buf)
 {
   int size = register_size (regno);
   if (size < sizeof (long))
@@ -181,8 +186,8 @@ static void s390_fill_gregset (struct regcache *regcache, void *buf)
 }
 
 struct regset_info target_regsets[] = {
-  { 0, 0, 0, GENERAL_REGS, s390_fill_gregset, NULL },
-  { 0, 0, -1, -1, NULL, NULL }
+  { 0, 0, 0, 0, GENERAL_REGS, s390_fill_gregset, NULL },
+  { 0, 0, 0, -1, -1, NULL, NULL }
 };
 
 
@@ -270,8 +275,11 @@ s390_arch_setup (void)
 #ifdef __s390x__
   {
     unsigned int pswm;
-    struct regcache *regcache = get_thread_regcache (current_inferior, 1);
+    struct regcache *regcache = new_register_cache ();
+    fetch_inferior_registers (regcache, find_regno ("pswm"));
     collect_register_by_name (regcache, "pswm", &pswm);
+    free_register_cache (regcache);
+
     if (pswm & 1)
       init_registers_s390x_linux64 ();
 

@@ -1,5 +1,5 @@
 /* frv device support
-   Copyright (C) 1998, 1999, 2007, 2008, 2009, 2010
+   Copyright (C) 1998, 1999, 2007, 2008, 2009, 2010, 2011
    Free Software Foundation, Inc.
    Contributed by Red Hat.
 
@@ -93,4 +93,4 @@ device_io_write_buffer (device *me, const void *source, int space,
   return nr_bytes;
 }
 
-void device_error (device *me, char* message, ...) {}
+void device_error (device *me, const char *message, ...) {}

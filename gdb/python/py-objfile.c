@@ -1,6 +1,6 @@
 /* Python interface to objfiles.
 
-   Copyright (C) 2008, 2009, 2010 Free Software Foundation, Inc.
+   Copyright (C) 2008, 2009, 2010, 2011 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -45,7 +45,8 @@ static PyObject *
 objfpy_get_filename (PyObject *self, void *closure)
 {
   objfile_object *obj = (objfile_object *) self;
-  if (obj->objfile && obj->objfile->name)
+
+  if (obj->objfile)
     return PyString_Decode (obj->objfile->name, strlen (obj->objfile->name),
 			    host_charset (), NULL);
   Py_RETURN_NONE;
@@ -55,6 +56,7 @@ static void
 objfpy_dealloc (PyObject *o)
 {
   objfile_object *self = (objfile_object *) o;
+
   Py_XDECREF (self->printers);
   self->ob_type->tp_free ((PyObject *) self);
 }
@@ -63,6 +65,7 @@ static PyObject *
 objfpy_new (PyTypeObject *type, PyObject *args, PyObject *keywords)
 {
   objfile_object *self = (objfile_object *) type->tp_alloc (type, 0);
+
   if (self)
     {
       self->objfile = NULL;
@@ -81,6 +84,7 @@ PyObject *
 objfpy_get_printers (PyObject *o, void *ignore)
 {
   objfile_object *self = (objfile_object *) o;
+
   Py_INCREF (self->printers);
   return self->printers;
 }
@@ -90,17 +94,18 @@ objfpy_set_printers (PyObject *o, PyObject *value, void *ignore)
 {
   PyObject *tmp;
   objfile_object *self = (objfile_object *) o;
+
   if (! value)
     {
       PyErr_SetString (PyExc_TypeError,
-		       "cannot delete the pretty_printers attribute");
+		       _("Cannot delete the pretty_printers attribute."));
       return -1;
     }
 
   if (! PyList_Check (value))
     {
       PyErr_SetString (PyExc_TypeError,
-		       "the pretty_printers attribute must be a list");
+		       _("The pretty_printers attribute must be a list."));
       return -1;
     }
 
@@ -111,6 +116,20 @@ objfpy_set_printers (PyObject *o, PyObject *value, void *ignore)
   Py_XDECREF (tmp);
 
   return 0;
+}
+
+/* Implementation of gdb.Objfile.is_valid (self) -> Boolean.
+   Returns True if this object file still exists in GDB.  */
+
+static PyObject *
+objfpy_is_valid (PyObject *self, PyObject *args)
+{
+  objfile_object *obj = (objfile_object *) self;
+
+  if (! obj->objfile)
+    Py_RETURN_FALSE;
+
+  Py_RETURN_TRUE;
 }
 
 
@@ -144,8 +163,6 @@ objfile_to_objfile_object (struct objfile *objfile)
       object = PyObject_New (objfile_object, &objfile_object_type);
       if (object)
 	{
-	  PyObject *dict;
-
 	  object->objfile = objfile;
 
 	  object->printers = PyList_New (0);
@@ -172,10 +189,20 @@ gdbpy_initialize_objfile (void)
     return;
 
   Py_INCREF (&objfile_object_type);
-  PyModule_AddObject (gdb_module, "Objfile", (PyObject *) &objfile_object_type);
+  PyModule_AddObject (gdb_module, "Objfile",
+		      (PyObject *) &objfile_object_type);
 }
 
 
+
+static PyMethodDef objfile_object_methods[] =
+{
+  { "is_valid", objfpy_is_valid, METH_NOARGS,
+    "is_valid () -> Boolean.\n\
+Return true if this object file is valid, false if not." },
+
+  { NULL }
+};
 
 static PyGetSetDef objfile_getset[] =
 {
@@ -216,7 +243,7 @@ static PyTypeObject objfile_object_type =
   0,				  /* tp_weaklistoffset */
   0,				  /* tp_iter */
   0,				  /* tp_iternext */
-  0,				  /* tp_methods */
+  objfile_object_methods,	  /* tp_methods */
   0,				  /* tp_members */
   objfile_getset,		  /* tp_getset */
   0,				  /* tp_base */

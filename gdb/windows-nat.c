@@ -1,7 +1,7 @@
 /* Target-vector operations for controlling windows child processes, for GDB.
 
    Copyright (C) 1995, 1996, 1997, 1998, 1999, 2000, 2001, 2002, 2003, 2004,
-   2005, 2006, 2007, 2008, 2009, 2010 Free Software Foundation, Inc.
+   2005, 2006, 2007, 2008, 2009, 2010, 2011 Free Software Foundation, Inc.
 
    Contributed by Cygnus Solutions, A Red Hat Company.
 
@@ -41,10 +41,12 @@
 #include <psapi.h>
 #ifdef __CYGWIN__
 #include <sys/cygwin.h>
+#include <cygwin/version.h>
 #endif
 #include <signal.h>
 
 #include "buildsym.h"
+#include "filenames.h"
 #include "symfile.h"
 #include "objfiles.h"
 #include "gdb_obstack.h"
@@ -71,10 +73,11 @@
 #define DebugBreakProcess		dyn_DebugBreakProcess
 #define DebugSetProcessKillOnExit	dyn_DebugSetProcessKillOnExit
 #define EnumProcessModules		dyn_EnumProcessModules
-#define GetModuleFileNameExA		dyn_GetModuleFileNameExA
 #define GetModuleInformation		dyn_GetModuleInformation
 #define LookupPrivilegeValueA		dyn_LookupPrivilegeValueA
 #define OpenProcessToken		dyn_OpenProcessToken
+#define GetConsoleFontSize		dyn_GetConsoleFontSize
+#define GetCurrentConsoleFont		dyn_GetCurrentConsoleFont
 
 static BOOL WINAPI (*AdjustTokenPrivileges)(HANDLE, BOOL, PTOKEN_PRIVILEGES,
 					    DWORD, PTOKEN_PRIVILEGES, PDWORD);
@@ -83,27 +86,66 @@ static BOOL WINAPI (*DebugBreakProcess) (HANDLE);
 static BOOL WINAPI (*DebugSetProcessKillOnExit) (BOOL);
 static BOOL WINAPI (*EnumProcessModules) (HANDLE, HMODULE *, DWORD,
 					  LPDWORD);
-static DWORD WINAPI (*GetModuleFileNameExA) (HANDLE, HMODULE, LPSTR,
-					    DWORD);
 static BOOL WINAPI (*GetModuleInformation) (HANDLE, HMODULE, LPMODULEINFO,
 					    DWORD);
 static BOOL WINAPI (*LookupPrivilegeValueA)(LPCSTR, LPCSTR, PLUID);
 static BOOL WINAPI (*OpenProcessToken)(HANDLE, DWORD, PHANDLE);
+static BOOL WINAPI (*GetCurrentConsoleFont) (HANDLE, BOOL,
+					     CONSOLE_FONT_INFO *);
+static COORD WINAPI (*GetConsoleFontSize) (HANDLE, DWORD);
 
 static struct target_ops windows_ops;
 
-#ifdef __CYGWIN__
-/* The starting and ending address of the cygwin1.dll text segment. */
-static CORE_ADDR cygwin_load_start;
-static CORE_ADDR cygwin_load_end;
+#undef STARTUPINFO
+#undef CreateProcess
+#undef GetModuleFileNameEx
+
+#ifndef __CYGWIN__
+# define __PMAX	(MAX_PATH + 1)
+  static DWORD WINAPI (*GetModuleFileNameEx) (HANDLE, HMODULE, LPSTR, DWORD);
+# define STARTUPINFO STARTUPINFOA
+# define CreateProcess CreateProcessA
+# define GetModuleFileNameEx_name "GetModuleFileNameExA"
+# define bad_GetModuleFileNameEx bad_GetModuleFileNameExA
+#else
+# define __PMAX	PATH_MAX
+/* The starting and ending address of the cygwin1.dll text segment.  */
+  static CORE_ADDR cygwin_load_start;
+  static CORE_ADDR cygwin_load_end;
+# if CYGWIN_VERSION_DLL_MAKE_COMBINED(CYGWIN_VERSION_API_MAJOR,CYGWIN_VERSION_API_MINOR) >= 181
+#   define __USEWIDE
+    typedef wchar_t cygwin_buf_t;
+    static DWORD WINAPI (*GetModuleFileNameEx) (HANDLE, HMODULE,
+						LPWSTR, DWORD);
+#   define STARTUPINFO STARTUPINFOW
+#   define CreateProcess CreateProcessW
+#   define GetModuleFileNameEx_name "GetModuleFileNameExW"
+#   define bad_GetModuleFileNameEx bad_GetModuleFileNameExW
+# else
+#   define CCP_POSIX_TO_WIN_W 1
+#   define CCP_WIN_W_TO_POSIX 3
+#   define cygwin_conv_path(op, from, to, size)  \
+         (op == CCP_WIN_W_TO_POSIX) ? \
+         cygwin_conv_to_full_posix_path (from, to) : \
+         cygwin_conv_to_win32_path (from, to)
+    typedef char cygwin_buf_t;
+    static DWORD WINAPI (*GetModuleFileNameEx) (HANDLE, HMODULE, LPSTR, DWORD);
+#   define STARTUPINFO STARTUPINFOA
+#   define CreateProcess CreateProcessA
+#   define GetModuleFileNameEx_name "GetModuleFileNameExA"
+#   define bad_GetModuleFileNameEx bad_GetModuleFileNameExA
+#   define CW_SET_DOS_FILE_WARNING -1	/* no-op this for older Cygwin */
+# endif
 #endif
 
-static int have_saved_context;	/* True if we've saved context from a cygwin signal. */
-static CONTEXT saved_context;	/* Containes the saved context from a cygwin signal. */
+static int have_saved_context;	/* True if we've saved context from a
+				   cygwin signal.  */
+static CONTEXT saved_context;	/* Containes the saved context from a
+				   cygwin signal.  */
 
 /* If we're not using the old Cygwin header file set, define the
    following which never should have been in the generic Win32 API
-   headers in the first place since they were our own invention... */
+   headers in the first place since they were our own invention...  */
 #ifndef _GNU_H_WINDOWS_H
 enum
   {
@@ -129,7 +171,7 @@ static int windows_initialization_done;
 #define DR6_CLEAR_VALUE 0xffff0ff0
 
 /* The string sent by cygwin when it processes a signal.
-   FIXME: This should be in a cygwin include file. */
+   FIXME: This should be in a cygwin include file.  */
 #ifndef _CYGWIN_SIGNAL_STRING
 #define _CYGWIN_SIGNAL_STRING "cYgSiGw00f"
 #endif
@@ -149,7 +191,7 @@ static void cygwin_set_dr7 (unsigned long val);
 static unsigned long cygwin_get_dr6 (void);
 
 static enum target_signal last_sig = TARGET_SIGNAL_0;
-/* Set if a signal was received from the debugged process */
+/* Set if a signal was received from the debugged process.  */
 
 /* Thread information structure used to track information that is
    not available in gdb's thread structure.  */
@@ -158,6 +200,7 @@ typedef struct thread_info_struct
     struct thread_info_struct *next;
     DWORD id;
     HANDLE h;
+    CORE_ADDR thread_local_base;
     char *name;
     int suspended;
     int reload_context;
@@ -168,7 +211,7 @@ thread_info;
 
 static thread_info thread_head;
 
-/* The process and thread handles for the above context. */
+/* The process and thread handles for the above context.  */
 
 static DEBUG_EVENT current_event;	/* The current debug event from
 					   WaitForDebugEvent */
@@ -176,13 +219,13 @@ static HANDLE current_process_handle;	/* Currently executing process */
 static thread_info *current_thread;	/* Info on currently selected thread */
 static DWORD main_thread_id;		/* Thread ID of the main thread */
 
-/* Counts of things. */
+/* Counts of things.  */
 static int exception_count = 0;
 static int event_count = 0;
 static int saw_create;
 static int open_process_used = 0;
 
-/* User options. */
+/* User options.  */
 static int new_console = 0;
 #ifdef __CYGWIN__
 static int cygwin_exceptions = 0;
@@ -207,15 +250,15 @@ static int useshell = 0;		/* use shell for subprocesses */
    One day we could read a reg, we could inspect the context we
    already have loaded, if it doesn't have the bit set that we need,
    we read that set of registers in using GetThreadContext.  If the
-   context already contains what we need, we just unpack it. Then to
+   context already contains what we need, we just unpack it.  Then to
    write a register, first we have to ensure that the context contains
    the other regs of the group, and then we copy the info in and set
-   out bit. */
+   out bit.  */
 
 static const int *mappings;
 
 /* This vector maps the target's idea of an exception (extracted
-   from the DEBUG_EVENT structure) to GDB's idea. */
+   from the DEBUG_EVENT structure) to GDB's idea.  */
 
 struct xlate_exception
   {
@@ -287,7 +330,7 @@ thread_rec (DWORD id, int get_context)
 
 /* Add a thread to the thread list.  */
 static thread_info *
-windows_add_thread (ptid_t ptid, HANDLE h)
+windows_add_thread (ptid_t ptid, HANDLE h, void *tlb)
 {
   thread_info *th;
   DWORD id;
@@ -302,6 +345,7 @@ windows_add_thread (ptid_t ptid, HANDLE h)
   th = XZALLOC (thread_info);
   th->id = id;
   th->h = h;
+  th->thread_local_base = (CORE_ADDR) (uintptr_t) tlb;
   th->next = thread_head.next;
   thread_head.next = th;
   add_thread (ptid);
@@ -324,7 +368,7 @@ windows_add_thread (ptid_t ptid, HANDLE h)
 }
 
 /* Clear out any old thread list and reintialize it to a
-   pristine state. */
+   pristine state.  */
 static void
 windows_init_thread_list (void)
 {
@@ -341,7 +385,7 @@ windows_init_thread_list (void)
   thread_head.next = NULL;
 }
 
-/* Delete a thread from the list of threads */
+/* Delete a thread from the list of threads.  */
 static void
 windows_delete_thread (ptid_t ptid)
 {
@@ -379,17 +423,19 @@ do_windows_fetch_inferior_registers (struct regcache *regcache, int r)
 
   if (!current_thread)
     return;	/* Windows sometimes uses a non-existent thread id in its
-		   events */
+		   events.  */
 
   if (current_thread->reload_context)
     {
 #ifdef __COPY_CONTEXT_SIZE
       if (have_saved_context)
 	{
-	  /* Lie about where the program actually is stopped since cygwin has informed us that
-	     we should consider the signal to have occurred at another location which is stored
-	     in "saved_context. */
-	  memcpy (&current_thread->context, &saved_context, __COPY_CONTEXT_SIZE);
+	  /* Lie about where the program actually is stopped since
+	     cygwin has informed us that we should consider the signal
+	     to have occurred at another location which is stored in
+	     "saved_context.  */
+	  memcpy (&current_thread->context, &saved_context,
+		  __COPY_CONTEXT_SIZE);
 	  have_saved_context = 0;
 	}
       else
@@ -399,7 +445,8 @@ do_windows_fetch_inferior_registers (struct regcache *regcache, int r)
 	  th->context.ContextFlags = CONTEXT_DEBUGGER_DR;
 	  GetThreadContext (th->h, &th->context);
 	  /* Copy dr values from that thread.
-	     But only if there were not modified since last stop. PR gdb/2388 */
+	     But only if there were not modified since last stop.
+	     PR gdb/2388 */
 	  if (!debug_registers_changed)
 	    {
 	      dr[0] = th->context.Dr0;
@@ -438,7 +485,7 @@ windows_fetch_inferior_registers (struct target_ops *ops,
 {
   current_thread = thread_rec (ptid_get_tid (inferior_ptid), TRUE);
   /* Check if current_thread exists.  Windows sometimes uses a non-existent
-     thread id in its events */
+     thread id in its events.  */
   if (current_thread)
     do_windows_fetch_inferior_registers (regcache, r);
 }
@@ -447,7 +494,7 @@ static void
 do_windows_store_inferior_registers (const struct regcache *regcache, int r)
 {
   if (!current_thread)
-    /* Windows sometimes uses a non-existent thread id in its events */;
+    /* Windows sometimes uses a non-existent thread id in its events.  */;
   else if (r >= 0)
     regcache_raw_collect (regcache, r,
 			  ((char *) &current_thread->context) + mappings[r]);
@@ -458,14 +505,14 @@ do_windows_store_inferior_registers (const struct regcache *regcache, int r)
     }
 }
 
-/* Store a new register value into the current thread context */
+/* Store a new register value into the current thread context.  */
 static void
 windows_store_inferior_registers (struct target_ops *ops,
 				  struct regcache *regcache, int r)
 {
   current_thread = thread_rec (ptid_get_tid (inferior_ptid), TRUE);
   /* Check if current_thread exists.  Windows sometimes uses a non-existent
-     thread id in its events */
+     thread id in its events.  */
   if (current_thread)
     do_windows_store_inferior_registers (regcache, r);
 }
@@ -480,48 +527,58 @@ get_module_name (LPVOID base_address, char *dll_name_ret)
   MODULEINFO mi;
   int i;
   HMODULE dh_buf[1];
-  HMODULE *DllHandle = dh_buf;	/* Set to temporary storage for initial query */
+  HMODULE *DllHandle = dh_buf;	/* Set to temporary storage for
+				   initial query.  */
   DWORD cbNeeded;
 #ifdef __CYGWIN__
-  char pathbuf[PATH_MAX + 1];	/* Temporary storage prior to converting to
-				   posix form */
-#else
-  char *pathbuf = dll_name_ret;	/* Just copy directly to passed-in arg */
+  cygwin_buf_t pathbuf[__PMAX];	/* Temporary storage prior to converting to
+				   posix form.  __PMAX is always enough
+				   as long as SO_NAME_MAX_PATH_SIZE is defined
+				   as 512.  */
 #endif
 
   cbNeeded = 0;
-  /* Find size of buffer needed to handle list of modules loaded in inferior */
+  /* Find size of buffer needed to handle list of modules loaded in
+     inferior.  */
   if (!EnumProcessModules (current_process_handle, DllHandle,
 			   sizeof (HMODULE), &cbNeeded) || !cbNeeded)
     goto failed;
 
-  /* Allocate correct amount of space for module list */
+  /* Allocate correct amount of space for module list.  */
   DllHandle = (HMODULE *) alloca (cbNeeded);
   if (!DllHandle)
     goto failed;
 
-  /* Get the list of modules */
+  /* Get the list of modules.  */
   if (!EnumProcessModules (current_process_handle, DllHandle, cbNeeded,
 				 &cbNeeded))
     goto failed;
 
   for (i = 0; i < (int) (cbNeeded / sizeof (HMODULE)); i++)
     {
-      /* Get information on this module */
+      /* Get information on this module.  */
       if (!GetModuleInformation (current_process_handle, DllHandle[i],
 				 &mi, sizeof (mi)))
 	error (_("Can't get module info"));
 
       if (!base_address || mi.lpBaseOfDll == base_address)
 	{
-	  /* Try to find the name of the given module */
-	  len = GetModuleFileNameExA (current_process_handle,
-				      DllHandle[i], pathbuf, MAX_PATH);
-	  if (len == 0)
-	    error (_("Error getting dll name: %u."), (unsigned) GetLastError ());
+	  /* Try to find the name of the given module.  */
 #ifdef __CYGWIN__
-	  /* Cygwin prefers that the path be in /x/y/z format */
-	  cygwin_conv_to_full_posix_path (pathbuf, dll_name_ret);
+	  /* Cygwin prefers that the path be in /x/y/z format.  */
+	  len = GetModuleFileNameEx (current_process_handle,
+				      DllHandle[i], pathbuf, __PMAX);
+	  if (len == 0)
+	    error (_("Error getting dll name: %lu."), GetLastError ());
+	  if (cygwin_conv_path (CCP_WIN_W_TO_POSIX, pathbuf, dll_name_ret,
+				__PMAX) < 0)
+	    error (_("Error converting dll name to POSIX: %d."), errno);
+#else
+	  len = GetModuleFileNameEx (current_process_handle,
+				      DllHandle[i], dll_name_ret, __PMAX);
+	  if (len == 0)
+	    error (_("Error getting dll name: %u."),
+		   (unsigned) GetLastError ());
 #endif
 	  return 1;	/* success */
 	}
@@ -533,7 +590,7 @@ failed:
 }
 
 /* Encapsulate the information required in a call to
-   symbol_file_add_args */
+   symbol_file_add_args.  */
 struct safe_symbol_file_add_args
 {
   char *name;
@@ -545,7 +602,7 @@ struct safe_symbol_file_add_args
   struct objfile *ret;
 };
 
-/* Maintain a linked list of "so" information. */
+/* Maintain a linked list of "so" information.  */
 struct lm_info
 {
   LPVOID load_addr;
@@ -554,7 +611,7 @@ struct lm_info
 static struct so_list solib_start, *solib_end;
 
 /* Call symbol_file_add with stderr redirected.  We don't care if there
-   are errors. */
+   are errors.  */
 static int
 safe_symbol_file_add_stub (void *argv)
 {
@@ -566,7 +623,7 @@ safe_symbol_file_add_stub (void *argv)
 #undef p
 }
 
-/* Restore gdb's stderr after calling symbol_file_add */
+/* Restore gdb's stderr after calling symbol_file_add.  */
 static void
 safe_symbol_file_add_cleanup (void *p)
 {
@@ -580,7 +637,7 @@ safe_symbol_file_add_cleanup (void *p)
 #undef sp
 }
 
-/* symbol_file_add wrapper that prevents errors from being displayed. */
+/* symbol_file_add wrapper that prevents errors from being displayed.  */
 static struct objfile *
 safe_symbol_file_add (char *name, int from_tty,
 		      struct section_addr_info *addrs,
@@ -612,12 +669,12 @@ static struct so_list *
 windows_make_so (const char *name, LPVOID load_addr)
 {
   struct so_list *so;
-  char buf[MAX_PATH + 1];
-  char cwd[MAX_PATH + 1];
   char *p;
+#ifndef __CYGWIN__
+  char buf[__PMAX];
+  char cwd[__PMAX];
   WIN32_FIND_DATA w32_fd;
   HANDLE h = FindFirstFile(name, &w32_fd);
-  MEMORY_BASIC_INFORMATION m;
 
   if (h == INVALID_HANDLE_VALUE)
     strcpy (buf, name);
@@ -635,12 +692,31 @@ windows_make_so (const char *name, LPVOID load_addr)
 	  SetCurrentDirectory (cwd);
 	}
     }
-
   if (strcasecmp (buf, "ntdll.dll") == 0)
     {
       GetSystemDirectory (buf, sizeof (buf));
       strcat (buf, "\\ntdll.dll");
     }
+#else
+  cygwin_buf_t buf[__PMAX];
+
+  buf[0] = 0;
+  if (access (name, F_OK) != 0)
+    {
+      if (strcasecmp (name, "ntdll.dll") == 0)
+#ifdef __USEWIDE
+	{
+	  GetSystemDirectoryW (buf, sizeof (buf) / sizeof (wchar_t));
+	  wcscat (buf, L"\\ntdll.dll");
+	}
+#else
+	{
+	  GetSystemDirectoryA (buf, sizeof (buf) / sizeof (wchar_t));
+	  strcat (buf, "\\ntdll.dll");
+	}
+#endif
+    }
+#endif
   so = XZALLOC (struct so_list);
   so->lm_info = (struct lm_info *) xmalloc (sizeof (struct lm_info));
   so->lm_info->load_addr = load_addr;
@@ -648,7 +724,20 @@ windows_make_so (const char *name, LPVOID load_addr)
 #ifndef __CYGWIN__
   strcpy (so->so_name, buf);
 #else
-  cygwin_conv_to_posix_path (buf, so->so_name);
+  if (buf[0])
+    cygwin_conv_path (CCP_WIN_W_TO_POSIX, buf, so->so_name,
+		      SO_NAME_MAX_PATH_SIZE);
+  else
+    {
+      char *rname = realpath (name, NULL);
+      if (rname && strlen (rname) < SO_NAME_MAX_PATH_SIZE)
+	{
+	  strcpy (so->so_name, rname);
+	  free (rname);
+	}
+      else
+	error (_("dll path too long"));
+    }
   /* Record cygwin1.dll .text start/end.  */
   p = strchr (so->so_name, '\0') - (sizeof ("/cygwin1.dll") - 1);
   if (p >= so->so_name && strcasecmp (p, "/cygwin1.dll") == 0)
@@ -673,8 +762,9 @@ windows_make_so (const char *name, LPVOID load_addr)
 
       /* The symbols in a dll are offset by 0x1000, which is the the
 	 offset from 0 of the first byte in an image - because of the
-	 file header and the section alignment. */
-      cygwin_load_start = (CORE_ADDR) (uintptr_t) ((char *) load_addr + 0x1000);
+	 file header and the section alignment.  */
+      cygwin_load_start = (CORE_ADDR) (uintptr_t) ((char *)
+						   load_addr + 0x1000);
       cygwin_load_end = cygwin_load_start + bfd_section_size (abfd, text);
 
       bfd_close (abfd);
@@ -687,7 +777,11 @@ windows_make_so (const char *name, LPVOID load_addr)
 static char *
 get_image_name (HANDLE h, void *address, int unicode)
 {
-  static char buf[(2 * MAX_PATH) + 1];
+#ifdef __CYGWIN__
+  static char buf[__PMAX];
+#else
+  static char buf[(2 * __PMAX) + 1];
+#endif
   DWORD size = unicode ? sizeof (WCHAR) : sizeof (char);
   char *address_ptr;
   int len = 0;
@@ -696,17 +790,18 @@ get_image_name (HANDLE h, void *address, int unicode)
 
   /* Attempt to read the name of the dll that was detected.
      This is documented to work only when actively debugging
-     a program.  It will not work for attached processes. */
+     a program.  It will not work for attached processes.  */
   if (address == NULL)
     return NULL;
 
   /* See if we could read the address of a string, and that the
-     address isn't null. */
-  if (!ReadProcessMemory (h, address,  &address_ptr, sizeof (address_ptr), &done)
+     address isn't null.  */
+  if (!ReadProcessMemory (h, address,  &address_ptr,
+			  sizeof (address_ptr), &done)
       || done != sizeof (address_ptr) || !address_ptr)
     return NULL;
 
-  /* Find the length of the string */
+  /* Find the length of the string.  */
   while (ReadProcessMemory (h, address_ptr + len++ * size, &b, size, &done)
 	 && (b[0] != 0 || b[size - 1] != 0) && done == size)
     continue;
@@ -718,8 +813,12 @@ get_image_name (HANDLE h, void *address, int unicode)
       WCHAR *unicode_address = (WCHAR *) alloca (len * sizeof (WCHAR));
       ReadProcessMemory (h, address_ptr, unicode_address, len * sizeof (WCHAR),
 			 &done);
-
-      WideCharToMultiByte (CP_ACP, 0, unicode_address, len, buf, len, 0, 0);
+#ifdef __CYGWIN__
+      wcstombs (buf, unicode_address, __PMAX);
+#else
+      WideCharToMultiByte (CP_ACP, 0, unicode_address, len, buf, sizeof buf,
+			   0, 0);
+#endif
     }
 
   return buf;
@@ -731,7 +830,7 @@ static int
 handle_load_dll (void *dummy)
 {
   LOAD_DLL_DEBUG_INFO *event = &current_event.u.LoadDll;
-  char dll_buf[MAX_PATH + 1];
+  char dll_buf[__PMAX];
   char *dll_name = NULL;
 
   dll_buf[0] = dll_buf[sizeof (dll_buf) - 1] = '\0';
@@ -797,7 +896,7 @@ handle_unload_dll (void *dummy)
   return 0;
 }
 
-/* Clear list of loaded DLLs. */
+/* Clear list of loaded DLLs.  */
 static void
 windows_clear_solib (void)
 {
@@ -805,7 +904,7 @@ windows_clear_solib (void)
   solib_end = &solib_start;
 }
 
-/* Load DLL symbol info. */
+/* Load DLL symbol info.  */
 void
 dll_symbol_command (char *args, int from_tty)
 {
@@ -829,7 +928,7 @@ dll_symbol_command (char *args, int from_tty)
 
 /* Handle DEBUG_STRING output from child process.
    Cygwin prepends its messages with a "cygwin:".  Interpret this as
-   a Cygwin signal.  Otherwise just print the string as a warning. */
+   a Cygwin signal.  Otherwise just print the string as a warning.  */
 static int
 handle_output_debug_string (struct target_waitstatus *ourstatus)
 {
@@ -841,7 +940,8 @@ handle_output_debug_string (struct target_waitstatus *ourstatus)
 	&s, 1024, 0)
       || !s || !*s)
     /* nothing to do */;
-  else if (strncmp (s, _CYGWIN_SIGNAL_STRING, sizeof (_CYGWIN_SIGNAL_STRING) - 1) != 0)
+  else if (strncmp (s, _CYGWIN_SIGNAL_STRING,
+		    sizeof (_CYGWIN_SIGNAL_STRING) - 1) != 0)
     {
 #ifdef __CYGWIN__
       if (strncmp (s, "cYg", 3) != 0)
@@ -851,11 +951,13 @@ handle_output_debug_string (struct target_waitstatus *ourstatus)
 #ifdef __COPY_CONTEXT_SIZE
   else
     {
-      /* Got a cygwin signal marker.  A cygwin signal is followed by the signal number
-	 itself and then optionally followed by the thread id and address to saved context
-	 within the DLL.  If these are supplied, then the given thread is assumed to have
-	 issued the signal and the context from the thread is assumed to be stored at the
-	 given address in the inferior.  Tell gdb to treat this like a real signal.  */
+      /* Got a cygwin signal marker.  A cygwin signal is followed by
+	 the signal number itself and then optionally followed by the
+	 thread id and address to saved context within the DLL.  If
+	 these are supplied, then the given thread is assumed to have
+	 issued the signal and the context from the thread is assumed
+	 to be stored at the given address in the inferior.  Tell gdb
+	 to treat this like a real signal.  */
       char *p;
       int sig = strtol (s + sizeof (_CYGWIN_SIGNAL_STRING) - 1, &p, 0);
       int gotasig = target_signal_from_host (sig);
@@ -870,7 +972,8 @@ handle_output_debug_string (struct target_waitstatus *ourstatus)
 	    retval = main_thread_id;
 	  else if ((x = (LPCVOID) strtoul (p, &p, 0))
 		   && ReadProcessMemory (current_process_handle, x,
-					 &saved_context, __COPY_CONTEXT_SIZE, &n)
+					 &saved_context,
+					 __COPY_CONTEXT_SIZE, &n)
 		   && n == __COPY_CONTEXT_SIZE)
 	    have_saved_context = 1;
 	  current_event.dwThreadId = retval;
@@ -950,7 +1053,11 @@ display_selector (HANDLE thread, DWORD sel)
     }
   else
     {
-      printf_filtered ("Invalid selector 0x%lx.\n",sel);
+      DWORD err = GetLastError ();
+      if (err == ERROR_NOT_SUPPORTED)
+	printf_filtered ("Function not supported\n");
+      else
+	printf_filtered ("Invalid selector 0x%lx.\n",sel);
       return 0;
     }
 }
@@ -994,15 +1101,6 @@ display_selectors (char * args, int from_tty)
     }
 }
 
-static struct cmd_list_element *info_w32_cmdlist = NULL;
-
-static void
-info_w32_command (char *args, int from_tty)
-{
-  help_list (info_w32_cmdlist, "info w32 ", class_info, gdb_stdout);
-}
-
-
 #define DEBUG_EXCEPTION_SIMPLE(x)       if (debug_exceptions) \
   printf_unfiltered ("gdb: Target exception %s at %s\n", x, \
     host_address_to_string (\
@@ -1016,7 +1114,7 @@ handle_exception (struct target_waitstatus *ourstatus)
 
   ourstatus->kind = TARGET_WAITKIND_STOPPED;
 
-  /* Record the context of the current thread */
+  /* Record the context of the current thread.  */
   th = thread_rec (current_event.dwThreadId, -1);
 
   switch (code)
@@ -1026,17 +1124,23 @@ handle_exception (struct target_waitstatus *ourstatus)
       ourstatus->value.sig = TARGET_SIGNAL_SEGV;
 #ifdef __CYGWIN__
       {
-	/* See if the access violation happened within the cygwin DLL itself.  Cygwin uses
-	   a kind of exception handling to deal with passed-in invalid addresses. gdb
-	   should not treat these as real SEGVs since they will be silently handled by
-	   cygwin.  A real SEGV will (theoretically) be caught by cygwin later in the process
-	   and will be sent as a cygwin-specific-signal.  So, ignore SEGVs if they show up
-	   within the text segment of the DLL itself. */
+	/* See if the access violation happened within the cygwin DLL
+	   itself.  Cygwin uses a kind of exception handling to deal
+	   with passed-in invalid addresses.  gdb should not treat
+	   these as real SEGVs since they will be silently handled by
+	   cygwin.  A real SEGV will (theoretically) be caught by
+	   cygwin later in the process and will be sent as a
+	   cygwin-specific-signal.  So, ignore SEGVs if they show up
+	   within the text segment of the DLL itself.  */
 	char *fn;
-	CORE_ADDR addr = (CORE_ADDR) (uintptr_t) current_event.u.Exception.ExceptionRecord.ExceptionAddress;
-	if ((!cygwin_exceptions && (addr >= cygwin_load_start && addr < cygwin_load_end))
+	CORE_ADDR addr = (CORE_ADDR) (uintptr_t)
+	  current_event.u.Exception.ExceptionRecord.ExceptionAddress;
+
+	if ((!cygwin_exceptions && (addr >= cygwin_load_start
+				    && addr < cygwin_load_end))
 	    || (find_pc_partial_function (addr, &fn, NULL, NULL)
-		&& strncmp (fn, "KERNEL32!IsBad", strlen ("KERNEL32!IsBad")) == 0))
+		&& strncmp (fn, "KERNEL32!IsBad",
+			    strlen ("KERNEL32!IsBad")) == 0))
 	  return 0;
       }
 #endif
@@ -1114,7 +1218,7 @@ handle_exception (struct target_waitstatus *ourstatus)
       ourstatus->value.sig = TARGET_SIGNAL_ILL;
       break;
     default:
-      /* Treat unhandled first chance exceptions specially. */
+      /* Treat unhandled first chance exceptions specially.  */
       if (current_event.u.Exception.dwFirstChance)
 	return -1;
       printf_unfiltered ("gdb: unknown target exception 0x%08lx at %s\n",
@@ -1130,7 +1234,7 @@ handle_exception (struct target_waitstatus *ourstatus)
 }
 
 /* Resume all artificially suspended threads if we are continuing
-   execution */
+   execution.  */
 static BOOL
 windows_continue (DWORD continue_status, int id)
 {
@@ -1186,14 +1290,16 @@ fake_create_process (void)
     open_process_used = 1;
   else
     {
-      error (_("OpenProcess call failed, GetLastError = %lud\n"),
+      error (_("OpenProcess call failed, GetLastError = %lud"),
        GetLastError ());
       /*  We can not debug anything in that case.  */
     }
   main_thread_id = current_event.dwThreadId;
-  current_thread = windows_add_thread (ptid_build (current_event.dwProcessId, 0,
-						   current_event.dwThreadId),
-				       current_event.u.CreateThread.hThread);
+  current_thread = windows_add_thread (
+		     ptid_build (current_event.dwProcessId, 0,
+				 current_event.dwThreadId),
+		     current_event.u.CreateThread.hThread,
+		     current_event.u.CreateThread.lpThreadLocalBase);
   return main_thread_id;
 }
 
@@ -1231,8 +1337,8 @@ windows_resume (struct target_ops *ops,
 	  for (i = 0; xlate[i].them != -1; i++)
 	    if (xlate[i].us == sig)
 	      {
-		current_event.u.Exception.ExceptionRecord.ExceptionCode =
-		  xlate[i].them;
+		current_event.u.Exception.ExceptionRecord.ExceptionCode
+		  = xlate[i].them;
 		continue_status = DBG_EXCEPTION_NOT_HANDLED;
 		break;
 	      }
@@ -1251,13 +1357,13 @@ windows_resume (struct target_ops *ops,
   DEBUG_EXEC (("gdb: windows_resume (pid=%d, tid=%ld, step=%d, sig=%d);\n",
 	       ptid_get_pid (ptid), ptid_get_tid (ptid), step, sig));
 
-  /* Get context for currently selected thread */
+  /* Get context for currently selected thread.  */
   th = thread_rec (ptid_get_tid (inferior_ptid), FALSE);
   if (th)
     {
       if (step)
 	{
-	  /* Single step by setting t bit */
+	  /* Single step by setting t bit.  */
 	  struct regcache *regcache = get_current_regcache ();
 	  struct gdbarch *gdbarch = get_regcache_arch (regcache);
 	  windows_fetch_inferior_registers (ops, regcache,
@@ -1282,7 +1388,7 @@ windows_resume (struct target_ops *ops,
     }
 
   /* Allow continuing with the same signal that interrupted us.
-     Otherwise complain. */
+     Otherwise complain.  */
 
   if (resume_all)
     windows_continue (continue_status, -1);
@@ -1309,8 +1415,8 @@ ctrl_c_handler (DWORD event_type)
     return TRUE;
 
   if (!DebugBreakProcess (current_process_handle))
-    warning (_("\
-Could not interrupt program.  Press Ctrl-c in the program console."));
+    warning (_("Could not interrupt program.  "
+	       "Press Ctrl-c in the program console."));
 
   /* Return true to tell that Ctrl-C has been handled.  */
   return TRUE;
@@ -1356,18 +1462,20 @@ get_windows_debug_event (struct target_ops *ops,
 	    {
 	      /* Kludge around a Windows bug where first event is a create
 		 thread event.  Caused when attached process does not have
-		 a main thread. */
+		 a main thread.  */
 	      retval = fake_create_process ();
 	      if (retval)
 		saw_create++;
 	    }
 	  break;
 	}
-      /* Record the existence of this thread */
+      /* Record the existence of this thread.  */
       retval = current_event.dwThreadId;
       th = windows_add_thread (ptid_build (current_event.dwProcessId, 0,
 					 current_event.dwThreadId),
-			     current_event.u.CreateThread.hThread);
+			     current_event.u.CreateThread.hThread,
+			     current_event.u.CreateThread.lpThreadLocalBase);
+
       break;
 
     case EXIT_THREAD_DEBUG_EVENT:
@@ -1375,6 +1483,7 @@ get_windows_debug_event (struct target_ops *ops,
 		     (unsigned) current_event.dwProcessId,
 		     (unsigned) current_event.dwThreadId,
 		     "EXIT_THREAD_DEBUG_EVENT"));
+
       if (current_event.dwThreadId != main_thread_id)
 	{
 	  windows_delete_thread (ptid_build (current_event.dwProcessId, 0,
@@ -1397,10 +1506,11 @@ get_windows_debug_event (struct target_ops *ops,
 	windows_delete_thread (ptid_build (current_event.dwProcessId, 0,
 					   main_thread_id));
       main_thread_id = current_event.dwThreadId;
-      /* Add the main thread */
+      /* Add the main thread.  */
       th = windows_add_thread (ptid_build (current_event.dwProcessId, 0,
 					   current_event.dwThreadId),
-			       current_event.u.CreateProcessInfo.hThread);
+	     current_event.u.CreateProcessInfo.hThread,
+	     current_event.u.CreateProcessInfo.lpThreadLocalBase);
       retval = current_event.dwThreadId;
       break;
 
@@ -1473,7 +1583,7 @@ get_windows_debug_event (struct target_ops *ops,
 	}
       break;
 
-    case OUTPUT_DEBUG_STRING_EVENT:	/* message from the kernel */
+    case OUTPUT_DEBUG_STRING_EVENT:	/* Message from the kernel.  */
       DEBUG_EVENTS (("gdb: kernel event for pid=%d tid=%x code=%s)\n",
 		     (unsigned) current_event.dwProcessId,
 		     (unsigned) current_event.dwThreadId,
@@ -1525,7 +1635,7 @@ windows_wait (struct target_ops *ops,
      with a SPURIOUS because resume can try and step or modify things,
      which needs a current_thread->h.  But some of these exceptions mark
      the birth or death of threads, which mean that the current thread
-     isn't necessarily what you think it is. */
+     isn't necessarily what you think it is.  */
 
   while (1)
     {
@@ -1538,8 +1648,8 @@ windows_wait (struct target_ops *ops,
 	   - The debugger and the program do not share the console, in
 	     which case the Ctrl-c event only reached the debugger.
 	     In that case, the ctrl_c handler will take care of interrupting
-	     the inferior. Note that this case is working starting with
-	     Windows XP. For Windows 2000, Ctrl-C should be pressed in the
+	     the inferior.  Note that this case is working starting with
+	     Windows XP.  For Windows 2000, Ctrl-C should be pressed in the
 	     inferior console.
 
 	   - The debugger and the program share the same console, in which
@@ -1617,20 +1727,20 @@ do_initial_windows_stuff (struct target_ops *ops, DWORD pid, int attaching)
   target_terminal_inferior ();
 
   windows_initialization_done = 0;
-  inf->stop_soon = STOP_QUIETLY;
+  inf->control.stop_soon = STOP_QUIETLY;
   while (1)
     {
       stop_after_trap = 1;
       wait_for_inferior (0);
       tp = inferior_thread ();
-      if (tp->stop_signal != TARGET_SIGNAL_TRAP)
-	resume (0, tp->stop_signal);
+      if (tp->suspend.stop_signal != TARGET_SIGNAL_TRAP)
+	resume (0, tp->suspend.stop_signal);
       else
 	break;
     }
 
   windows_initialization_done = 1;
-  inf->stop_soon = NO_STOP_QUIETLY;
+  inf->control.stop_soon = NO_STOP_QUIETLY;
   stop_after_trap = 0;
   return;
 }
@@ -1640,7 +1750,7 @@ do_initial_windows_stuff (struct target_ops *ops, DWORD pid, int attaching)
 
    This code is copied from the Cygwin source code and rearranged to allow
    dynamically loading of the needed symbols from advapi32 which is only
-   available on NT/2K/XP. */
+   available on NT/2K/XP.  */
 static int
 set_process_privilege (const char *privilege, BOOL enable)
 {
@@ -1668,9 +1778,9 @@ set_process_privilege (const char *privilege, BOOL enable)
 #if 0
   /* Disabled, otherwise every `attach' in an unprivileged user session
      would raise the "Failed to get SE_DEBUG_NAME privilege" warning in
-     windows_attach(). */
+     windows_attach().  */
   /* AdjustTokenPrivileges returns TRUE even if the privilege could not
-     be enabled. GetLastError () returns an correct error code, though. */
+     be enabled.  GetLastError () returns an correct error code, though.  */
   if (enable && GetLastError () == ERROR_NOT_ALL_ASSIGNED)
     goto out;
 #endif
@@ -1696,7 +1806,8 @@ windows_attach (struct target_ops *ops, char *args, int from_tty)
   if (set_process_privilege (SE_DEBUG_NAME, TRUE) < 0)
     {
       printf_unfiltered ("Warning: Failed to get SE_DEBUG_NAME privilege\n");
-      printf_unfiltered ("This can cause attach to fail on Windows NT/2K/XP\n");
+      printf_unfiltered ("This can cause attach to "
+			 "fail on Windows NT/2K/XP\n");
     }
 
   windows_init_thread_list ();
@@ -1706,7 +1817,7 @@ windows_attach (struct target_ops *ops, char *args, int from_tty)
 #ifdef __CYGWIN__
   if (!ok)
     {
-      /* Try fall back to Cygwin pid */
+      /* Try fall back to Cygwin pid.  */
       pid = cygwin_internal (CW_CYGWIN_PID_TO_WINPID, pid);
 
       if (pid > 0)
@@ -1772,10 +1883,9 @@ windows_detach (struct target_ops *ops, char *args, int from_tty)
 static char *
 windows_pid_to_exec_file (int pid)
 {
-  static char path[MAX_PATH + 1];
-
+  static char path[__PMAX];
 #ifdef __CYGWIN__
-  /* Try to find exe name as symlink target of /proc/<pid>/exe */
+  /* Try to find exe name as symlink target of /proc/<pid>/exe.  */
   int nchars;
   char procexe[sizeof ("/proc/4294967295/exe")];
   sprintf (procexe, "/proc/%u/exe", pid);
@@ -1788,7 +1898,7 @@ windows_pid_to_exec_file (int pid)
 #endif
 
   /* If we get here then either Cygwin is hosed, this isn't a Cygwin version
-     of gdb, or we're trying to debug a non-Cygwin windows executable. */
+     of gdb, or we're trying to debug a non-Cygwin windows executable.  */
   if (!get_module_name (0, path))
     path[0] = '\0';
 
@@ -1813,6 +1923,51 @@ windows_open (char *arg, int from_tty)
   error (_("Use the \"run\" command to start a Unix child process."));
 }
 
+/* Modify CreateProcess parameters for use of a new separate console.
+   Parameters are:
+   *FLAGS: DWORD parameter for general process creation flags.
+   *SI: STARTUPINFO structure, for which the console window size and
+   console buffer size is filled in if GDB is running in a console.
+   to create the new console.
+   The size of the used font is not available on all versions of
+   Windows OS.  Furthermore, the current font might not be the default
+   font, but this is still better than before.
+   If the windows and buffer sizes are computed,
+   SI->DWFLAGS is changed so that this information is used
+   by CreateProcess function.  */
+
+static void
+windows_set_console_info (STARTUPINFO *si, DWORD *flags)
+{
+  HANDLE hconsole = CreateFile ("CONOUT$", GENERIC_READ | GENERIC_WRITE,
+				FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, 0);
+
+  if (hconsole != INVALID_HANDLE_VALUE)
+    {
+      CONSOLE_SCREEN_BUFFER_INFO sbinfo;
+      COORD font_size;
+      CONSOLE_FONT_INFO cfi;
+
+      GetCurrentConsoleFont (hconsole, FALSE, &cfi);
+      font_size = GetConsoleFontSize (hconsole, cfi.nFont);
+      GetConsoleScreenBufferInfo(hconsole, &sbinfo);
+      si->dwXSize = sbinfo.srWindow.Right - sbinfo.srWindow.Left + 1;
+      si->dwYSize = sbinfo.srWindow.Bottom - sbinfo.srWindow.Top + 1;
+      if (font_size.X)
+	si->dwXSize *= font_size.X;
+      else
+	si->dwXSize *= 8;
+      if (font_size.Y)
+	si->dwYSize *= font_size.Y;
+      else
+	si->dwYSize *= 12;
+      si->dwXCountChars = sbinfo.dwSize.X;
+      si->dwYCountChars = sbinfo.dwSize.Y;
+      si->dwFlags |= STARTF_USESIZE | STARTF_USECOUNTCHARS;
+    }
+  *flags |= CREATE_NEW_CONSOLE;
+}
+
 /* Start an inferior windows child process and sets inferior_ptid to its pid.
    EXEC_FILE is the file to run.
    ALLARGS is a string containing the arguments to the program.
@@ -1823,20 +1978,26 @@ windows_create_inferior (struct target_ops *ops, char *exec_file,
 		       char *allargs, char **in_env, int from_tty)
 {
   STARTUPINFO si;
-  PROCESS_INFORMATION pi;
-  BOOL ret;
-  DWORD flags;
-  char *args;
-  char real_path[MAXPATHLEN];
-  char *toexec;
-  char shell[MAX_PATH + 1]; /* Path to shell */
-  const char *sh;
 #ifdef __CYGWIN__
+  cygwin_buf_t real_path[__PMAX];
+  cygwin_buf_t shell[__PMAX]; /* Path to shell */
+  const char *sh;
+  cygwin_buf_t *toexec;
+  cygwin_buf_t *cygallargs;
+  cygwin_buf_t *args;
+  size_t len;
   int tty;
   int ostdin, ostdout, ostderr;
 #else
+  char real_path[__PMAX];
+  char shell[__PMAX]; /* Path to shell */
+  char *toexec;
+  char *args;
   HANDLE tty;
 #endif
+  PROCESS_INFORMATION pi;
+  BOOL ret;
+  DWORD flags = 0;
   const char *inferior_io_terminal = get_inferior_io_terminal ();
 
   if (!exec_file)
@@ -1845,44 +2006,65 @@ windows_create_inferior (struct target_ops *ops, char *exec_file,
   memset (&si, 0, sizeof (si));
   si.cb = sizeof (si);
 
-#ifdef __CYGWIN__
-  if (!useshell)
-    {
-      flags = DEBUG_ONLY_THIS_PROCESS;
-      cygwin_conv_to_win32_path (exec_file, real_path);
-      toexec = real_path;
-    }
-  else
-    {
-      char *newallargs;
-      sh = getenv ("SHELL");
-      if (!sh)
-	sh = "/bin/sh";
-      cygwin_conv_to_win32_path (sh, shell);
-      newallargs = alloca (sizeof (" -c 'exec  '") + strlen (exec_file)
-			   + strlen (allargs) + 2);
-      sprintf (newallargs, " -c 'exec %s %s'", exec_file, allargs);
-      allargs = newallargs;
-      toexec = shell;
-      flags = DEBUG_PROCESS;
-    }
-#else
-  toexec = exec_file;
-  flags = DEBUG_ONLY_THIS_PROCESS;
-#endif
-
   if (new_group)
     flags |= CREATE_NEW_PROCESS_GROUP;
 
   if (new_console)
-    flags |= CREATE_NEW_CONSOLE;
-
-  args = alloca (strlen (toexec) + strlen (allargs) + 2);
-  strcpy (args, toexec);
-  strcat (args, " ");
-  strcat (args, allargs);
+    windows_set_console_info (&si, &flags);
 
 #ifdef __CYGWIN__
+  if (!useshell)
+    {
+      flags |= DEBUG_ONLY_THIS_PROCESS;
+      if (cygwin_conv_path (CCP_POSIX_TO_WIN_W, exec_file, real_path,
+			    __PMAX * sizeof (cygwin_buf_t)) < 0)
+	error (_("Error starting executable: %d"), errno);
+      toexec = real_path;
+#ifdef __USEWIDE
+      len = mbstowcs (NULL, allargs, 0) + 1;
+      if (len == (size_t) -1)
+	error (_("Error starting executable: %d"), errno);
+      cygallargs = (wchar_t *) alloca (len * sizeof (wchar_t));
+      mbstowcs (cygallargs, allargs, len);
+#else
+      cygallargs = allargs;
+#endif
+    }
+  else
+    {
+      sh = getenv ("SHELL");
+      if (!sh)
+	sh = "/bin/sh";
+      if (cygwin_conv_path (CCP_POSIX_TO_WIN_W, sh, shell, __PMAX) < 0)
+      	error (_("Error starting executable via shell: %d"), errno);
+#ifdef __USEWIDE
+      len = sizeof (L" -c 'exec  '") + mbstowcs (NULL, exec_file, 0)
+	    + mbstowcs (NULL, allargs, 0) + 2;
+      cygallargs = (wchar_t *) alloca (len * sizeof (wchar_t));
+      swprintf (cygallargs, len, L" -c 'exec %s %s'", exec_file, allargs);
+#else
+      cygallargs = (char *)
+	alloca (sizeof (" -c 'exec  '") + strlen (exec_file)
+				    + strlen (allargs) + 2);
+      sprintf (cygallargs, " -c 'exec %s %s'", exec_file, allargs);
+#endif
+      toexec = shell;
+      flags |= DEBUG_PROCESS;
+    }
+
+#ifdef __USEWIDE
+  args = (cygwin_buf_t *) alloca ((wcslen (toexec) + wcslen (cygallargs) + 2)
+				  * sizeof (wchar_t));
+  wcscpy (args, toexec);
+  wcscat (args, L" ");
+  wcscat (args, cygallargs);
+#else
+  args = (cygwin_buf_t *) alloca (strlen (toexec) + strlen (cygallargs) + 2);
+  strcpy (args, toexec);
+  strcat (args, " ");
+  strcat (args, cygallargs);
+#endif
+
   /* Prepare the environment vars for CreateProcess.  */
   cygwin_internal (CW_SYNC_WINENV);
 
@@ -1906,7 +2088,37 @@ windows_create_inferior (struct target_ops *ops, char *exec_file,
 	  dup2 (tty, 2);
 	}
     }
+
+  windows_init_thread_list ();
+  ret = CreateProcess (0,
+		       args,	/* command line */
+		       NULL,	/* Security */
+		       NULL,	/* thread */
+		       TRUE,	/* inherit handles */
+		       flags,	/* start flags */
+		       NULL,	/* environment */
+		       NULL,	/* current directory */
+		       &si,
+		       &pi);
+  if (tty >= 0)
+    {
+      close (tty);
+      dup2 (ostdin, 0);
+      dup2 (ostdout, 1);
+      dup2 (ostderr, 2);
+      close (ostdin);
+      close (ostdout);
+      close (ostderr);
+    }
 #else
+  toexec = exec_file;
+  args = alloca (strlen (toexec) + strlen (allargs) + 2);
+  strcpy (args, toexec);
+  strcat (args, " ");
+  strcat (args, allargs);
+
+  flags |= DEBUG_ONLY_THIS_PROCESS;
+
   if (!inferior_io_terminal)
     tty = INVALID_HANDLE_VALUE;
   else
@@ -1928,32 +2140,18 @@ windows_create_inferior (struct target_ops *ops, char *exec_file,
 	  si.dwFlags |= STARTF_USESTDHANDLES;
 	}
     }
-#endif
 
   windows_init_thread_list ();
-  ret = CreateProcess (0,
-		       args,	/* command line */
-		       NULL,	/* Security */
-		       NULL,	/* thread */
-		       TRUE,	/* inherit handles */
-		       flags,	/* start flags */
-		       NULL,	/* environment */
-		       NULL,	/* current directory */
-		       &si,
-		       &pi);
-
-#ifdef __CYGWIN__
-  if (tty >= 0)
-    {
-      close (tty);
-      dup2 (ostdin, 0);
-      dup2 (ostdout, 1);
-      dup2 (ostderr, 2);
-      close (ostdin);
-      close (ostdout);
-      close (ostderr);
-    }
-#else
+  ret = CreateProcessA (0,
+			args,	/* command line */
+			NULL,	/* Security */
+			NULL,	/* thread */
+			TRUE,	/* inherit handles */
+			flags,	/* start flags */
+			NULL,	/* environment */
+			NULL,	/* current directory */
+			&si,
+			&pi);
   if (tty != INVALID_HANDLE_VALUE)
     CloseHandle (tty);
 #endif
@@ -1990,7 +2188,7 @@ windows_mourn_inferior (struct target_ops *ops)
 }
 
 /* Send a SIGINT to the process group.  This acts just like the user typed a
-   ^C on the controlling terminal. */
+   ^C on the controlling terminal.  */
 
 static void
 windows_stop (ptid_t ptid)
@@ -2044,13 +2242,13 @@ windows_kill_inferior (struct target_ops *ops)
 	break;
     }
 
-  target_mourn_inferior ();	/* or just windows_mourn_inferior? */
+  target_mourn_inferior ();	/* Or just windows_mourn_inferior?  */
 }
 
 static void
 windows_prepare_to_store (struct regcache *regcache)
 {
-  /* Do nothing, since we can store individual regs */
+  /* Do nothing, since we can store individual regs.  */
 }
 
 static int
@@ -2066,7 +2264,7 @@ windows_close (int x)
 		PIDGET (inferior_ptid)));
 }
 
-/* Convert pid to printable format. */
+/* Convert pid to printable format.  */
 static char *
 windows_pid_to_str (struct target_ops *ops, ptid_t ptid)
 {
@@ -2099,7 +2297,8 @@ windows_xfer_shared_libraries (struct target_ops *ops,
   obstack_init (&obstack);
   obstack_grow_str (&obstack, "<library-list>\n");
   for (so = solib_start.next; so; so = so->next)
-    windows_xfer_shared_library (so->so_name, (CORE_ADDR) (uintptr_t) so->lm_info->load_addr,
+    windows_xfer_shared_library (so->so_name, (CORE_ADDR)
+				 (uintptr_t) so->lm_info->load_addr,
 				 target_gdbarch, &obstack);
   obstack_grow_str0 (&obstack, "</library-list>\n");
 
@@ -2142,6 +2341,24 @@ windows_xfer_partial (struct target_ops *ops, enum target_object object,
 					      readbuf, writebuf, offset, len);
       return -1;
     }
+}
+
+/* Provide thread local base, i.e. Thread Information Block address.
+   Returns 1 if ptid is found and sets *ADDR to thread_local_base.  */
+
+static int
+windows_get_tib_address (ptid_t ptid, CORE_ADDR *addr)
+{
+  thread_info *th;
+
+  th = thread_rec (ptid_get_tid (ptid), 0);
+  if (th == NULL)
+    return 0;
+
+  if (addr != NULL)
+    *addr = th->thread_local_base;
+
+  return 1;
 }
 
 static ptid_t
@@ -2192,6 +2409,7 @@ init_windows_ops (void)
   windows_ops.to_has_execution = default_child_has_execution;
   windows_ops.to_pid_to_exec_file = windows_pid_to_exec_file;
   windows_ops.to_get_ada_task_ptid = windows_get_ada_task_ptid;
+  windows_ops.to_get_tib_address = windows_get_tib_address;
 
   i386_use_watchpoints (&windows_ops);
 
@@ -2220,6 +2438,10 @@ _initialize_windows_nat (void)
 
   init_windows_ops ();
 
+#ifdef __CYGWIN__
+  cygwin_internal (CW_SET_DOS_FILE_WARNING, 0);
+#endif
+
   c = add_com ("dll-symbols", class_files, dll_symbol_command,
 	       _("Load dll library symbols from FILE."));
   set_cmd_completer (c, filename_completer);
@@ -2238,7 +2460,8 @@ Show use of shell to start subprocess."), NULL,
 			   NULL, /* FIXME: i18n: */
 			   &setlist, &showlist);
 
-  add_setshow_boolean_cmd ("cygwin-exceptions", class_support, &cygwin_exceptions, _("\
+  add_setshow_boolean_cmd ("cygwin-exceptions", class_support,
+			   &cygwin_exceptions, _("\
 Break when an exception is detected in the Cygwin DLL itself."), _("\
 Show whether gdb breaks on exceptions in the Cygwin DLL itself."), NULL,
 			   NULL,
@@ -2289,9 +2512,7 @@ Show whether to display kernel exceptions in child process."), NULL,
 			   NULL, /* FIXME: i18n: */
 			   &setlist, &showlist);
 
-  add_prefix_cmd ("w32", class_info, info_w32_command,
-		  _("Print information specific to Win32 debugging."),
-		  &info_w32_cmdlist, "info w32 ", 0, &infolist);
+  init_w32_command_list ();
 
   add_cmd ("selector", class_info, display_selectors,
 	   _("Display selectors infos."),
@@ -2338,7 +2559,7 @@ cygwin_get_dr6 (void)
 
 /* Determine if the thread referenced by "ptid" is alive
    by "polling" it.  If WaitForSingleObject returns WAIT_OBJECT_0
-   it means that the thread has died.  Otherwise it is assumed to be alive. */
+   it means that the thread has died.  Otherwise it is assumed to be alive.  */
 static int
 windows_thread_alive (struct target_ops *ops, ptid_t ptid)
 {
@@ -2347,8 +2568,8 @@ windows_thread_alive (struct target_ops *ops, ptid_t ptid)
   gdb_assert (ptid_get_tid (ptid) != 0);
   tid = ptid_get_tid (ptid);
 
-  return WaitForSingleObject (thread_rec (tid, FALSE)->h, 0) == WAIT_OBJECT_0 ?
-    FALSE : TRUE;
+  return WaitForSingleObject (thread_rec (tid, FALSE)->h, 0) == WAIT_OBJECT_0
+    ? FALSE : TRUE;
 }
 
 void
@@ -2366,7 +2587,7 @@ _initialize_check_for_gdb_ini (void)
 				      sizeof ("/gdb.ini"));
       strcpy (oldini, homedir);
       p = strchr (oldini, '\0');
-      if (p > oldini && p[-1] != '/')
+      if (p > oldini && !IS_DIR_SEPARATOR (p[-1]))
 	*p++ = '/';
       strcpy (p, "gdb.ini");
       if (access (oldini, 0) == 0)
@@ -2381,7 +2602,7 @@ _initialize_check_for_gdb_ini (void)
 }
 
 /* Define dummy functions which always return error for the rare cases where
-   these functions could not be found. */
+   these functions could not be found.  */
 static BOOL WINAPI
 bad_DebugActiveProcessStop (DWORD w)
 {
@@ -2402,11 +2623,21 @@ bad_EnumProcessModules (HANDLE w, HMODULE *x, DWORD y, LPDWORD z)
 {
   return FALSE;
 }
+
+#ifdef __USEWIDE
+static DWORD WINAPI
+bad_GetModuleFileNameExW (HANDLE w, HMODULE x, LPWSTR y, DWORD z)
+{
+  return 0;
+}
+#else
 static DWORD WINAPI
 bad_GetModuleFileNameExA (HANDLE w, HMODULE x, LPSTR y, DWORD z)
 {
   return 0;
 }
+#endif
+
 static BOOL WINAPI
 bad_GetModuleInformation (HANDLE w, HMODULE x, LPMODULEINFO y, DWORD z)
 {
@@ -2419,8 +2650,23 @@ bad_OpenProcessToken (HANDLE w, DWORD x, PHANDLE y)
   return FALSE;
 }
 
+static BOOL WINAPI
+bad_GetCurrentConsoleFont (HANDLE w, BOOL bMaxWindow, CONSOLE_FONT_INFO *f)
+{
+  f->nFont = 0;
+  return 1;
+}
+static COORD WINAPI
+bad_GetConsoleFontSize (HANDLE w, DWORD nFont)
+{
+  COORD size;
+  size.X = 8;
+  size.Y = 12;
+  return size;
+}
+ 
 /* Load any functions which may not be available in ancient versions
-   of Windows. */
+   of Windows.  */
 void
 _initialize_loadable (void)
 {
@@ -2429,61 +2675,71 @@ _initialize_loadable (void)
   hm = LoadLibrary ("kernel32.dll");
   if (hm)
     {
-      dyn_DebugActiveProcessStop = (void *)
+      DebugActiveProcessStop = (void *)
 	GetProcAddress (hm, "DebugActiveProcessStop");
-      dyn_DebugBreakProcess = (void *)
+      DebugBreakProcess = (void *)
 	GetProcAddress (hm, "DebugBreakProcess");
-      dyn_DebugSetProcessKillOnExit = (void *)
+      DebugSetProcessKillOnExit = (void *)
 	GetProcAddress (hm, "DebugSetProcessKillOnExit");
+      GetConsoleFontSize = (void *) 
+	GetProcAddress (hm, "GetConsoleFontSize");
+      GetCurrentConsoleFont = (void *) 
+	GetProcAddress (hm, "GetCurrentConsoleFont");
     }
 
   /* Set variables to dummy versions of these processes if the function
-     wasn't found in kernel32.dll. */
-  if (!dyn_DebugBreakProcess)
-    dyn_DebugBreakProcess = bad_DebugBreakProcess;
-  if (!dyn_DebugActiveProcessStop || !dyn_DebugSetProcessKillOnExit)
+     wasn't found in kernel32.dll.  */
+  if (!DebugBreakProcess)
+    DebugBreakProcess = bad_DebugBreakProcess;
+  if (!DebugActiveProcessStop || !DebugSetProcessKillOnExit)
     {
-      dyn_DebugActiveProcessStop = bad_DebugActiveProcessStop;
-      dyn_DebugSetProcessKillOnExit = bad_DebugSetProcessKillOnExit;
+      DebugActiveProcessStop = bad_DebugActiveProcessStop;
+      DebugSetProcessKillOnExit = bad_DebugSetProcessKillOnExit;
     }
+  if (!GetConsoleFontSize)
+    GetConsoleFontSize = bad_GetConsoleFontSize;
+  if (!GetCurrentConsoleFont)
+    GetCurrentConsoleFont = bad_GetCurrentConsoleFont;
 
   /* Load optional functions used for retrieving filename information
-     associated with the currently debugged process or its dlls. */
+     associated with the currently debugged process or its dlls.  */
   hm = LoadLibrary ("psapi.dll");
   if (hm)
     {
-      dyn_EnumProcessModules = (void *)
+      EnumProcessModules = (void *)
 	GetProcAddress (hm, "EnumProcessModules");
-      dyn_GetModuleInformation = (void *)
+      GetModuleInformation = (void *)
 	GetProcAddress (hm, "GetModuleInformation");
-      dyn_GetModuleFileNameExA = (void *)
-	GetProcAddress (hm, "GetModuleFileNameExA");
+      GetModuleFileNameEx = (void *)
+	GetProcAddress (hm, GetModuleFileNameEx_name);
     }
 
-  if (!dyn_EnumProcessModules || !dyn_GetModuleInformation || !dyn_GetModuleFileNameExA)
+  if (!EnumProcessModules || !GetModuleInformation || !GetModuleFileNameEx)
     {
       /* Set variables to dummy versions of these processes if the function
-	 wasn't found in psapi.dll. */
-      dyn_EnumProcessModules = bad_EnumProcessModules;
-      dyn_GetModuleInformation = bad_GetModuleInformation;
-      dyn_GetModuleFileNameExA = bad_GetModuleFileNameExA;
-      /* This will probably fail on Windows 9x/Me.  Let the user know that we're
-	 missing some functionality. */
-      warning(_("cannot automatically find executable file or library to read symbols.\nUse \"file\" or \"dll\" command to load executable/libraries directly."));
+	 wasn't found in psapi.dll.  */
+      EnumProcessModules = bad_EnumProcessModules;
+      GetModuleInformation = bad_GetModuleInformation;
+      GetModuleFileNameEx = bad_GetModuleFileNameEx;
+      /* This will probably fail on Windows 9x/Me.  Let the user know
+	 that we're missing some functionality.  */
+      warning(_("\
+cannot automatically find executable file or library to read symbols.\n\
+Use \"file\" or \"dll\" command to load executable/libraries directly."));
     }
 
   hm = LoadLibrary ("advapi32.dll");
   if (hm)
     {
-      dyn_OpenProcessToken = (void *)
-	GetProcAddress (hm, "OpenProcessToken");
-      dyn_LookupPrivilegeValueA = (void *)
+      OpenProcessToken = (void *) GetProcAddress (hm, "OpenProcessToken");
+      LookupPrivilegeValueA = (void *)
 	GetProcAddress (hm, "LookupPrivilegeValueA");
-      dyn_AdjustTokenPrivileges = (void *)
+      AdjustTokenPrivileges = (void *)
 	GetProcAddress (hm, "AdjustTokenPrivileges");
       /* Only need to set one of these since if OpenProcessToken fails nothing
-	 else is needed. */
-      if (!dyn_OpenProcessToken || !dyn_LookupPrivilegeValueA || !dyn_AdjustTokenPrivileges)
-	dyn_OpenProcessToken = bad_OpenProcessToken;
+	 else is needed.  */
+      if (!OpenProcessToken || !LookupPrivilegeValueA
+	  || !AdjustTokenPrivileges)
+	OpenProcessToken = bad_OpenProcessToken;
     }
 }

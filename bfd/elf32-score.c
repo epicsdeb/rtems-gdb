@@ -1774,9 +1774,8 @@ score_elf_got_offset_from_index (bfd *dynobj,
 {
   asection *sgot;
   bfd_vma gp;
-  struct score_got_info *g;
 
-  g = score_elf_got_info (dynobj, &sgot);
+  score_elf_got_info (dynobj, &sgot);
   gp = _bfd_get_gp_value (output_bfd);
 
   return sgot->output_section->vma + sgot->output_offset + got_index - gp;
@@ -1987,8 +1986,6 @@ score_elf_final_link_relocate (reloc_howto_type *howto,
   bfd_vma gp = MINUS_ONE;
   /* The place (section offset or address) of the storage unit being relocated.  */
   bfd_vma rel_addr;
-  /* The value of GP used to create the relocatable object.  */
-  bfd_vma gp0 = MINUS_ONE;
   /* The offset into the global offset table at which the address of the relocation entry
      symbol, adjusted by the addend, resides during execution.  */
   bfd_vma g = MINUS_ONE;
@@ -2107,7 +2104,6 @@ score_elf_final_link_relocate (reloc_howto_type *howto,
     case R_SCORE_HI16:
     case R_SCORE_LO16:
     case R_SCORE_GPREL32:
-      gp0 = _bfd_get_gp_value (input_bfd);
       gp = _bfd_get_gp_value (output_bfd);
       break;
 
@@ -2130,7 +2126,7 @@ score_elf_final_link_relocate (reloc_howto_type *howto,
                && h != NULL
                && h->root.def_dynamic
                && !h->root.def_regular))
-           && r_symndx != 0
+           && r_symndx != STN_UNDEF
            && (input_section->flags & SEC_ALLOC) != 0)
         {
           /* If we're creating a shared library, or this relocation is against a symbol
@@ -2143,8 +2139,8 @@ score_elf_final_link_relocate (reloc_howto_type *howto,
                                                     input_section))
             return bfd_reloc_undefined;
         }
-      else if (r_symndx == 0)
-        /* r_symndx will be zero only for relocs against symbols
+      else if (r_symndx == STN_UNDEF)
+        /* r_symndx will be STN_UNDEF (zero) only for relocs against symbols
            from removed linkonce sections, or sections discarded by
            a linker script.  */
         value = 0;
@@ -2408,7 +2404,6 @@ s3_bfd_score_elf_relocate_section (bfd *output_bfd,
                                    asection **local_sections)
 {
   Elf_Internal_Shdr *symtab_hdr;
-  struct elf_link_hash_entry **sym_hashes;
   Elf_Internal_Rela *rel;
   Elf_Internal_Rela *relend;
   const char *name;
@@ -2439,7 +2434,6 @@ s3_bfd_score_elf_relocate_section (bfd *output_bfd,
 
   symtab_hdr = &elf_tdata (input_bfd)->symtab_hdr;
   extsymoff = (elf_bad_symtab (input_bfd)) ? 0 : symtab_hdr->sh_info;
-  sym_hashes = elf_sym_hashes (input_bfd);
   rel = relocs;
   relend = relocs + input_section->reloc_count;
   for (; rel < relend; rel++)
@@ -2681,15 +2675,8 @@ s3_bfd_score_elf_relocate_section (bfd *output_bfd,
         }
 
       if (sec != NULL && elf_discarded_section (sec))
-        {
-          /* For relocs against symbols from removed linkonce sections,
-             or sections discarded by a linker script, we just want the
-             section contents zeroed.  Avoid any special processing.  */
-          _bfd_clear_contents (howto, input_bfd, contents + rel->r_offset);
-          rel->r_info = 0;
-          rel->r_addend = 0;
-          continue;
-        }
+	RELOC_AGAINST_DISCARDED_SECTION (info, input_bfd, input_section,
+					 rel, relend, howto, contents);
 
       if (info->relocatable)
         {
@@ -3923,7 +3910,7 @@ s3_bfd_score_elf_grok_prstatus (bfd *abfd, Elf_Internal_Note *note)
       elf_tdata (abfd)->core_signal = score_bfd_get_16 (abfd, note->descdata + 12);
 
       /* pr_pid */
-      elf_tdata (abfd)->core_pid = score_bfd_get_32 (abfd, note->descdata + 24);
+      elf_tdata (abfd)->core_lwpid = score_bfd_get_32 (abfd, note->descdata + 24);
 
       /* pr_reg */
       offset = 72;

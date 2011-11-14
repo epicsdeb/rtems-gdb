@@ -1,4 +1,5 @@
-#   Copyright 1998, 2007, 2008, 2009, 2010 Free Software Foundation, Inc.
+#   Copyright 1998, 2007, 2008, 2009, 2010, 2011
+#   Free Software Foundation, Inc.
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -21,8 +22,6 @@ if $tracelevel then {
     strace $tracelevel
 }
 
-set prms_id 0
-set bug_id 0
 
 gdb_exit
 gdb_start
@@ -74,22 +73,22 @@ gdb_test "info tracepoint $asm_test_num" \
 
 # 2.3 info tracepoint (invalid tracepoint number)
 gdb_test "info tracepoint [expr $c_test_num + $asm_test_num]" \
-    "No breakpoint or watchpoint number [expr $c_test_num + $asm_test_num]." \
+    "No tracepoint matching '[expr $c_test_num + $asm_test_num]'." \
     "2.3: info tracepoint (invalid tracepoint number)"
 
 # 2.4 info tracepoints (list of numbers)
-send_gdb "info tracepoints $c_test_num $asm_test_num \n"
-gdb_expect {
-    -re "Num Enb .*$gdb_prompt $" {
-	fail "2.4: info trace rejects multiple tracepoint numbers"
+gdb_test_multiple "info tracepoints $c_test_num $asm_test_num " \
+    "2.4: info trace rejects multiple tracepoint numbers" {
+	-re "Num Enb .*$gdb_prompt $" {
+	    fail "2.4: info trace rejects multiple tracepoint numbers"
+	}
+	-re ".*$gdb_prompt $" {
+	    pass "2.4: info trace rejects multiple tracepoint numbers"
+	}
     }
-    -re ".*$gdb_prompt $" {
-	pass "2.4: info trace rejects multiple tracepoint numbers"
-    }
-}
 
 # 2.5 help info trace
 gdb_test "help info tracepoints" \
-    "Status of tracepoints, or tracepoint number NUMBER.*" \
+    "Status of specified tracepoints .all tracepoints if no argument.*" \
     "2.5: help info tracepoints"
 

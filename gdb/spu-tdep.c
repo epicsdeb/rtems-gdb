@@ -1,5 +1,6 @@
 /* SPU target-dependent code for GDB, the GNU debugger.
-   Copyright (C) 2006, 2007, 2008, 2009, 2010 Free Software Foundation, Inc.
+   Copyright (C) 2006, 2007, 2008, 2009, 2010, 2011
+   Free Software Foundation, Inc.
 
    Contributed by Ulrich Weigand <uweigand@de.ibm.com>.
    Based on a port by Sid Manning <sid@us.ibm.com>.
@@ -43,7 +44,8 @@
 #include "block.h"
 #include "observer.h"
 #include "infcall.h"
-
+#include "dwarf2.h"
+#include "exceptions.h"
 #include "spu-tdep.h"
 
 
@@ -175,67 +177,72 @@ spu_register_type (struct gdbarch *gdbarch, int reg_nr)
       return builtin_type (gdbarch)->builtin_uint32;
 
     default:
-      internal_error (__FILE__, __LINE__, "invalid regnum");
+      internal_error (__FILE__, __LINE__, _("invalid regnum"));
     }
 }
 
 /* Pseudo registers for preferred slots - stack pointer.  */
 
-static void
+static enum register_status
 spu_pseudo_register_read_spu (struct regcache *regcache, const char *regname,
 			      gdb_byte *buf)
 {
   struct gdbarch *gdbarch = get_regcache_arch (regcache);
   enum bfd_endian byte_order = gdbarch_byte_order (gdbarch);
+  enum register_status status;
   gdb_byte reg[32];
   char annex[32];
   ULONGEST id;
 
-  regcache_raw_read_unsigned (regcache, SPU_ID_REGNUM, &id);
+  status = regcache_raw_read_unsigned (regcache, SPU_ID_REGNUM, &id);
+  if (status != REG_VALID)
+    return status;
   xsnprintf (annex, sizeof annex, "%d/%s", (int) id, regname);
   memset (reg, 0, sizeof reg);
   target_read (&current_target, TARGET_OBJECT_SPU, annex,
 	       reg, 0, sizeof reg);
 
   store_unsigned_integer (buf, 4, byte_order, strtoulst (reg, NULL, 16));
+  return REG_VALID;
 }
 
-static void
+static enum register_status
 spu_pseudo_register_read (struct gdbarch *gdbarch, struct regcache *regcache,
                           int regnum, gdb_byte *buf)
 {
   gdb_byte reg[16];
   char annex[32];
   ULONGEST id;
+  enum register_status status;
 
   switch (regnum)
     {
     case SPU_SP_REGNUM:
-      regcache_raw_read (regcache, SPU_RAW_SP_REGNUM, reg);
+      status = regcache_raw_read (regcache, SPU_RAW_SP_REGNUM, reg);
+      if (status != REG_VALID)
+	return status;
       memcpy (buf, reg, 4);
-      break;
+      return status;
 
     case SPU_FPSCR_REGNUM:
-      regcache_raw_read_unsigned (regcache, SPU_ID_REGNUM, &id);
+      status = regcache_raw_read_unsigned (regcache, SPU_ID_REGNUM, &id);
+      if (status != REG_VALID)
+	return status;
       xsnprintf (annex, sizeof annex, "%d/fpcr", (int) id);
       target_read (&current_target, TARGET_OBJECT_SPU, annex, buf, 0, 16);
-      break;
+      return status;
 
     case SPU_SRR0_REGNUM:
-      spu_pseudo_register_read_spu (regcache, "srr0", buf);
-      break;
+      return spu_pseudo_register_read_spu (regcache, "srr0", buf);
 
     case SPU_LSLR_REGNUM:
-      spu_pseudo_register_read_spu (regcache, "lslr", buf);
-      break;
+      return spu_pseudo_register_read_spu (regcache, "lslr", buf);
 
     case SPU_DECR_REGNUM:
-      spu_pseudo_register_read_spu (regcache, "decr", buf);
-      break;
+      return spu_pseudo_register_read_spu (regcache, "decr", buf);
 
     case SPU_DECR_STATUS_REGNUM:
-      spu_pseudo_register_read_spu (regcache, "decr_status", buf);
-      break;
+      return spu_pseudo_register_read_spu (regcache, "decr_status", buf);
 
     default:
       internal_error (__FILE__, __LINE__, _("invalid regnum"));
@@ -353,7 +360,7 @@ spu_gdbarch_id (struct gdbarch *gdbarch)
   int id = tdep->id;
 
   /* The objfile architecture of a standalone SPU executable does not
-     provide an SPU ID.  Retrieve it from the the objfile's relocated
+     provide an SPU ID.  Retrieve it from the objfile's relocated
      address range in this special case.  */
   if (id == -1
       && symfile_objfile && symfile_objfile->obfd
@@ -362,23 +369,6 @@ spu_gdbarch_id (struct gdbarch *gdbarch)
     id = SPUADDR_SPU (obj_section_addr (symfile_objfile->sections));
 
   return id;
-}
-
-static ULONGEST
-spu_lslr (int id)
-{
-  gdb_byte buf[32];
-  char annex[32];
-
-  if (id == -1)
-    return SPU_LS_SIZE - 1;
-
-  xsnprintf (annex, sizeof annex, "%d/lslr", id);
-  memset (buf, 0, sizeof buf);
-  target_read (&current_target, TARGET_OBJECT_SPU, annex,
-	       buf, 0, sizeof buf);
-
-  return strtoulst (buf, NULL, 16);
 }
 
 static int
@@ -426,7 +416,6 @@ spu_pointer_to_address (struct gdbarch *gdbarch,
 			struct type *type, const gdb_byte *buf)
 {
   int id = spu_gdbarch_id (gdbarch);
-  ULONGEST lslr = spu_lslr (id);
   enum bfd_endian byte_order = gdbarch_byte_order (gdbarch);
   ULONGEST addr
     = extract_unsigned_integer (buf, TYPE_LENGTH (type), byte_order);
@@ -435,7 +424,7 @@ spu_pointer_to_address (struct gdbarch *gdbarch,
   if (TYPE_ADDRESS_CLASS_1 (type))
     return addr;
 
-  return addr? SPUADDR (id, addr & lslr) : 0;
+  return addr? SPUADDR (id, addr) : 0;
 }
 
 static CORE_ADDR
@@ -443,10 +432,9 @@ spu_integer_to_address (struct gdbarch *gdbarch,
 			struct type *type, const gdb_byte *buf)
 {
   int id = spu_gdbarch_id (gdbarch);
-  ULONGEST lslr = spu_lslr (id);
   ULONGEST addr = unpack_long (type, buf);
 
-  return SPUADDR (id, addr & lslr);
+  return SPUADDR (id, addr);
 }
 
 
@@ -468,7 +456,7 @@ enum
     op_a     = 0x0c0,
     op_ai    = 0x1c,
 
-    op_selb  = 0x4,
+    op_selb  = 0x8,
 
     op_br    = 0x64,
     op_bra   = 0x60,
@@ -633,6 +621,7 @@ spu_analyze_prologue (struct gdbarch *gdbarch,
   int found_sp = 0;
   int found_fp = 0;
   int found_lr = 0;
+  int found_bc = 0;
   int reg_immed[SPU_NUM_GPRS];
   gdb_byte buf[16];
   CORE_ADDR prolog_pc = start_pc;
@@ -661,8 +650,9 @@ spu_analyze_prologue (struct gdbarch *gdbarch,
 	- The first instruction to set up the stack pointer.
 	- The first instruction to set up the frame pointer.
 	- The first instruction to save the link register.
+	- The first instruction to save the backchain.
 
-     We return the instruction after the latest of these three,
+     We return the instruction after the latest of these four,
      or the incoming PC if none is found.  The first instruction
      to set up the stack pointer also defines the frame size.
 
@@ -771,6 +761,14 @@ spu_analyze_prologue (struct gdbarch *gdbarch,
 	      found_lr = 1;
 	      prolog_pc = pc + 4;
 	    }
+
+	  if (ra == SPU_RAW_SP_REGNUM
+	      && (found_sp? immed == 0 : rt == SPU_RAW_SP_REGNUM)
+	      && !found_bc)
+	    {
+	      found_bc = 1;
+	      prolog_pc = pc + 4;
+	    }
 	}
 
       /* _start uses SELB to set up the stack pointer.  */
@@ -822,7 +820,7 @@ spu_virtual_frame_pointer (struct gdbarch *gdbarch, CORE_ADDR pc,
     }
   else
     {
-      /* ??? We don't really know ... */
+      /* ??? We don't really know ...  */
       *reg = SPU_SP_REGNUM;
       *offset = 0;
     }
@@ -996,7 +994,13 @@ spu_frame_unwind_cache (struct frame_info *this_frame,
     {
       CORE_ADDR reg;
       LONGEST backchain;
+      ULONGEST lslr;
       int status;
+
+      /* Get local store limit.  */
+      lslr = get_frame_register_unsigned (this_frame, SPU_LSLR_REGNUM);
+      if (!lslr)
+	lslr = (ULONGEST) -1;
 
       /* Get the backchain.  */
       reg = get_frame_register_unsigned (this_frame, SPU_SP_REGNUM);
@@ -1005,11 +1009,12 @@ spu_frame_unwind_cache (struct frame_info *this_frame,
 
       /* A zero backchain terminates the frame chain.  Also, sanity
          check against the local store size limit.  */
-      if (status && backchain > 0 && backchain < SPU_LS_SIZE)
+      if (status && backchain > 0 && backchain <= lslr)
 	{
 	  /* Assume the link register is saved into its slot.  */
-	  if (backchain + 16 < SPU_LS_SIZE)
-	    info->saved_regs[SPU_LR_REGNUM].addr = SPUADDR (id, backchain + 16);
+	  if (backchain + 16 <= lslr)
+	    info->saved_regs[SPU_LR_REGNUM].addr = SPUADDR (id,
+							    backchain + 16);
 
           /* Frame bases.  */
 	  info->frame_base = SPUADDR (id, backchain);
@@ -1077,6 +1082,7 @@ spu_frame_prev_register (struct frame_info *this_frame,
 
 static const struct frame_unwind spu_frame_unwind = {
   NORMAL_FRAME,
+  default_frame_unwind_stop_reason,
   spu_frame_this_id,
   spu_frame_prev_register,
   NULL,
@@ -1231,6 +1237,7 @@ spu2ppu_dealloc_cache (struct frame_info *self, void *this_cache)
 
 static const struct frame_unwind spu2ppu_unwind = {
   ARCH_FRAME,
+  default_frame_unwind_stop_reason,
   spu2ppu_this_id,
   spu2ppu_prev_register,
   NULL,
@@ -1449,6 +1456,13 @@ spu_return_value (struct gdbarch *gdbarch, struct type *func_type,
 		  gdb_byte *out, const gdb_byte *in)
 {
   enum return_value_convention rvc;
+  int opencl_vector = 0;
+
+  if (func_type
+      && TYPE_CALLING_CONVENTION (func_type) == DW_CC_GDB_IBM_OpenCL
+      && TYPE_CODE (type) == TYPE_CODE_ARRAY
+      && TYPE_VECTOR (type))
+    opencl_vector = 1;
 
   if (TYPE_LENGTH (type) <= (SPU_ARGN_REGNUM - SPU_ARG1_REGNUM + 1) * 16)
     rvc = RETURN_VALUE_REGISTER_CONVENTION;
@@ -1460,11 +1474,14 @@ spu_return_value (struct gdbarch *gdbarch, struct type *func_type,
       switch (rvc)
 	{
 	case RETURN_VALUE_REGISTER_CONVENTION:
-	  spu_value_to_regcache (regcache, SPU_ARG1_REGNUM, type, in);
+	  if (opencl_vector && TYPE_LENGTH (type) == 2)
+	    regcache_cooked_write_part (regcache, SPU_ARG1_REGNUM, 2, 2, in);
+	  else
+	    spu_value_to_regcache (regcache, SPU_ARG1_REGNUM, type, in);
 	  break;
 
 	case RETURN_VALUE_STRUCT_CONVENTION:
-	  error ("Cannot set function return value.");
+	  error (_("Cannot set function return value."));
 	  break;
 	}
     }
@@ -1473,11 +1490,14 @@ spu_return_value (struct gdbarch *gdbarch, struct type *func_type,
       switch (rvc)
 	{
 	case RETURN_VALUE_REGISTER_CONVENTION:
-	  spu_regcache_to_value (regcache, SPU_ARG1_REGNUM, type, out);
+	  if (opencl_vector && TYPE_LENGTH (type) == 2)
+	    regcache_cooked_read_part (regcache, SPU_ARG1_REGNUM, 2, 2, out);
+	  else
+	    spu_regcache_to_value (regcache, SPU_ARG1_REGNUM, type, out);
 	  break;
 
 	case RETURN_VALUE_STRUCT_CONVENTION:
-	  error ("Function return value unknown.");
+	  error (_("Function return value unknown."));
 	  break;
 	}
     }
@@ -1489,12 +1509,46 @@ spu_return_value (struct gdbarch *gdbarch, struct type *func_type,
 /* Breakpoints.  */
 
 static const gdb_byte *
-spu_breakpoint_from_pc (struct gdbarch *gdbarch, CORE_ADDR * pcptr, int *lenptr)
+spu_breakpoint_from_pc (struct gdbarch *gdbarch,
+			CORE_ADDR * pcptr, int *lenptr)
 {
   static const gdb_byte breakpoint[] = { 0x00, 0x00, 0x3f, 0xff };
 
   *lenptr = sizeof breakpoint;
   return breakpoint;
+}
+
+static int
+spu_memory_remove_breakpoint (struct gdbarch *gdbarch,
+			      struct bp_target_info *bp_tgt)
+{
+  /* We work around a problem in combined Cell/B.E. debugging here.  Consider
+     that in a combined application, we have some breakpoints inserted in SPU
+     code, and now the application forks (on the PPU side).  GDB common code
+     will assume that the fork system call copied all breakpoints into the new
+     process' address space, and that all those copies now need to be removed
+     (see breakpoint.c:detach_breakpoints).
+
+     While this is certainly true for PPU side breakpoints, it is not true
+     for SPU side breakpoints.  fork will clone the SPU context file
+     descriptors, so that all the existing SPU contexts are in accessible
+     in the new process.  However, the contents of the SPU contexts themselves
+     are *not* cloned.  Therefore the effect of detach_breakpoints is to
+     remove SPU breakpoints from the *original* SPU context's local store
+     -- this is not the correct behaviour.
+
+     The workaround is to check whether the PID we are asked to remove this
+     breakpoint from (i.e. ptid_get_pid (inferior_ptid)) is different from the
+     PID of the current inferior (i.e. current_inferior ()->pid).  This is only
+     true in the context of detach_breakpoints.  If so, we simply do nothing.
+     [ Note that for the fork child process, it does not matter if breakpoints
+     remain inserted, because those SPU contexts are not runnable anyway --
+     the Linux kernel allows only the original process to invoke spu_run.  */
+
+  if (ptid_get_pid (inferior_ptid) != current_inferior ()->pid) 
+    return 0;
+
+  return default_memory_remove_breakpoint (gdbarch, bp_tgt);
 }
 
 
@@ -1510,6 +1564,7 @@ spu_software_single_step (struct frame_info *frame)
   unsigned int insn;
   int offset, reg;
   gdb_byte buf[4];
+  ULONGEST lslr;
 
   pc = get_frame_pc (frame);
 
@@ -1517,13 +1572,18 @@ spu_software_single_step (struct frame_info *frame)
     return 1;
   insn = extract_unsigned_integer (buf, 4, byte_order);
 
+  /* Get local store limit.  */
+  lslr = get_frame_register_unsigned (frame, SPU_LSLR_REGNUM);
+  if (!lslr)
+    lslr = (ULONGEST) -1;
+
   /* Next sequential instruction is at PC + 4, except if the current
      instruction is a PPE-assisted call, in which case it is at PC + 8.
      Wrap around LS limit to be on the safe side.  */
   if ((insn & 0xffffff00) == 0x00002100)
-    next_pc = (SPUADDR_ADDR (pc) + 8) & (SPU_LS_SIZE - 1);
+    next_pc = (SPUADDR_ADDR (pc) + 8) & lslr;
   else
-    next_pc = (SPUADDR_ADDR (pc) + 4) & (SPU_LS_SIZE - 1);
+    next_pc = (SPUADDR_ADDR (pc) + 4) & lslr;
 
   insert_single_step_breakpoint (gdbarch,
 				 aspace, SPUADDR (SPUADDR_SPU (pc), next_pc));
@@ -1536,11 +1596,24 @@ spu_software_single_step (struct frame_info *frame)
 	target += SPUADDR_ADDR (pc);
       else if (reg != -1)
 	{
-	  get_frame_register_bytes (frame, reg, 0, 4, buf);
-	  target += extract_unsigned_integer (buf, 4, byte_order) & -4;
+	  int optim, unavail;
+
+	  if (get_frame_register_bytes (frame, reg, 0, 4, buf,
+					 &optim, &unavail))
+	    target += extract_unsigned_integer (buf, 4, byte_order) & -4;
+	  else
+	    {
+	      if (optim)
+		error (_("Could not determine address of "
+			 "single-step breakpoint."));
+	      if (unavail)
+		throw_error (NOT_AVAILABLE_ERROR,
+			     _("Could not determine address of "
+			       "single-step breakpoint."));
+	    }
 	}
 
-      target = target & (SPU_LS_SIZE - 1);
+      target = target & lslr;
       if (target != next_pc)
 	insert_single_step_breakpoint (gdbarch, aspace,
 				       SPUADDR (SPUADDR_SPU (pc), target));
@@ -1560,9 +1633,13 @@ spu_get_longjmp_target (struct frame_info *frame, CORE_ADDR *pc)
   enum bfd_endian byte_order = gdbarch_byte_order (gdbarch);
   gdb_byte buf[4];
   CORE_ADDR jb_addr;
+  int optim, unavail;
 
   /* Jump buffer is pointed to by the argument register $r3.  */
-  get_frame_register_bytes (frame, SPU_ARG1_REGNUM, 0, 4, buf);
+  if (!get_frame_register_bytes (frame, SPU_ARG1_REGNUM, 0, 4, buf,
+				 &optim, &unavail))
+    return 0;
+
   jb_addr = extract_unsigned_integer (buf, 4, byte_order);
   if (target_read_memory (SPUADDR (tdep->id, jb_addr), buf, 4))
     return 0;
@@ -1591,8 +1668,9 @@ spu_dis_asm_print_address (bfd_vma addr, struct disassemble_info *info)
 static int
 gdb_print_insn_spu (bfd_vma memaddr, struct disassemble_info *info)
 {
-  /* The opcodes disassembler does 18-bit address arithmetic.  Make sure the
-     SPU ID encoded in the high bits is added back when we call print_address.  */
+  /* The opcodes disassembler does 18-bit address arithmetic.  Make
+     sure the SPU ID encoded in the high bits is added back when we
+     call print_address.  */
   struct disassemble_info spu_info = *info;
   struct spu_dis_asm_data data;
   data.gdbarch = info->application_data;
@@ -1626,11 +1704,12 @@ gdb_print_insn_spu (bfd_vma memaddr, struct disassemble_info *info)
 
    _ovly_table should never change.
 
-   Both tables are aligned to a 16-byte boundary, the symbols _ovly_table
-   and _ovly_buf_table are of type STT_OBJECT and their size set to the size
-   of the respective array. buf in _ovly_table is an index into _ovly_buf_table.
+   Both tables are aligned to a 16-byte boundary, the symbols
+   _ovly_table and _ovly_buf_table are of type STT_OBJECT and their
+   size set to the size of the respective array. buf in _ovly_table is
+   an index into _ovly_buf_table.
 
-   mapped is an index into _ovly_table. Both the mapped and buf indices start
+   mapped is an index into _ovly_table.  Both the mapped and buf indices start
    from one to reference the first entry in their respective tables.  */
 
 /* Using the per-objfile private data mechanism, we store for each
@@ -1673,7 +1752,8 @@ spu_get_overlay_table (struct objfile *objfile)
   if (!ovly_table_msym)
     return NULL;
 
-  ovly_buf_table_msym = lookup_minimal_symbol ("_ovly_buf_table", NULL, objfile);
+  ovly_buf_table_msym = lookup_minimal_symbol ("_ovly_buf_table",
+					       NULL, objfile);
   if (!ovly_buf_table_msym)
     return NULL;
 
@@ -1767,7 +1847,7 @@ spu_overlay_update (struct obj_section *osect)
 /* Whenever a new objfile is loaded, read the target's _ovly_table.
    If there is one, go through all sections and make sure for non-
    overlay sections LMA equals VMA, while for overlay sections LMA
-   is larger than local store size.  */
+   is larger than SPU_OVERLAY_LMA.  */
 static void
 spu_overlay_new_objfile (struct objfile *objfile)
 {
@@ -1797,7 +1877,7 @@ spu_overlay_new_objfile (struct objfile *objfile)
       if (ovly_table[ndx].mapped_ptr == 0)
 	bfd_section_lma (obfd, bsect) = bfd_section_vma (obfd, bsect);
       else
-	bfd_section_lma (obfd, bsect) = bsect->filepos + SPU_LS_SIZE;
+	bfd_section_lma (obfd, bsect) = SPU_OVERLAY_LMA + bsect->filepos;
     }
 }
 
@@ -1841,7 +1921,7 @@ spu_catch_start (struct objfile *objfile)
       struct symbol *sym;
       struct symtab_and_line sal;
 
-      sym = lookup_block_symbol (block, "main", NULL, VAR_DOMAIN);
+      sym = lookup_block_symbol (block, "main", VAR_DOMAIN);
       if (sym)
 	{
 	  fixup_symbol_section (sym, objfile);
@@ -1853,11 +1933,14 @@ spu_catch_start (struct objfile *objfile)
   /* Use a numerical address for the set_breakpoint command to avoid having
      the breakpoint re-set incorrectly.  */
   xsnprintf (buf, sizeof buf, "*%s", core_addr_to_string (pc));
-  set_breakpoint (get_objfile_arch (objfile),
-		  buf, NULL /* condition */,
-		  0 /* hardwareflag */, 1 /* tempflag */,
-		  -1 /* thread */, 0 /* ignore_count */,
-		  0 /* pending */, 1 /* enabled */);
+  create_breakpoint (get_objfile_arch (objfile), buf /* arg */,
+		     NULL /* cond_string */, -1 /* thread */,
+		     0 /* parse_condition_and_thread */, 1 /* tempflag */,
+		     bp_breakpoint /* type_wanted */,
+		     0 /* ignore_count */,
+		     AUTO_BOOLEAN_FALSE /* pending_break_support */,
+		     NULL /* ops */, 0 /* from_tty */, 1 /* enabled */,
+		     0 /* internal  */);
 }
 
 
@@ -2492,7 +2575,8 @@ info_spu_proxydma_command (char *args, int from_tty)
 static void
 info_spu_command (char *args, int from_tty)
 {
-  printf_unfiltered (_("\"info spu\" must be followed by the name of an SPU facility.\n"));
+  printf_unfiltered (_("\"info spu\" must be followed by "
+		       "the name of an SPU facility.\n"));
   help_list (infospucmdlist, "info spu ", -1, gdb_stdout);
 }
 
@@ -2633,6 +2717,7 @@ spu_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
   /* Breakpoints.  */
   set_gdbarch_decr_pc_after_break (gdbarch, 4);
   set_gdbarch_breakpoint_from_pc (gdbarch, spu_breakpoint_from_pc);
+  set_gdbarch_memory_remove_breakpoint (gdbarch, spu_memory_remove_breakpoint);
   set_gdbarch_cannot_step_breakpoint (gdbarch, 1);
   set_gdbarch_software_single_step (gdbarch, spu_software_single_step);
   set_gdbarch_get_longjmp_target (gdbarch, spu_get_longjmp_target);

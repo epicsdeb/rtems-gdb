@@ -1,6 +1,6 @@
 /* XML target description support for GDB.
 
-   Copyright (C) 2006, 2008, 2009, 2010 Free Software Foundation, Inc.
+   Copyright (C) 2006, 2008, 2009, 2010, 2011 Free Software Foundation, Inc.
 
    Contributed by CodeSourcery.
 
@@ -85,8 +85,15 @@ struct tdesc_parsing_data
      it does not have its own.  This starts at zero.  */
   int next_regnum;
 
-  /* The union we are currently parsing, or last parsed.  */
-  struct tdesc_type *current_union;
+  /* The struct or union we are currently parsing, or last parsed.  */
+  struct tdesc_type *current_type;
+
+  /* The byte size of the current struct type, if specified.  Zero
+     if not specified.  */
+  int current_type_size;
+
+  /* Whether the current type is a flags type.  */
+  int current_type_is_flags;
 };
 
 /* Handle the end of an <architecture> element and its value.  */
@@ -145,8 +152,7 @@ tdesc_start_target (struct gdb_xml_parser *parser,
 		    const struct gdb_xml_element *element,
 		    void *user_data, VEC(gdb_xml_value_s) *attributes)
 {
-  struct tdesc_parsing_data *data = user_data;
-  char *version = VEC_index (gdb_xml_value_s, attributes, 0)->value;
+  char *version = xml_find_attribute (attributes, "version")->value;
 
   if (strcmp (version, "1.0") != 0)
     gdb_xml_error (parser,
@@ -162,7 +168,7 @@ tdesc_start_feature (struct gdb_xml_parser *parser,
 		     void *user_data, VEC(gdb_xml_value_s) *attributes)
 {
   struct tdesc_parsing_data *data = user_data;
-  char *name = VEC_index (gdb_xml_value_s, attributes, 0)->value;
+  char *name = xml_find_attribute (attributes, "name")->value;
 
   data->current_feature = tdesc_create_feature (data->tdesc, name);
 }
@@ -227,13 +233,61 @@ tdesc_start_union (struct gdb_xml_parser *parser,
 		   void *user_data, VEC(gdb_xml_value_s) *attributes)
 {
   struct tdesc_parsing_data *data = user_data;
-  char *id = VEC_index (gdb_xml_value_s, attributes, 0)->value;
+  char *id = xml_find_attribute (attributes, "id")->value;
 
-  data->current_union = tdesc_create_union (data->current_feature, id);
+  data->current_type = tdesc_create_union (data->current_feature, id);
+  data->current_type_size = 0;
+  data->current_type_is_flags = 0;
+}
+
+/* Handle the start of a <struct> element.  Initialize the type and
+   record it with the current feature.  */
+
+static void
+tdesc_start_struct (struct gdb_xml_parser *parser,
+		   const struct gdb_xml_element *element,
+		   void *user_data, VEC(gdb_xml_value_s) *attributes)
+{
+  struct tdesc_parsing_data *data = user_data;
+  char *id = xml_find_attribute (attributes, "id")->value;
+  struct tdesc_type *type;
+  struct gdb_xml_value *attr;
+
+  type = tdesc_create_struct (data->current_feature, id);
+  data->current_type = type;
+  data->current_type_size = 0;
+  data->current_type_is_flags = 0;
+
+  attr = xml_find_attribute (attributes, "size");
+  if (attr != NULL)
+    {
+      int size = (int) * (ULONGEST *) attr->value;
+
+      tdesc_set_struct_size (type, size);
+      data->current_type_size = size;
+    }
+}
+
+static void
+tdesc_start_flags (struct gdb_xml_parser *parser,
+		   const struct gdb_xml_element *element,
+		   void *user_data, VEC(gdb_xml_value_s) *attributes)
+{
+  struct tdesc_parsing_data *data = user_data;
+  char *id = xml_find_attribute (attributes, "id")->value;
+  int length = (int) * (ULONGEST *)
+    xml_find_attribute (attributes, "size")->value;
+  struct tdesc_type *type;
+
+  type = tdesc_create_flags (data->current_feature, id, length);
+
+  data->current_type = type;
+  data->current_type_size = 0;
+  data->current_type_is_flags = 1;
 }
 
 /* Handle the start of a <field> element.  Attach the field to the
-   current union.  */
+   current struct or union.  */
 
 static void
 tdesc_start_field (struct gdb_xml_parser *parser,
@@ -241,20 +295,88 @@ tdesc_start_field (struct gdb_xml_parser *parser,
 		   void *user_data, VEC(gdb_xml_value_s) *attributes)
 {
   struct tdesc_parsing_data *data = user_data;
-  struct gdb_xml_value *attrs = VEC_address (gdb_xml_value_s, attributes);
+  struct gdb_xml_value *attr;
   struct tdesc_type *field_type;
   char *field_name, *field_type_id;
+  int start, end;
 
-  field_name = attrs[0].value;
-  field_type_id = attrs[1].value;
+  field_name = xml_find_attribute (attributes, "name")->value;
 
-  field_type = tdesc_named_type (data->current_feature, field_type_id);
-  if (field_type == NULL)
-    gdb_xml_error (parser, _("Union field \"%s\" references undefined "
-			     "type \"%s\""),
-		   field_name, field_type_id);
+  attr = xml_find_attribute (attributes, "type");
+  if (attr != NULL)
+    field_type_id = attr->value;
+  else
+    field_type_id = NULL;
 
-  tdesc_add_field (data->current_union, field_name, field_type);
+  attr = xml_find_attribute (attributes, "start");
+  if (attr != NULL)
+    start = * (ULONGEST *) attr->value;
+  else
+    start = -1;
+
+  attr = xml_find_attribute (attributes, "end");
+  if (attr != NULL)
+    end = * (ULONGEST *) attr->value;
+  else
+    end = -1;
+
+  if (field_type_id != NULL)
+    {
+      if (data->current_type_is_flags)
+	gdb_xml_error (parser, _("Cannot add typed field \"%s\" to flags"), 
+		       field_name);
+      if (data->current_type_size != 0)
+	gdb_xml_error (parser,
+		       _("Explicitly sized type can not "
+			 "contain non-bitfield \"%s\""), 
+		       field_name);
+
+      field_type = tdesc_named_type (data->current_feature, field_type_id);
+      if (field_type == NULL)
+	gdb_xml_error (parser, _("Field \"%s\" references undefined "
+				 "type \"%s\""),
+		       field_name, field_type_id);
+
+      tdesc_add_field (data->current_type, field_name, field_type);
+    }
+  else if (start != -1 && end != -1)
+    {
+      struct tdesc_type *t = data->current_type;
+
+      if (data->current_type_is_flags)
+	tdesc_add_flag (t, start, field_name);
+      else
+	{
+	  if (data->current_type_size == 0)
+	    gdb_xml_error (parser,
+			   _("Implicitly sized type can "
+			     "not contain bitfield \"%s\""), 
+			   field_name);
+
+	  if (end >= 64)
+	    gdb_xml_error (parser,
+			   _("Bitfield \"%s\" goes past "
+			     "64 bits (unsupported)"),
+			   field_name);
+
+	  /* Assume that the bit numbering in XML is "lsb-zero".  Most
+	     architectures other than PowerPC use this ordering.  In
+	     the future, we can add an XML tag to indicate "msb-zero"
+	     numbering.  */
+	  if (start > end)
+	    gdb_xml_error (parser, _("Bitfield \"%s\" has start after end"),
+			   field_name);
+
+	  if (end >= data->current_type_size * TARGET_CHAR_BIT)
+	    gdb_xml_error (parser,
+			   _("Bitfield \"%s\" does not fit in struct"));
+
+	  tdesc_add_bitfield (t, field_name, start, end);
+	}
+    }
+  else
+    gdb_xml_error (parser, _("Field \"%s\" has neither type nor bit position"),
+		   field_name);
 }
 
 /* Handle the start of a <vector> element.  Initialize the type and
@@ -287,11 +409,13 @@ tdesc_start_vector (struct gdb_xml_parser *parser,
 
 static const struct gdb_xml_attribute field_attributes[] = {
   { "name", GDB_XML_AF_NONE, NULL, NULL },
-  { "type", GDB_XML_AF_NONE, NULL, NULL },
+  { "type", GDB_XML_AF_OPTIONAL, NULL, NULL },
+  { "start", GDB_XML_AF_OPTIONAL, gdb_xml_parse_attr_ulongest, NULL },
+  { "end", GDB_XML_AF_OPTIONAL, gdb_xml_parse_attr_ulongest, NULL },
   { NULL, GDB_XML_AF_NONE, NULL, NULL }
 };
 
-static const struct gdb_xml_element union_children[] = {
+static const struct gdb_xml_element struct_union_children[] = {
   { "field", field_attributes, NULL, GDB_XML_EF_REPEATABLE,
     tdesc_start_field, NULL },
   { NULL, NULL, NULL, GDB_XML_EF_NONE, NULL, NULL }
@@ -308,8 +432,15 @@ static const struct gdb_xml_attribute reg_attributes[] = {
   { NULL, GDB_XML_AF_NONE, NULL, NULL }
 };
 
-static const struct gdb_xml_attribute union_attributes[] = {
+static const struct gdb_xml_attribute struct_union_attributes[] = {
   { "id", GDB_XML_AF_NONE, NULL, NULL },
+  { "size", GDB_XML_AF_OPTIONAL, gdb_xml_parse_attr_ulongest, NULL},
+  { NULL, GDB_XML_AF_NONE, NULL, NULL }
+};
+
+static const struct gdb_xml_attribute flags_attributes[] = {
+  { "id", GDB_XML_AF_NONE, NULL, NULL },
+  { "size", GDB_XML_AF_NONE, gdb_xml_parse_attr_ulongest, NULL},
   { NULL, GDB_XML_AF_NONE, NULL, NULL }
 };
 
@@ -329,9 +460,15 @@ static const struct gdb_xml_element feature_children[] = {
   { "reg", reg_attributes, NULL,
     GDB_XML_EF_OPTIONAL | GDB_XML_EF_REPEATABLE,
     tdesc_start_reg, NULL },
-  { "union", union_attributes, union_children,
+  { "struct", struct_union_attributes, struct_union_children,
+    GDB_XML_EF_OPTIONAL | GDB_XML_EF_REPEATABLE,
+    tdesc_start_struct, NULL },
+  { "union", struct_union_attributes, struct_union_children,
     GDB_XML_EF_OPTIONAL | GDB_XML_EF_REPEATABLE,
     tdesc_start_union, NULL },
+  { "flags", flags_attributes, struct_union_children,
+    GDB_XML_EF_OPTIONAL | GDB_XML_EF_REPEATABLE,
+    tdesc_start_flags, NULL },    
   { "vector", vector_attributes, NULL,
     GDB_XML_EF_OPTIONAL | GDB_XML_EF_REPEATABLE,
     tdesc_start_vector, NULL },
@@ -369,7 +506,6 @@ tdesc_parse_xml (const char *document, xml_fetch_another fetcher,
 		 void *fetcher_baton)
 {
   struct cleanup *back_to, *result_cleanup;
-  struct gdb_xml_parser *parser;
   struct tdesc_parsing_data data;
   struct tdesc_xml_cache *cache;
   char *expanded_text;
@@ -395,16 +531,14 @@ tdesc_parse_xml (const char *document, xml_fetch_another fetcher,
       }
 
   back_to = make_cleanup (null_cleanup, NULL);
-  parser = gdb_xml_create_parser_and_cleanup (_("target description"),
-					      tdesc_elements, &data);
-  gdb_xml_use_dtd (parser, "gdb-target.dtd");
 
   memset (&data, 0, sizeof (struct tdesc_parsing_data));
   data.tdesc = allocate_target_description ();
   result_cleanup = make_cleanup_free_target_description (data.tdesc);
   make_cleanup (xfree, expanded_text);
 
-  if (gdb_xml_parse (parser, expanded_text) == 0)
+  if (gdb_xml_parse_quick (_("target description"), "gdb-target.dtd",
+			   tdesc_elements, expanded_text, &data) == 0)
     {
       /* Parsed successfully.  */
       struct tdesc_xml_cache new_cache;

@@ -1,6 +1,6 @@
 /* Process record and replay target code for GNU/Linux.
 
-   Copyright (C) 2008, 2009, 2010 Free Software Foundation, Inc.
+   Copyright (C) 2008, 2009, 2010, 2011 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -240,6 +240,7 @@ record_linux_system_call (enum gdb_syscall syscall,
     case gdb_sys_exit:
       {
         int q;
+
         target_terminal_ours ();
         q = yquery (_("The next instruction is syscall exit.  "
                       "It will make the program exit.  "
@@ -256,6 +257,7 @@ record_linux_system_call (enum gdb_syscall syscall,
     case gdb_sys_read:
       {
         ULONGEST addr, count;
+
         regcache_raw_read_unsigned (regcache, tdep->arg2, &addr);
         regcache_raw_read_unsigned (regcache, tdep->arg3, &count);
         if (record_arch_list_add_mem ((CORE_ADDR) addr, (int) count))
@@ -654,6 +656,7 @@ record_linux_system_call (enum gdb_syscall syscall,
     case gdb_sys_readlink:
       {
         ULONGEST len;
+
         regcache_raw_read_unsigned (regcache, tdep->arg2,
                                     &tmpulongest);
         regcache_raw_read_unsigned (regcache, tdep->arg3, &len);
@@ -669,11 +672,11 @@ record_linux_system_call (enum gdb_syscall syscall,
     case gdb_sys_reboot:
       {
         int q;
+
         target_terminal_ours ();
-        q =
-          yquery (_("The next instruction is syscall reboot.  "
-                    "It will restart the computer.  "
-                    "Do you want to stop the program?"));
+        q = yquery (_("The next instruction is syscall reboot.  "
+		      "It will restart the computer.  "
+		      "Do you want to stop the program?"));
         target_terminal_inferior ();
         if (q)
           return 1;
@@ -692,21 +695,26 @@ record_linux_system_call (enum gdb_syscall syscall,
 
     case gdb_sys_munmap:
       {
-        int q;
         ULONGEST len;
 
         regcache_raw_read_unsigned (regcache, tdep->arg1,
                                     &tmpulongest);
         regcache_raw_read_unsigned (regcache, tdep->arg2, &len);
-        target_terminal_ours ();
-        q = yquery (_("The next instruction is syscall munmap.  "
-                      "It will free the memory addr = 0x%s len = %u.  "
-                      "It will make record target get error.  "
-                      "Do you want to stop the program?"),
-                    OUTPUT_REG (tmpulongest, tdep->arg1), (int) len);
-        target_terminal_inferior ();
-        if (q)
-          return 1;
+        if (record_memory_query)
+          {
+	    int q;
+
+            target_terminal_ours ();
+            q = yquery (_("\
+The next instruction is syscall munmap.\n\
+It will free the memory addr = 0x%s len = %u.\n\
+It will make record target cannot record some memory change.\n\
+Do you want to stop the program?"),
+                        OUTPUT_REG (tmpulongest, tdep->arg1), (int) len);
+            target_terminal_inferior ();
+            if (q)
+              return 1;
+          }
       }
       break;
 
@@ -745,6 +753,7 @@ record_linux_system_call (enum gdb_syscall syscall,
     case gdb_sys_getpeername:
       {
         ULONGEST len;
+
         regcache_raw_read_unsigned (regcache, tdep->arg2, &tmpulongest);
         regcache_raw_read_unsigned (regcache, tdep->arg3, &len);
         if (record_linux_sockaddr (regcache, tdep, tmpulongest, len))
@@ -755,14 +764,18 @@ record_linux_system_call (enum gdb_syscall syscall,
     case gdb_sys_recvfrom:
       {
         ULONGEST len;
+
         regcache_raw_read_unsigned (regcache, tdep->arg4, &tmpulongest);
         regcache_raw_read_unsigned (regcache, tdep->arg5, &len);
         if (record_linux_sockaddr (regcache, tdep, tmpulongest, len))
           return -1;
       }
+      break;
+
     case gdb_sys_recv:
       {
         ULONGEST size;
+
         regcache_raw_read_unsigned (regcache, tdep->arg2, &tmpulongest);
         regcache_raw_read_unsigned (regcache, tdep->arg3, &size);
         if (record_arch_list_add_mem ((CORE_ADDR) tmpulongest, (int) size))
@@ -788,6 +801,7 @@ record_linux_system_call (enum gdb_syscall syscall,
         {
           ULONGEST optvalp;
           gdb_byte *optlenp = alloca (tdep->size_int);
+
           if (target_read_memory ((CORE_ADDR) tmpulongest, optlenp,
                                   tdep->size_int))
             {
@@ -829,8 +843,6 @@ record_linux_system_call (enum gdb_syscall syscall,
             if (tmpulongest)
               {
                 gdb_byte *a = alloca (tdep->size_ulong * 2);
-                int addrlen;
-                gdb_byte *addrlenp;
                 ULONGEST len;
 
                 tmpulongest += tdep->size_ulong;
@@ -859,6 +871,7 @@ record_linux_system_call (enum gdb_syscall syscall,
         case RECORD_SYS_SOCKETPAIR:
           {
             gdb_byte *a = alloca (tdep->size_ulong);
+
             regcache_raw_read_unsigned (regcache, tdep->arg2,
                                         &tmpulongest);
             if (tmpulongest)
@@ -892,8 +905,6 @@ record_linux_system_call (enum gdb_syscall syscall,
           if (tmpulongest)
             {
               gdb_byte *a = alloca (tdep->size_ulong * 2);
-              int addrlen;
-              gdb_byte *addrlenp;
               ULONGEST len;
 
               tmpulongest += tdep->size_ulong * 4;
@@ -1137,6 +1148,7 @@ record_linux_system_call (enum gdb_syscall syscall,
     case gdb_sys_msgrcv:
       {
         ULONGEST msgp;
+
         regcache_raw_read_signed (regcache, tdep->arg3, &tmpulongest);
         regcache_raw_read_unsigned (regcache, tdep->arg2, &msgp);
         tmpint = (int) tmpulongest + tdep->size_long;
@@ -1170,6 +1182,7 @@ record_linux_system_call (enum gdb_syscall syscall,
           {
             ULONGEST second;
             ULONGEST ptr;
+
             regcache_raw_read_signed (regcache, tdep->arg3, &second);
             regcache_raw_read_unsigned (regcache, tdep->arg5, &ptr);
             tmpint = (int) second + tdep->size_long;
@@ -1225,6 +1238,7 @@ record_linux_system_call (enum gdb_syscall syscall,
       if (tmpulongest == 0 || tmpulongest == 2)
         {
           ULONGEST ptr, bytecount;
+
           regcache_raw_read_unsigned (regcache, tdep->arg2, &ptr);
           regcache_raw_read_unsigned (regcache, tdep->arg3, &bytecount);
           if (record_arch_list_add_mem ((CORE_ADDR) ptr, (int) bytecount))
@@ -1323,6 +1337,7 @@ record_linux_system_call (enum gdb_syscall syscall,
     case gdb_sys_getdents:
       {
         ULONGEST count;
+
         regcache_raw_read_unsigned (regcache, tdep->arg2,
                                     &tmpulongest);
         regcache_raw_read_unsigned (regcache, tdep->arg3, &count);
@@ -1454,6 +1469,7 @@ record_linux_system_call (enum gdb_syscall syscall,
       if (tmpulongest)
         {
           ULONGEST nfds;
+
           regcache_raw_read_unsigned (regcache, tdep->arg2, &nfds);
           if (record_arch_list_add_mem ((CORE_ADDR) tmpulongest,
                                         tdep->size_pollfd * nfds))
@@ -1466,6 +1482,7 @@ record_linux_system_call (enum gdb_syscall syscall,
       if (tmpulongest == 7 || tmpulongest == 8)
         {
           int rsize;
+
           if (tmpulongest == 7)
             rsize = tdep->size_NFS_FHSIZE;
           else
@@ -1538,6 +1555,7 @@ record_linux_system_call (enum gdb_syscall syscall,
       if (tmpulongest)
         {
           ULONGEST sigsetsize;
+
           regcache_raw_read_unsigned (regcache, tdep->arg2,&sigsetsize);
           if (record_arch_list_add_mem ((CORE_ADDR) tmpulongest,
                                         (int) sigsetsize))
@@ -1561,6 +1579,7 @@ record_linux_system_call (enum gdb_syscall syscall,
       if (tmpulongest)
         {
           ULONGEST count;
+
           regcache_raw_read_unsigned (regcache, tdep->arg3,&count);
           if (record_arch_list_add_mem ((CORE_ADDR) tmpulongest, (int) count))
             return -1;
@@ -1576,6 +1595,7 @@ record_linux_system_call (enum gdb_syscall syscall,
       if (tmpulongest)
         {
           ULONGEST size;
+
           regcache_raw_read_unsigned (regcache, tdep->arg2, &size);
           if (record_arch_list_add_mem ((CORE_ADDR) tmpulongest, (int) size))
             return -1;
@@ -1648,6 +1668,7 @@ record_linux_system_call (enum gdb_syscall syscall,
       if (tmpulongest)
         {
           ULONGEST gidsetsize;
+
           regcache_raw_read_unsigned (regcache, tdep->arg1,
                                       &gidsetsize);
           tmpint = tdep->size_gid_t * (int) gidsetsize;
@@ -1709,6 +1730,7 @@ record_linux_system_call (enum gdb_syscall syscall,
     case gdb_sys_getdents64:
       {
         ULONGEST count;
+
         regcache_raw_read_unsigned (regcache, tdep->arg2,
                                     &tmpulongest);
         regcache_raw_read_unsigned (regcache, tdep->arg3, &count);
@@ -1751,6 +1773,7 @@ record_linux_system_call (enum gdb_syscall syscall,
       if (tmpulongest)
         {
           ULONGEST size;
+
           regcache_raw_read_unsigned (regcache, tdep->arg4, &size);
           if (record_arch_list_add_mem ((CORE_ADDR) tmpulongest, (int) size))
             return -1;
@@ -1764,6 +1787,7 @@ record_linux_system_call (enum gdb_syscall syscall,
       if (tmpulongest)
         {
           ULONGEST size;
+
           regcache_raw_read_unsigned (regcache, tdep->arg3, &size);
           if (record_arch_list_add_mem ((CORE_ADDR) tmpulongest, (int) size))
             return -1;
@@ -1792,6 +1816,7 @@ record_linux_system_call (enum gdb_syscall syscall,
       if (tmpulongest)
         {
           ULONGEST len;
+
           regcache_raw_read_unsigned (regcache, tdep->arg2, &len);
           if (record_arch_list_add_mem ((CORE_ADDR) tmpulongest, (int) len))
             return -1;
@@ -1825,6 +1850,7 @@ record_linux_system_call (enum gdb_syscall syscall,
       if (tmpulongest)
         {
           ULONGEST nr;
+
           regcache_raw_read_unsigned (regcache, tdep->arg3, &nr);
           if (record_arch_list_add_mem ((CORE_ADDR) tmpulongest,
                                         nr * tdep->size_io_event))
@@ -1879,6 +1905,7 @@ record_linux_system_call (enum gdb_syscall syscall,
     case gdb_sys_exit_group:
       {
         int q;
+
         target_terminal_ours ();
         q = yquery (_("The next instruction is syscall exit_group.  "
                       "It will make the program exit.  "
@@ -1894,6 +1921,7 @@ record_linux_system_call (enum gdb_syscall syscall,
       if (tmpulongest)
         {
           ULONGEST len;
+
           regcache_raw_read_unsigned (regcache, tdep->arg3, &len);
           if (record_arch_list_add_mem ((CORE_ADDR) tmpulongest, (int) len))
             return -1;
@@ -1909,6 +1937,7 @@ record_linux_system_call (enum gdb_syscall syscall,
       if (tmpulongest)
         {
           ULONGEST maxevents;
+
           regcache_raw_read_unsigned (regcache, tdep->arg3, &maxevents);
           if (record_arch_list_add_mem ((CORE_ADDR) tmpulongest,
                                         maxevents * tdep->size_epoll_event))
@@ -1989,6 +2018,7 @@ record_linux_system_call (enum gdb_syscall syscall,
       if (tmpulongest)
         {
           ULONGEST maxnode;
+
           regcache_raw_read_unsigned (regcache, tdep->arg3, &maxnode);
           if (record_arch_list_add_mem ((CORE_ADDR) tmpulongest,
                                         maxnode * tdep->size_long))
@@ -2007,6 +2037,7 @@ record_linux_system_call (enum gdb_syscall syscall,
       if (tmpulongest)
         {
           ULONGEST msg_len;
+
           regcache_raw_read_unsigned (regcache, tdep->arg3, &msg_len);
           if (record_arch_list_add_mem ((CORE_ADDR) tmpulongest,
                                         (int) msg_len))
@@ -2055,6 +2086,7 @@ record_linux_system_call (enum gdb_syscall syscall,
           if (tmpulongest)
             {
               ULONGEST buflen;
+
               regcache_raw_read_unsigned (regcache, tdep->arg4, &buflen);
               if (record_arch_list_add_mem ((CORE_ADDR) tmpulongest,
                                             (int) buflen))
@@ -2094,6 +2126,7 @@ record_linux_system_call (enum gdb_syscall syscall,
       if (tmpulongest)
         {
           ULONGEST bufsiz;
+
           regcache_raw_read_unsigned (regcache, tdep->arg4, &bufsiz);
           if (record_arch_list_add_mem ((CORE_ADDR) tmpulongest, (int) bufsiz))
             return -1;
@@ -2128,6 +2161,7 @@ record_linux_system_call (enum gdb_syscall syscall,
       if (tmpulongest)
         {
           ULONGEST nfds;
+
           regcache_raw_read_unsigned (regcache, tdep->arg2, &nfds);
           if (record_arch_list_add_mem ((CORE_ADDR) tmpulongest,
                                         tdep->size_pollfd * nfds))
@@ -2173,6 +2207,7 @@ record_linux_system_call (enum gdb_syscall syscall,
       if (tmpulongest)
         {
           ULONGEST nr_pages;
+
           regcache_raw_read_unsigned (regcache, tdep->arg2, &nr_pages);
           if (record_arch_list_add_mem ((CORE_ADDR) tmpulongest,
                                         nr_pages * tdep->size_int))
@@ -2198,6 +2233,7 @@ record_linux_system_call (enum gdb_syscall syscall,
       if (tmpulongest)
         {
           ULONGEST maxevents;
+
           regcache_raw_read_unsigned (regcache, tdep->arg3, &maxevents);
           tmpint = (int) maxevents * tdep->size_epoll_event;
           if (record_arch_list_add_mem ((CORE_ADDR) tmpulongest, tmpint))

@@ -1,6 +1,7 @@
 # This testcase is part of GDB, the GNU debugger.
 
-# Copyright 2001, 2004, 2007, 2008, 2009, 2010 Free Software Foundation, Inc.
+# Copyright 2001, 2004, 2007, 2008, 2009, 2010, 2011
+# Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -24,22 +25,13 @@ if $tracelevel then {
 	strace $tracelevel
 }
 
-set prms_id 0
-set bug_id 0
 
 set testfile "charset"
 set srcfile ${testfile}.c
-set binfile ${objdir}/${subdir}/${testfile}
-if  { [gdb_compile "${srcdir}/${subdir}/${srcfile}" "${binfile}" executable {debug}] != "" } {
-    untested "couldn't compile ${srcdir}/${subdir}/${srcfile}"
+set srcmallocfile ${testfile}-malloc.c
+if { [prepare_for_testing ${testfile}.exp ${testfile} [list $srcfile $srcmallocfile]] } {
     return -1
 }
-
-# Start with a fresh gdb.
-gdb_exit
-gdb_start
-gdb_reinitialize_dir $srcdir/$subdir
-gdb_load ${binfile}
 
 # Parse the output from a `show charset' command.  Return the host
 # and target charset as a two-element list.
@@ -363,7 +355,7 @@ if {$wchar_size == 2} {
     set wchar_ok 1
 }
 
-gdb_test "set host-charset ASCII" ""
+gdb_test_no_output "set host-charset ASCII"
 foreach target_charset $charset_subset {
     if {![valid_target_charset $target_charset]} {
 	continue
@@ -376,15 +368,7 @@ foreach target_charset $charset_subset {
 	set param target-charset
 	set L ""
     }
-    send_gdb "set $param $target_charset\n" 
-    gdb_expect {
-        -re "$gdb_prompt $" {
-            pass "set $param $target_charset"
-        }
-        timeout {
-            fail "set $param $target_charset (timeout)"
-        }
-    }
+    gdb_test_no_output "set $param $target_charset"
 
     # Try printing the null character.  There seems to be a bug in
     # gdb_test that requires us to use gdb_expect here.
@@ -523,7 +507,7 @@ foreach target_charset $charset_subset {
 }
 
 # Reset the target charset.
-gdb_test "set target-charset UTF-8" ""
+gdb_test_no_output "set target-charset UTF-8"
 
 # \242 is not a valid UTF-8 character.
 gdb_test "print \"\\242\"" " = \"\\\\242\"" \
@@ -615,5 +599,31 @@ if {$ucs2_ok} {
 gdb_test "print 'a' == 'a' || 'b' == 'b'" \
   ".* = 1" \
   "EVAL_SKIP cleanup handling regression test"
+
+
+proc string_display { var_name set_prefix x_size x_type} {
+  gdb_test_no_output "set ${var_name} = ${set_prefix}\"Test String\\0with zeroes\"" "Assign ${var_name} with prefix ${set_prefix}"
+  gdb_test "x /2${x_size}s ${var_name}" ".* ${x_type}\"Test String\"\[\r\n\]+.* ${x_type}\"with zeroes\"" "Display String ${var_name} with x/${x_size}s"
+}
+
+string_display String16 u h u
+if {$wchar_size == 2} {
+  string_display String16 L h u
+}
+ 
+string_display String32 U w U
+if {$wchar_size == 4} {
+  string_display String32 L w U
+}
+
+
+foreach name {short int long} {
+    # We're really just checking to make sure this doesn't give an
+    # error.
+    gdb_test "print ${name}_array = \"hi\"" \
+	" = {.*}" \
+	"assign string to $name array"
+}
+
 
 gdb_exit 

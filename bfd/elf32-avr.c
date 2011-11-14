@@ -473,7 +473,7 @@ static reloc_howto_type elf_avr_howto_table[] =
 	 0xffff,		/* dst_mask */
 	 FALSE), 		/* pcrel_offset */
   /* A low 8 bit absolute relocation of 24 bit program memory address.
-     For LDI command.  Will be changed when linker stubs are needed. */
+     For LDI command.  Will be changed when linker stubs are needed.  */
   HOWTO (R_AVR_LO8_LDI_GS,      /* type */
          1,                     /* rightshift */
          1,                     /* size (0 = byte, 1 = short, 2 = long) */
@@ -488,7 +488,7 @@ static reloc_howto_type elf_avr_howto_table[] =
          0xffff,                /* dst_mask */
          FALSE),                /* pcrel_offset */
   /* A low 8 bit absolute relocation of 24 bit program memory address.
-     For LDI command.  Will be changed when linker stubs are needed. */
+     For LDI command.  Will be changed when linker stubs are needed.  */
   HOWTO (R_AVR_HI8_LDI_GS,      /* type */
          9,                     /* rightshift */
          1,                     /* size (0 = byte, 1 = short, 2 = long) */
@@ -501,7 +501,21 @@ static reloc_howto_type elf_avr_howto_table[] =
          FALSE,                 /* partial_inplace */
          0xffff,                /* src_mask */
          0xffff,                /* dst_mask */
-         FALSE)                 /* pcrel_offset */
+         FALSE),                /* pcrel_offset */
+  /* 8 bit offset.  */
+  HOWTO (R_AVR_8,		/* type */
+	 0,			/* rightshift */
+	 0,			/* size (0 = byte, 1 = short, 2 = long) */
+	 8,			/* bitsize */
+	 FALSE,			/* pc_relative */
+	 0,			/* bitpos */
+	 complain_overflow_bitfield,/* complain_on_overflow */
+	 bfd_elf_generic_reloc,	/* special_function */
+	 "R_AVR_8",		/* name */
+	 FALSE,			/* partial_inplace */
+	 0x000000ff,		/* src_mask */
+	 0x000000ff,		/* dst_mask */
+	 FALSE),		/* pcrel_offset */
 };
 
 /* Map BFD reloc types to AVR ELF reloc types.  */
@@ -539,7 +553,8 @@ static const struct avr_reloc_map avr_reloc_map[] =
   { BFD_RELOC_AVR_CALL,             R_AVR_CALL },
   { BFD_RELOC_AVR_LDI,              R_AVR_LDI  },
   { BFD_RELOC_AVR_6,                R_AVR_6    },
-  { BFD_RELOC_AVR_6_ADIW,           R_AVR_6_ADIW }
+  { BFD_RELOC_AVR_6_ADIW,           R_AVR_6_ADIW },
+  { BFD_RELOC_8,                    R_AVR_8 }
 };
 
 /* Meant to be filled one day with the wrap around address for the
@@ -717,48 +732,6 @@ avr_info_to_howto_rela (bfd *abfd ATTRIBUTE_UNUSED,
   r_type = ELF32_R_TYPE (dst->r_info);
   BFD_ASSERT (r_type < (unsigned int) R_AVR_max);
   cache_ptr->howto = &elf_avr_howto_table[r_type];
-}
-
-/* Look through the relocs for a section during the first phase.
-   Since we don't do .gots or .plts, we just need to consider the
-   virtual table relocs for gc.  */
-
-static bfd_boolean
-elf32_avr_check_relocs (bfd *abfd,
-			struct bfd_link_info *info,
-			asection *sec,
-			const Elf_Internal_Rela *relocs)
-{
-  Elf_Internal_Shdr *symtab_hdr;
-  struct elf_link_hash_entry **sym_hashes;
-  const Elf_Internal_Rela *rel;
-  const Elf_Internal_Rela *rel_end;
-
-  if (info->relocatable)
-    return TRUE;
-
-  symtab_hdr = &elf_tdata (abfd)->symtab_hdr;
-  sym_hashes = elf_sym_hashes (abfd);
-
-  rel_end = relocs + sec->reloc_count;
-  for (rel = relocs; rel < rel_end; rel++)
-    {
-      struct elf_link_hash_entry *h;
-      unsigned long r_symndx;
-
-      r_symndx = ELF32_R_SYM (rel->r_info);
-      if (r_symndx < symtab_hdr->sh_info)
-        h = NULL;
-      else
-	{
-	  h = sym_hashes[r_symndx - symtab_hdr->sh_info];
-	  while (h->root.type == bfd_link_hash_indirect
-		 || h->root.type == bfd_link_hash_warning)
-	    h = (struct elf_link_hash_entry *) h->root.u.i.link;
-	}
-    }
-
-  return TRUE;
 }
 
 static bfd_boolean
@@ -1189,7 +1162,7 @@ elf32_avr_relocate_section (bfd *output_bfd ATTRIBUTE_UNUSED,
 
       r_type = ELF32_R_TYPE (rel->r_info);
       r_symndx = ELF32_R_SYM (rel->r_info);
-      howto  = elf_avr_howto_table + ELF32_R_TYPE (rel->r_info);
+      howto  = elf_avr_howto_table + r_type;
       h      = NULL;
       sym    = NULL;
       sec    = NULL;
@@ -1217,15 +1190,8 @@ elf32_avr_relocate_section (bfd *output_bfd ATTRIBUTE_UNUSED,
 	}
 
       if (sec != NULL && elf_discarded_section (sec))
-	{
-	  /* For relocs against symbols from removed linkonce sections,
-	     or sections discarded by a linker script, we just want the
-	     section contents zeroed.  Avoid any special processing.  */
-	  _bfd_clear_contents (howto, input_bfd, contents + rel->r_offset);
-	  rel->r_info = 0;
-	  rel->r_addend = 0;
-	  continue;
-	}
+	RELOC_AGAINST_DISCARDED_SECTION (info, input_bfd, input_section,
+					 rel, relend, howto, contents);
 
       if (info->relocatable)
 	continue;
@@ -1332,6 +1298,34 @@ bfd_elf_avr_final_write_processing (bfd *abfd,
     case bfd_mach_avr6:
       val = E_AVR_MACH_AVR6;
       break;
+
+    case bfd_mach_avrxmega1:
+      val = E_AVR_MACH_XMEGA1;
+      break;
+
+    case bfd_mach_avrxmega2:
+      val = E_AVR_MACH_XMEGA2;
+      break;
+
+    case bfd_mach_avrxmega3:
+      val = E_AVR_MACH_XMEGA3;
+      break;
+
+    case bfd_mach_avrxmega4:
+      val = E_AVR_MACH_XMEGA4;
+      break;
+
+    case bfd_mach_avrxmega5:
+      val = E_AVR_MACH_XMEGA5;
+      break;
+
+    case bfd_mach_avrxmega6:
+      val = E_AVR_MACH_XMEGA6;
+      break;
+
+    case bfd_mach_avrxmega7:
+      val = E_AVR_MACH_XMEGA7;
+      break;
     }
 
   elf_elfheader (abfd)->e_machine = EM_AVR;
@@ -1394,6 +1388,34 @@ elf32_avr_object_p (bfd *abfd)
 	case E_AVR_MACH_AVR6:
 	  e_set = bfd_mach_avr6;
 	  break;
+
+	case E_AVR_MACH_XMEGA1:
+	  e_set = bfd_mach_avrxmega1;
+	  break;
+
+	case E_AVR_MACH_XMEGA2:
+	  e_set = bfd_mach_avrxmega2;
+	  break;
+
+	case E_AVR_MACH_XMEGA3:
+	  e_set = bfd_mach_avrxmega3;
+	  break;
+
+	case E_AVR_MACH_XMEGA4:
+	  e_set = bfd_mach_avrxmega4;
+	  break;
+
+	case E_AVR_MACH_XMEGA5:
+	  e_set = bfd_mach_avrxmega5;
+	  break;
+
+	case E_AVR_MACH_XMEGA6:
+	  e_set = bfd_mach_avrxmega6;
+	  break;
+
+	case E_AVR_MACH_XMEGA7:
+	  e_set = bfd_mach_avrxmega7;
+	  break;
 	}
     }
   return bfd_default_set_arch_mach (abfd, bfd_arch_avr,
@@ -1416,7 +1438,6 @@ elf32_avr_relax_delete_bytes (bfd *abfd,
   unsigned int sec_shndx;
   bfd_byte *contents;
   Elf_Internal_Rela *irel, *irelend;
-  Elf_Internal_Rela *irelalign;
   Elf_Internal_Sym *isym;
   Elf_Internal_Sym *isymbuf = NULL;
   bfd_vma toaddr;
@@ -1428,10 +1449,6 @@ elf32_avr_relax_delete_bytes (bfd *abfd,
   sec_shndx = _bfd_elf_section_from_bfd_section (abfd, sec);
   contents = elf_section_data (sec)->this_hdr.contents;
 
-  /* The deletion must stop at the next ALIGN reloc for an aligment
-     power larger than the number of bytes we are deleting.  */
-
-  irelalign = NULL;
   toaddr = sec->size;
 
   irel = elf_section_data (sec)->relocs;
@@ -1447,12 +1464,9 @@ elf32_avr_relax_delete_bytes (bfd *abfd,
   for (irel = elf_section_data (sec)->relocs; irel < irelend; irel++)
     {
       bfd_vma old_reloc_address;
-      bfd_vma shrinked_insn_address;
 
       old_reloc_address = (sec->output_section->vma
                            + sec->output_offset + irel->r_offset);
-      shrinked_insn_address = (sec->output_section->vma
-                              + sec->output_offset + addr - count);
 
       /* Get the new reloc address.  */
       if ((irel->r_offset > addr
@@ -1633,8 +1647,6 @@ elf32_avr_relax_section (bfd *abfd,
   Elf_Internal_Rela *irel, *irelend;
   bfd_byte *contents = NULL;
   Elf_Internal_Sym *isymbuf = NULL;
-  static asection *last_input_section = NULL;
-  static Elf_Internal_Rela *last_reloc = NULL;
   struct elf32_avr_link_hash_table *htab;
 
   if (link_info->relocatable)
@@ -1693,11 +1705,6 @@ elf32_avr_relax_section (bfd *abfd,
                      (abfd, sec, NULL, NULL, link_info->keep_memory));
   if (internal_relocs == NULL)
     goto error_return;
-
-  if (sec != last_input_section)
-    last_reloc = NULL;
-
-  last_input_section = sec;
 
   /* Walk through the relocs looking for relaxing opportunities.  */
   irelend = internal_relocs + sec->reloc_count;
@@ -2494,12 +2501,10 @@ avr_build_one_stub (struct bfd_hash_entry *bh, void *in_arg)
 
 static bfd_boolean
 avr_mark_stub_not_to_be_necessary (struct bfd_hash_entry *bh,
-                                   void *in_arg)
+                                   void *in_arg ATTRIBUTE_UNUSED)
 {
   struct elf32_avr_stub_hash_entry *hsh;
-  struct elf32_avr_link_hash_table *htab;
 
-  htab = in_arg;
   hsh = avr_stub_hash_entry (bh);
   hsh->is_actually_needed = FALSE;
 
@@ -2993,6 +2998,7 @@ elf32_avr_build_stubs (struct bfd_link_info *info)
 }
 
 #define ELF_ARCH		bfd_arch_avr
+#define ELF_TARGET_ID		AVR_ELF_DATA
 #define ELF_MACHINE_CODE	EM_AVR
 #define ELF_MACHINE_ALT1	EM_AVR_OLD
 #define ELF_MAXPAGESIZE		1
@@ -3006,7 +3012,6 @@ elf32_avr_build_stubs (struct bfd_link_info *info)
 #define elf_info_to_howto	             avr_info_to_howto_rela
 #define elf_info_to_howto_rel	             NULL
 #define elf_backend_relocate_section         elf32_avr_relocate_section
-#define elf_backend_check_relocs             elf32_avr_check_relocs
 #define elf_backend_can_gc_sections          1
 #define elf_backend_rela_normal		     1
 #define elf_backend_final_write_processing \

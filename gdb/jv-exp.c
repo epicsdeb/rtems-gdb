@@ -144,7 +144,7 @@
    yacc generated parsers in gdb.  Note that these are only the variables
    produced by yacc.  If other parser generators (bison, byacc, etc) produce
    additional global names that conflict at link time, then those parser
-   generators need to be fixed instead of adding those names to this list. */
+   generators need to be fixed instead of adding those names to this list.  */
 
 #define	yymaxdepth java_maxdepth
 #define	yyparse	java_parse
@@ -244,7 +244,7 @@ typedef union YYSTYPE {
     int *ivec;
   } YYSTYPE;
 /* Line 191 of yacc.c.  */
-#line 248 "jv-exp.c.tmp"
+#line 248 "jv-exp.c"
 # define yystype YYSTYPE /* obsolescent; will be withdrawn */
 # define YYSTYPE_IS_DECLARED 1
 # define YYSTYPE_IS_TRIVIAL 1
@@ -260,7 +260,7 @@ static int parse_number (char *, int, int, YYSTYPE *);
 
 
 /* Line 214 of yacc.c.  */
-#line 264 "jv-exp.c.tmp"
+#line 264 "jv-exp.c"
 
 #if ! defined (yyoverflow) || YYERROR_VERBOSE
 
@@ -495,11 +495,11 @@ static const unsigned short yyrline[] =
      438,   440,   444,   446,   452,   458,   457,   463,   465,   470,
      487,   489,   494,   495,   497,   499,   500,   504,   509,   514,
      515,   516,   517,   519,   521,   525,   530,   535,   536,   538,
-     540,   544,   548,   569,   577,   578,   580,   582,   587,   588,
-     590,   595,   596,   598,   604,   605,   607,   609,   611,   617,
-     618,   620,   625,   626,   631,   632,   636,   637,   642,   643,
-     648,   649,   654,   655,   660,   661,   665,   667,   674,   676,
-     678,   679,   684
+     540,   544,   548,   568,   576,   577,   579,   581,   586,   587,
+     589,   594,   595,   597,   603,   604,   606,   608,   610,   616,
+     617,   619,   624,   625,   630,   631,   635,   636,   641,   642,
+     647,   648,   653,   654,   659,   660,   664,   666,   673,   675,
+     677,   678,   683
 };
 #endif
 
@@ -1502,7 +1502,7 @@ yyreduce:
     { yyval.sval.length = yyvsp[-2].sval.length + yyvsp[0].sval.length + 1;
 		  if (yyvsp[-2].sval.ptr + yyvsp[-2].sval.length + 1 == yyvsp[0].sval.ptr
 		      && yyvsp[-2].sval.ptr[yyvsp[-2].sval.length] == '.')
-		    yyval.sval.ptr = yyvsp[-2].sval.ptr;  /* Optimization. */
+		    yyval.sval.ptr = yyvsp[-2].sval.ptr;  /* Optimization.  */
 		  else
 		    {
 		      yyval.sval.ptr = (char *) xmalloc (yyval.sval.length + 1);
@@ -1705,7 +1705,6 @@ yyreduce:
   case 92:
 #line 549 "jv-exp.y"
     {
-		  int exp_size = expout_ptr;
 		  int last_exp_size = length_of_subexp(expout, expout_ptr);
 		  struct type *type;
 		  int i;
@@ -1714,7 +1713,7 @@ yyreduce:
 		    error (_("Invalid cast expression"));
 		  type = expout->elts[base+1].type;
 		  /* Remove the 'Expression' and slide the
-		     UnaryExpressionNotPlusMinus down to replace it. */
+		     UnaryExpressionNotPlusMinus down to replace it.  */
 		  for (i = 0;  i < last_exp_size;  i++)
 		    expout->elts[base + i] = expout->elts[base + i + 3];
 		  expout_ptr -= 3;
@@ -1727,121 +1726,121 @@ yyreduce:
     break;
 
   case 93:
-#line 570 "jv-exp.y"
+#line 569 "jv-exp.y"
     { write_exp_elt_opcode (UNOP_CAST);
 		  write_exp_elt_type (java_array_type (java_type_from_name (yyvsp[-3].sval), yyvsp[-2].lval));
 		  write_exp_elt_opcode (UNOP_CAST); }
     break;
 
   case 95:
-#line 579 "jv-exp.y"
+#line 578 "jv-exp.y"
     { write_exp_elt_opcode (BINOP_MUL); }
     break;
 
   case 96:
-#line 581 "jv-exp.y"
+#line 580 "jv-exp.y"
     { write_exp_elt_opcode (BINOP_DIV); }
     break;
 
   case 97:
-#line 583 "jv-exp.y"
+#line 582 "jv-exp.y"
     { write_exp_elt_opcode (BINOP_REM); }
     break;
 
   case 99:
-#line 589 "jv-exp.y"
+#line 588 "jv-exp.y"
     { write_exp_elt_opcode (BINOP_ADD); }
     break;
 
   case 100:
-#line 591 "jv-exp.y"
+#line 590 "jv-exp.y"
     { write_exp_elt_opcode (BINOP_SUB); }
     break;
 
   case 102:
-#line 597 "jv-exp.y"
+#line 596 "jv-exp.y"
     { write_exp_elt_opcode (BINOP_LSH); }
     break;
 
   case 103:
-#line 599 "jv-exp.y"
+#line 598 "jv-exp.y"
     { write_exp_elt_opcode (BINOP_RSH); }
     break;
 
   case 105:
-#line 606 "jv-exp.y"
+#line 605 "jv-exp.y"
     { write_exp_elt_opcode (BINOP_LESS); }
     break;
 
   case 106:
-#line 608 "jv-exp.y"
+#line 607 "jv-exp.y"
     { write_exp_elt_opcode (BINOP_GTR); }
     break;
 
   case 107:
-#line 610 "jv-exp.y"
+#line 609 "jv-exp.y"
     { write_exp_elt_opcode (BINOP_LEQ); }
     break;
 
   case 108:
-#line 612 "jv-exp.y"
+#line 611 "jv-exp.y"
     { write_exp_elt_opcode (BINOP_GEQ); }
     break;
 
   case 110:
-#line 619 "jv-exp.y"
+#line 618 "jv-exp.y"
     { write_exp_elt_opcode (BINOP_EQUAL); }
     break;
 
   case 111:
-#line 621 "jv-exp.y"
+#line 620 "jv-exp.y"
     { write_exp_elt_opcode (BINOP_NOTEQUAL); }
     break;
 
   case 113:
-#line 627 "jv-exp.y"
+#line 626 "jv-exp.y"
     { write_exp_elt_opcode (BINOP_BITWISE_AND); }
     break;
 
   case 115:
-#line 633 "jv-exp.y"
+#line 632 "jv-exp.y"
     { write_exp_elt_opcode (BINOP_BITWISE_XOR); }
     break;
 
   case 117:
-#line 638 "jv-exp.y"
+#line 637 "jv-exp.y"
     { write_exp_elt_opcode (BINOP_BITWISE_IOR); }
     break;
 
   case 119:
-#line 644 "jv-exp.y"
+#line 643 "jv-exp.y"
     { write_exp_elt_opcode (BINOP_LOGICAL_AND); }
     break;
 
   case 121:
-#line 650 "jv-exp.y"
+#line 649 "jv-exp.y"
     { write_exp_elt_opcode (BINOP_LOGICAL_OR); }
     break;
 
   case 123:
-#line 656 "jv-exp.y"
+#line 655 "jv-exp.y"
     { write_exp_elt_opcode (TERNOP_COND); }
     break;
 
   case 126:
-#line 666 "jv-exp.y"
+#line 665 "jv-exp.y"
     { write_exp_elt_opcode (BINOP_ASSIGN); }
     break;
 
   case 127:
-#line 668 "jv-exp.y"
+#line 667 "jv-exp.y"
     { write_exp_elt_opcode (BINOP_ASSIGN_MODIFY);
 		  write_exp_elt_opcode (yyvsp[-1].opcode);
 		  write_exp_elt_opcode (BINOP_ASSIGN_MODIFY); }
     break;
 
   case 128:
-#line 675 "jv-exp.y"
+#line 674 "jv-exp.y"
     { push_expression_name (yyvsp[0].sval); }
     break;
 
@@ -1849,7 +1848,7 @@ yyreduce:
     }
 
 /* Line 1000 of yacc.c.  */
-#line 1853 "jv-exp.c.tmp"
+#line 1852 "jv-exp.c"
 
   yyvsp -= yylen;
   yyssp -= yylen;
@@ -2074,7 +2073,7 @@ yyreturn:
 }
 
 
-#line 687 "jv-exp.y"
+#line 686 "jv-exp.y"
 
 /* Take care of parsing a number (anything that starts with a digit).
    Set yylval and return the token type; update lexptr.
@@ -2095,25 +2094,28 @@ parse_number (char *p, int len, int parsed_float, YYSTYPE *putithere)
 
   if (parsed_float)
     {
-      /* It's a float since it contains a point or an exponent.  */
-      char c;
-      int num = 0;	/* number of tokens scanned by scanf */
-      char saved_char = p[len];
+      const char *suffix;
+      int suffix_len;
 
-      p[len] = 0;	/* null-terminate the token */
-      num = sscanf (p, "%" DOUBLEST_SCAN_FORMAT "%c",
-		    &putithere->typed_val_float.dval, &c);
-      p[len] = saved_char;	/* restore the input stream */
-      if (num != 1) 		/* check scanf found ONLY a float ... */
+      if (! parse_float (p, len, &putithere->typed_val_float.dval, &suffix))
 	return ERROR;
-      /* See if it has `f' or `d' suffix (float or double).  */
 
-      c = tolower (p[len - 1]);
+      suffix_len = p + len - suffix;
 
-      if (c == 'f' || c == 'F')
-	putithere->typed_val_float.type = parse_type->builtin_float;
-      else if (isdigit (c) || c == '.' || c == 'd' || c == 'D')
+      if (suffix_len == 0)
 	putithere->typed_val_float.type = parse_type->builtin_double;
+      else if (suffix_len == 1)
+	{
+	  /* See if it has `f' or `d' suffix (float or double).  */
+	  if (tolower (*suffix) == 'f')
+	    putithere->typed_val_float.type =
+	      parse_type->builtin_float;
+	  else if (tolower (*suffix) == 'd')
+	    putithere->typed_val_float.type =
+	      parse_type->builtin_double;
+	  else
+	    return ERROR;
+	}
       else
 	return ERROR;
 
@@ -2152,7 +2154,7 @@ parse_number (char *p, int len, int parsed_float, YYSTYPE *putithere)
       }
 
   c = p[len-1];
-  /* A paranoid calculation of (1<<64)-1. */
+  /* A paranoid calculation of (1<<64)-1.  */
   limit = (ULONGEST)0xffffffff;
   limit = ((limit << 16) << 16) | limit;
   if (c == 'l' || c == 'L')
@@ -2285,11 +2287,11 @@ yylex (void)
     case '\'':
       /* We either have a character constant ('0' or '\177' for example)
 	 or we have a quoted symbol reference ('foo(int,int)' in C++
-	 for example). */
+	 for example).  */
       lexptr++;
       c = *lexptr++;
       if (c == '\\')
-	c = parse_escape (&lexptr);
+	c = parse_escape (parse_gdbarch, &lexptr);
       else if (c == '\'')
 	error (_("Empty character constant"));
 
@@ -2334,7 +2336,7 @@ yylex (void)
     case '.':
       /* Might be a floating point number.  */
       if (lexptr[1] < '0' || lexptr[1] > '9')
-	goto symbol;		/* Nope, must be a symbol. */
+	goto symbol;		/* Nope, must be a symbol.  */
       /* FALL THRU into number case.  */
 
     case '0':
@@ -2439,7 +2441,7 @@ yylex (void)
 
       do {
 	/* Grow the static temp buffer if necessary, including allocating
-	   the first one on demand. */
+	   the first one on demand.  */
 	if (tempbufindex + 1 >= tempbufsize)
 	  {
 	    tempbuf = (char *) xrealloc (tempbuf, tempbufsize += 64);
@@ -2448,11 +2450,11 @@ yylex (void)
 	  {
 	  case '\0':
 	  case '"':
-	    /* Do nothing, loop will terminate. */
+	    /* Do nothing, loop will terminate.  */
 	    break;
 	  case '\\':
 	    tokptr++;
-	    c = parse_escape (&tokptr);
+	    c = parse_escape (parse_gdbarch, &tokptr);
 	    if (c == -1)
 	      {
 		continue;
@@ -2605,7 +2607,7 @@ java_type_from_name (struct stoken name)
 }
 
 /* If NAME is a valid variable name in this scope, push it and return 1.
-   Otherwise, return 0. */
+   Otherwise, return 0.  */
 
 static int
 push_variable (struct stoken name)
@@ -2651,7 +2653,7 @@ push_variable (struct stoken name)
 
 /* Assuming a reference expression has been pushed, emit the
    STRUCTOP_PTR ops to access the field named NAME.  If NAME is a
-   qualified name (has '.'), generate a field access for each part. */
+   qualified name (has '.'), generate a field access for each part.  */
 
 static void
 push_fieldnames (struct stoken name)
@@ -2663,7 +2665,7 @@ push_fieldnames (struct stoken name)
     {
       if (i == name.length || name.ptr[i] == '.')
 	{
-	  /* token.ptr is start of current field name. */
+	  /* token.ptr is start of current field name.  */
 	  token.length = &name.ptr[i] - token.ptr;
 	  write_exp_elt_opcode (STRUCTOP_PTR);
 	  write_exp_string (token);
@@ -2742,27 +2744,26 @@ push_qualified_expression_name (struct stoken name, int dot_index)
 }
 
 /* Handle Name in an expression (or LHS).
-   Handle VAR, TYPE, TYPE.FIELD1....FIELDN and VAR.FIELD1....FIELDN. */
+   Handle VAR, TYPE, TYPE.FIELD1....FIELDN and VAR.FIELD1....FIELDN.  */
 
 static void
 push_expression_name (struct stoken name)
 {
   char *tmp;
   struct type *typ;
-  char *ptr;
   int i;
 
   for (i = 0;  i < name.length;  i++)
     {
       if (name.ptr[i] == '.')
 	{
-	  /* It's a Qualified Expression Name. */
+	  /* It's a Qualified Expression Name.  */
 	  push_qualified_expression_name (name, i);
 	  return;
 	}
     }
 
-  /* It's a Simple Expression Name. */
+  /* It's a Simple Expression Name.  */
   
   if (push_variable (name))
     return;

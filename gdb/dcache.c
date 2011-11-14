@@ -1,7 +1,7 @@
 /* Caching code for GDB, the GNU debugger.
 
    Copyright (C) 1992, 1993, 1995, 1996, 1998, 1999, 2000, 2001, 2003, 2007,
-   2008, 2009, 2010 Free Software Foundation, Inc.
+   2008, 2009, 2010, 2011 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -88,7 +88,7 @@
 
 struct dcache_block
 {
-  /* for least-recently-allocated and free lists */
+  /* For least-recently-allocated and free lists.  */
   struct dcache_block *prev;
   struct dcache_block *next;
 
@@ -100,7 +100,7 @@ struct dcache_block
 struct dcache_struct
 {
   splay_tree tree;
-  struct dcache_block *oldest; /* least-recently-allocated list */
+  struct dcache_block *oldest; /* least-recently-allocated list.  */
 
   /* The free list is maintained identically to OLDEST to simplify
      the code: we only need one set of accessors.  */
@@ -134,7 +134,7 @@ show_dcache_enabled_p (struct ui_file *file, int from_tty,
   fprintf_filtered (file, _("Deprecated remotecache flag is %s.\n"), value);
 }
 
-static DCACHE *last_cache; /* Used by info dcache */
+static DCACHE *last_cache; /* Used by info dcache.  */
 
 /* Add BLOCK to circular block list BLIST, behind the block at *BLIST.
    *BLIST is not updated (unless it was previously NULL of course).
@@ -417,7 +417,6 @@ DCACHE *
 dcache_init (void)
 {
   DCACHE *dcache;
-  int i;
 
   dcache = (DCACHE *) xmalloc (sizeof (*dcache));
 
@@ -474,6 +473,7 @@ dcache_xfer_memory (struct target_ops *ops, DCACHE *dcache,
   int i;
   int res;
   int (*xfunc) (DCACHE *dcache, CORE_ADDR addr, gdb_byte *ptr);
+
   xfunc = should_write ? dcache_poke_byte : dcache_peek_byte;
 
   /* If this is a different inferior from what we've recorded,
@@ -533,6 +533,7 @@ void
 dcache_update (DCACHE *dcache, CORE_ADDR memaddr, gdb_byte *myaddr, int len)
 {
   int i;
+
   for (i = 0; i < len; i++)
     dcache_poke_byte (dcache, memaddr + i, myaddr + i);
 }
@@ -574,7 +575,7 @@ dcache_print_line (int index)
     {
       printf_filtered ("%02x ", db->data[j]);
 
-      /* Print a newline every 16 bytes (48 characters) */
+      /* Print a newline every 16 bytes (48 characters).  */
       if ((j % 16 == 15) && (j != LINE_SIZE - 1))
 	printf_filtered ("\n");
     }
@@ -585,11 +586,12 @@ static void
 dcache_info (char *exp, int tty)
 {
   splay_tree_node n;
-  int i, refcount, lineno;
+  int i, refcount;
 
   if (exp)
     {
       char *linestart;
+
       i = strtol (exp, &linestart, 10);
       if (linestart == exp || i < 0)
 	{

@@ -1,6 +1,6 @@
 /* QNX Neutrino specific low level interface, for the remote server
    for GDB.
-   Copyright (C) 2009, 2010 Free Software Foundation, Inc.
+   Copyright (C) 2009, 2010, 2011 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -174,7 +174,7 @@ do_attach (pid_t pid)
       close (nto_inferior.ctl_fd);
       init_nto_inferior (&nto_inferior);
     }
-  snprintf (nto_inferior.nto_procfs_path, PATH_MAX - 1, "/proc/%d/as", pid);
+  xsnprintf (nto_inferior.nto_procfs_path, PATH_MAX - 1, "/proc/%d/as", pid);
   nto_inferior.ctl_fd = open (nto_inferior.nto_procfs_path, O_RDWR);
   if (nto_inferior.ctl_fd == -1)
     {
@@ -406,6 +406,12 @@ nto_detach (int pid)
   return 0;
 }
 
+static void
+nto_mourn (struct process_info *process)
+{
+  remove_process (process);
+}
+
 /* Check if the given thread is alive.  
 
    Return 1 if alive, 0 otherwise.  */
@@ -629,7 +635,8 @@ nto_fetch_registers (struct regcache *regcache, int regno)
 	    {
 	      const unsigned int registeroffset
 		= the_low_target.register_offset (regno);
-	      supply_register (regcache, regno, ((char *)&greg) + registeroffset);
+	      supply_register (regcache, regno,
+			       ((char *)&greg) + registeroffset);
 	    }
 	}
       else
@@ -900,12 +907,15 @@ static struct target_ops nto_target_ops = {
   nto_attach,
   nto_kill,
   nto_detach,
+  nto_mourn,
   NULL, /* nto_join */
   nto_thread_alive,
   nto_resume,
   nto_wait,
   nto_fetch_registers,
   nto_store_registers,
+  NULL, /* prepare_to_access_memory */
+  NULL, /* done_accessing_memory */
   nto_read_memory,
   nto_write_memory,
   NULL, /* nto_look_up_symbols */

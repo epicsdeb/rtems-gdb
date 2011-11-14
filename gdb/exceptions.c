@@ -2,7 +2,7 @@
 
    Copyright (C) 1986, 1988, 1989, 1990, 1991, 1992, 1993, 1994, 1995, 1996,
    1997, 1998, 1999, 2000, 2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008,
-   2009, 2010 Free Software Foundation, Inc.
+   2009, 2010, 2011 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -89,7 +89,7 @@ exceptions_state_mc_init (struct ui_out *func_uiout,
   uiout = func_uiout;
 
   /* Prevent error/quit during FUNC from calling cleanups established
-     prior to here. */
+     prior to here.  */
   new_catcher->saved_cleanup_chain = save_cleanups ();
 
   /* Push this new catcher on the top.  */
@@ -104,10 +104,11 @@ static void
 catcher_pop (void)
 {
   struct catcher *old_catcher = current_catcher;
+
   current_catcher = old_catcher->prev;
 
   /* Restore the cleanup chain, the error/quit messages, and the uiout
-     builder, to their original states. */
+     builder, to their original states.  */
 
   restore_cleanups (old_catcher->saved_cleanup_chain);
 
@@ -174,6 +175,7 @@ exceptions_state_mc (enum catcher_action action)
 	case CATCH_ITER:
 	  {
 	    struct gdb_exception exception = *current_catcher->exception;
+
 	    if (current_catcher->mask & RETURN_MASK (exception.reason))
 	      {
 		/* Exit normally if this catcher can handle this
@@ -184,7 +186,7 @@ exceptions_state_mc (enum catcher_action action)
 	      }
 	    /* The caller didn't request that the event be caught,
 	       relay the event to the next containing
-	       catch_errors(). */
+	       catch_errors().  */
 	    catcher_pop ();
 	    throw_exception (exception);
 	  }
@@ -210,7 +212,7 @@ exceptions_state_mc_action_iter_1 (void)
 
 /* Return EXCEPTION to the nearest containing catch_errors().  */
 
-NORETURN void
+void
 throw_exception (struct gdb_exception exception)
 {
   struct thread_info *tp = NULL;
@@ -224,14 +226,17 @@ throw_exception (struct gdb_exception exception)
   /* Perhaps it would be cleaner to do this via the cleanup chain (not sure
      I can think of a reason why that is vital, though).  */
   if (tp != NULL)
-    bpstat_clear_actions (tp->stop_bpstat);	/* Clear queued breakpoint commands */
+    {
+      /* Clear queued breakpoint commands.  */
+      bpstat_clear_actions (tp->control.stop_bpstat);
+    }
 
   disable_current_display ();
   do_cleanups (ALL_CLEANUPS);
 
   /* Jump to the containing catch_errors() call, communicating REASON
      to that call via setjmp's return value.  Note that REASON can't
-     be zero, by definition in defs.h. */
+     be zero, by definition in defs.h.  */
   exceptions_state_mc (CATCH_THROWING);
   *current_catcher->exception = exception;
   EXCEPTIONS_SIGLONGJMP (current_catcher->buf, exception.reason);
@@ -239,10 +244,11 @@ throw_exception (struct gdb_exception exception)
 
 static char *last_message;
 
-NORETURN void
+void
 deprecated_throw_reason (enum return_reason reason)
 {
   struct gdb_exception exception;
+
   memset (&exception, 0, sizeof exception);
 
   exception.reason = reason;
@@ -299,6 +305,7 @@ print_exception (struct ui_file *file, struct gdb_exception e)
      as that way the MI's behavior is preserved.  */
   const char *start;
   const char *end;
+
   for (start = e.message; start != NULL; start = end)
     {
       end = strchr (start, '\n');
@@ -363,7 +370,7 @@ print_any_exception (struct ui_file *file, const char *prefix,
   if (e.reason < 0 && e.message != NULL)
     {
       target_terminal_ours ();
-      wrap_here ("");		/* Force out any buffered output */
+      wrap_here ("");		/* Force out any buffered output.  */
       gdb_flush (gdb_stdout);
       annotate_error_begin ();
 
@@ -374,7 +381,7 @@ print_any_exception (struct ui_file *file, const char *prefix,
     }
 }
 
-NORETURN static void ATTR_NORETURN ATTR_FORMAT (printf, 3, 0)
+static void ATTRIBUTE_NORETURN ATTRIBUTE_PRINTF (3, 0)
 throw_it (enum return_reason reason, enum errors error, const char *fmt,
 	  va_list ap)
 {
@@ -396,22 +403,23 @@ throw_it (enum return_reason reason, enum errors error, const char *fmt,
   throw_exception (e);
 }
 
-NORETURN void
+void
 throw_verror (enum errors error, const char *fmt, va_list ap)
 {
   throw_it (RETURN_ERROR, error, fmt, ap);
 }
 
-NORETURN void
+void
 throw_vfatal (const char *fmt, va_list ap)
 {
   throw_it (RETURN_QUIT, GDB_NO_ERROR, fmt, ap);
 }
 
-NORETURN void
+void
 throw_error (enum errors error, const char *fmt, ...)
 {
   va_list args;
+
   va_start (args, fmt);
   throw_it (RETURN_ERROR, error, fmt, args);
   va_end (args);
@@ -434,12 +442,12 @@ throw_error (enum errors error, const char *fmt, ...)
    be replaced by judicious use of QUIT.  */
 
 /* MAYBE: cagney/1999-11-05: catch_errors() in conjunction with
-   error() et.al. could maintain a set of flags that indicate the the
+   error() et al. could maintain a set of flags that indicate the the
    current state of each of the longjmp buffers.  This would give the
    longjmp code the chance to detect a longjmp botch (before it gets
    to longjmperror()).  Prior to 1999-11-05 this wasn't possible as
    code also randomly used a SET_TOP_LEVEL macro that directly
-   initialize the longjmp buffers. */
+   initialized the longjmp buffers.  */
 
 int
 catch_exceptions (struct ui_out *uiout,
@@ -457,6 +465,7 @@ catch_exception (struct ui_out *uiout,
 		 return_mask mask)
 {
   volatile struct gdb_exception exception;
+
   TRY_CATCH (exception, mask)
     {
       (*func) (uiout, func_args);
@@ -473,6 +482,7 @@ catch_exceptions_with_msg (struct ui_out *uiout,
 {
   volatile struct gdb_exception exception;
   volatile int val = 0;
+
   TRY_CATCH (exception, mask)
     {
       val = (*func) (uiout, func_args);
@@ -505,6 +515,7 @@ catch_errors (catch_errors_ftype *func, void *func_args, char *errstring,
 {
   volatile int val = 0;
   volatile struct gdb_exception exception;
+
   TRY_CATCH (exception, mask)
     {
       val = func (func_args);
@@ -520,6 +531,7 @@ catch_command_errors (catch_command_errors_ftype * command,
 		      char *arg, int from_tty, return_mask mask)
 {
   volatile struct gdb_exception e;
+
   TRY_CATCH (e, mask)
     {
       command (arg, from_tty);

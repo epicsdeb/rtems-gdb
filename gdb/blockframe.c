@@ -3,7 +3,7 @@
 
    Copyright (C) 1986, 1987, 1988, 1989, 1990, 1991, 1992, 1993, 1994, 1995,
    1996, 1997, 1998, 1999, 2000, 2001, 2002, 2003, 2004, 2007, 2008, 2009,
-   2010 Free Software Foundation, Inc.
+   2010, 2011 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -37,9 +37,10 @@
 #include "gdbcmd.h"
 #include "block.h"
 #include "inline-frame.h"
+#include "psymtab.h"
 
-/* Return the innermost lexical block in execution
-   in a specified stack frame.  The frame address is assumed valid.
+/* Return the innermost lexical block in execution in a specified
+   stack frame.  The frame address is assumed valid.
 
    If ADDR_IN_BLOCK is non-zero, set *ADDR_IN_BLOCK to the exact code
    address we used to choose the block.  We use this to find a source
@@ -57,10 +58,12 @@
 struct block *
 get_frame_block (struct frame_info *frame, CORE_ADDR *addr_in_block)
 {
-  const CORE_ADDR pc = get_frame_address_in_block (frame);
-  struct frame_info *next_frame;
+  CORE_ADDR pc;
   struct block *bl;
   int inline_count;
+
+  if (!get_frame_address_in_block_if_available (frame, &pc))
+    return NULL;
 
   if (addr_in_block)
     *addr_in_block = pc;
@@ -137,13 +140,15 @@ struct symbol *
 find_pc_sect_function (CORE_ADDR pc, struct obj_section *section)
 {
   struct block *b = block_for_pc_sect (pc, section);
+
   if (b == 0)
     return 0;
   return block_linkage_function (b);
 }
 
 /* Return the function containing pc value PC.
-   Returns 0 if function is not known.  Backward compatibility, no section */
+   Returns 0 if function is not known.  
+   Backward compatibility, no section */
 
 struct symbol *
 find_pc_function (CORE_ADDR pc)
@@ -152,14 +157,15 @@ find_pc_function (CORE_ADDR pc)
 }
 
 /* These variables are used to cache the most recent result
- * of find_pc_partial_function. */
+   of find_pc_partial_function.  */
 
 static CORE_ADDR cache_pc_function_low = 0;
 static CORE_ADDR cache_pc_function_high = 0;
 static char *cache_pc_function_name = 0;
 static struct obj_section *cache_pc_function_section = NULL;
+static int cache_pc_function_is_gnu_ifunc = 0;
 
-/* Clear cache, e.g. when symbol table is discarded. */
+/* Clear cache, e.g. when symbol table is discarded.  */
 
 void
 clear_pc_function_cache (void)
@@ -168,6 +174,7 @@ clear_pc_function_cache (void)
   cache_pc_function_high = 0;
   cache_pc_function_name = (char *) 0;
   cache_pc_function_section = NULL;
+  cache_pc_function_is_gnu_ifunc = 0;
 }
 
 /* Finds the "function" (text symbol) that is smaller than PC but
@@ -175,23 +182,25 @@ clear_pc_function_cache (void)
    *NAME and/or *ADDRESS conditionally if that pointer is non-null.
    If ENDADDR is non-null, then set *ENDADDR to be the end of the
    function (exclusive), but passing ENDADDR as non-null means that
-   the function might cause symbols to be read.  This function either
-   succeeds or fails (not halfway succeeds).  If it succeeds, it sets
-   *NAME, *ADDRESS, and *ENDADDR to real information and returns 1.
-   If it fails, it sets *NAME, *ADDRESS, and *ENDADDR to zero and
-   returns 0.  */
+   the function might cause symbols to be read.  If IS_GNU_IFUNC_P is provided
+   *IS_GNU_IFUNC_P is set to 1 on return if the function is STT_GNU_IFUNC.
+   This function either succeeds or fails (not halfway succeeds).  If it
+   succeeds, it sets *NAME, *ADDRESS, and *ENDADDR to real information and
+   returns 1.  If it fails, it sets *NAME, *ADDRESS, *ENDADDR and
+   *IS_GNU_IFUNC_P to zero and returns 0.  */
 
 /* Backward compatibility, no section argument.  */
 
 int
-find_pc_partial_function (CORE_ADDR pc, char **name, CORE_ADDR *address,
-			  CORE_ADDR *endaddr)
+find_pc_partial_function_gnu_ifunc (CORE_ADDR pc, char **name,
+				    CORE_ADDR *address, CORE_ADDR *endaddr,
+				    int *is_gnu_ifunc_p)
 {
   struct obj_section *section;
-  struct partial_symtab *pst;
   struct symbol *f;
   struct minimal_symbol *msymbol;
-  struct partial_symbol *psb;
+  struct symtab *symtab = NULL;
+  struct objfile *objfile;
   int i;
   CORE_ADDR mapped_pc;
 
@@ -212,62 +221,38 @@ find_pc_partial_function (CORE_ADDR pc, char **name, CORE_ADDR *address,
     goto return_cached_value;
 
   msymbol = lookup_minimal_symbol_by_pc_section (mapped_pc, section);
-  pst = find_pc_sect_psymtab (mapped_pc, section);
-  if (pst)
+  ALL_OBJFILES (objfile)
+  {
+    if (objfile->sf)
+      symtab = objfile->sf->qf->find_pc_sect_symtab (objfile, msymbol,
+						     mapped_pc, section, 0);
+    if (symtab)
+      break;
+  }
+
+  if (symtab)
     {
-      /* Need to read the symbols to get a good value for the end address.  */
-      if (endaddr != NULL && !pst->readin)
+      /* Checking whether the msymbol has a larger value is for the
+	 "pathological" case mentioned in print_frame_info.  */
+      f = find_pc_sect_function (mapped_pc, section);
+      if (f != NULL
+	  && (msymbol == NULL
+	      || (BLOCK_START (SYMBOL_BLOCK_VALUE (f))
+		  >= SYMBOL_VALUE_ADDRESS (msymbol))))
 	{
-	  /* Need to get the terminal in case symbol-reading produces
-	     output.  */
-	  target_terminal_ours_for_output ();
-	  PSYMTAB_TO_SYMTAB (pst);
-	}
-
-      if (pst->readin)
-	{
-	  /* Checking whether the msymbol has a larger value is for the
-	     "pathological" case mentioned in print_frame_info.  */
-	  f = find_pc_sect_function (mapped_pc, section);
-	  if (f != NULL
-	      && (msymbol == NULL
-		  || (BLOCK_START (SYMBOL_BLOCK_VALUE (f))
-		      >= SYMBOL_VALUE_ADDRESS (msymbol))))
-	    {
-	      cache_pc_function_low = BLOCK_START (SYMBOL_BLOCK_VALUE (f));
-	      cache_pc_function_high = BLOCK_END (SYMBOL_BLOCK_VALUE (f));
-	      cache_pc_function_name = SYMBOL_LINKAGE_NAME (f);
-	      cache_pc_function_section = section;
-	      goto return_cached_value;
-	    }
-	}
-      else
-	{
-	  /* Now that static symbols go in the minimal symbol table, perhaps
-	     we could just ignore the partial symbols.  But at least for now
-	     we use the partial or minimal symbol, whichever is larger.  */
-	  psb = find_pc_sect_psymbol (pst, mapped_pc, section);
-
-	  if (psb
-	      && (msymbol == NULL
-		  || (SYMBOL_VALUE_ADDRESS (psb)
-		      >= SYMBOL_VALUE_ADDRESS (msymbol))))
-	    {
-	      /* This case isn't being cached currently. */
-	      if (address)
-		*address = SYMBOL_VALUE_ADDRESS (psb);
-	      if (name)
-		*name = SYMBOL_LINKAGE_NAME (psb);
-	      /* endaddr non-NULL can't happen here.  */
-	      return 1;
-	    }
+	  cache_pc_function_low = BLOCK_START (SYMBOL_BLOCK_VALUE (f));
+	  cache_pc_function_high = BLOCK_END (SYMBOL_BLOCK_VALUE (f));
+	  cache_pc_function_name = SYMBOL_LINKAGE_NAME (f);
+	  cache_pc_function_section = section;
+	  cache_pc_function_is_gnu_ifunc = TYPE_GNU_IFUNC (SYMBOL_TYPE (f));
+	  goto return_cached_value;
 	}
     }
 
-  /* Not in the normal symbol tables, see if the pc is in a known section.
-     If it's not, then give up.  This ensures that anything beyond the end
-     of the text seg doesn't appear to be part of the last function in the
-     text segment.  */
+  /* Not in the normal symbol tables, see if the pc is in a known
+     section.  If it's not, then give up.  This ensures that anything
+     beyond the end of the text seg doesn't appear to be part of the
+     last function in the text segment.  */
 
   if (!section)
     msymbol = NULL;
@@ -282,12 +267,15 @@ find_pc_partial_function (CORE_ADDR pc, char **name, CORE_ADDR *address,
 	*address = 0;
       if (endaddr != NULL)
 	*endaddr = 0;
+      if (is_gnu_ifunc_p != NULL)
+	*is_gnu_ifunc_p = 0;
       return 0;
     }
 
   cache_pc_function_low = SYMBOL_VALUE_ADDRESS (msymbol);
   cache_pc_function_name = SYMBOL_LINKAGE_NAME (msymbol);
   cache_pc_function_section = section;
+  cache_pc_function_is_gnu_ifunc = MSYMBOL_TYPE (msymbol) == mst_text_gnu_ifunc;
 
   /* If the minimal symbol has a size, use it for the cache.
      Otherwise use the lesser of the next minimal symbol in the same
@@ -304,13 +292,16 @@ find_pc_partial_function (CORE_ADDR pc, char **name, CORE_ADDR *address,
 
       for (i = 1; SYMBOL_LINKAGE_NAME (msymbol + i) != NULL; i++)
 	{
-	  if (SYMBOL_VALUE_ADDRESS (msymbol + i) != SYMBOL_VALUE_ADDRESS (msymbol)
-	      && SYMBOL_OBJ_SECTION (msymbol + i) == SYMBOL_OBJ_SECTION (msymbol))
+	  if (SYMBOL_VALUE_ADDRESS (msymbol + i)
+	      != SYMBOL_VALUE_ADDRESS (msymbol)
+	      && SYMBOL_OBJ_SECTION (msymbol + i)
+	      == SYMBOL_OBJ_SECTION (msymbol))
 	    break;
 	}
 
       if (SYMBOL_LINKAGE_NAME (msymbol + i) != NULL
-	  && SYMBOL_VALUE_ADDRESS (msymbol + i) < obj_section_endaddr (section))
+	  && SYMBOL_VALUE_ADDRESS (msymbol + i)
+	  < obj_section_endaddr (section))
 	cache_pc_function_high = SYMBOL_VALUE_ADDRESS (msymbol + i);
       else
 	/* We got the start address from the last msymbol in the objfile.
@@ -338,7 +329,7 @@ find_pc_partial_function (CORE_ADDR pc, char **name, CORE_ADDR *address,
 	  /* Because the high address is actually beyond the end of
 	     the function (and therefore possibly beyond the end of
 	     the overlay), we must actually convert (high - 1) and
-	     then add one to that. */
+	     then add one to that.  */
 
 	  *endaddr = 1 + overlay_unmapped_address (cache_pc_function_high - 1,
 						   section);
@@ -347,11 +338,24 @@ find_pc_partial_function (CORE_ADDR pc, char **name, CORE_ADDR *address,
 	*endaddr = cache_pc_function_high;
     }
 
+  if (is_gnu_ifunc_p)
+    *is_gnu_ifunc_p = cache_pc_function_is_gnu_ifunc;
+
   return 1;
 }
 
-/* Return the innermost stack frame executing inside of BLOCK,
-   or NULL if there is no such frame.  If BLOCK is NULL, just return NULL.  */
+/* See find_pc_partial_function_gnu_ifunc, only the IS_GNU_IFUNC_P parameter
+   is omitted here for backward API compatibility.  */
+
+int
+find_pc_partial_function (CORE_ADDR pc, char **name, CORE_ADDR *address,
+			  CORE_ADDR *endaddr)
+{
+  return find_pc_partial_function_gnu_ifunc (pc, name, address, endaddr, NULL);
+}
+
+/* Return the innermost stack frame executing inside of BLOCK, or NULL
+   if there is no such frame.  If BLOCK is NULL, just return NULL.  */
 
 struct frame_info *
 block_innermost_frame (struct block *block)

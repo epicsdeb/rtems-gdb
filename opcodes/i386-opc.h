@@ -44,9 +44,11 @@ enum
   Cpu586,
   /* i686 or better required */
   Cpu686,
-  /* CLFLUSH Instuction support required */
+  /* CLFLUSH Instruction support required */
   CpuClflush,
-  /* SYSCALL Instuctions support required */
+  /* NOP Instruction support required */
+  CpuNop,
+  /* SYSCALL Instructions support required */
   CpuSYSCALL,
   /* Floating point support required */
   Cpu8087,
@@ -92,8 +94,10 @@ enum
   CpuAVX,
   /* Intel L1OM support required */
   CpuL1OM,
-  /* Xsave/xrstor New Instuctions support required */
+  /* Xsave/xrstor New Instructions support required */
   CpuXsave,
+  /* Xsaveopt New Instructions support required */
+  CpuXsaveopt,
   /* AES support required */
   CpuAES,
   /* PCLMUL support required */
@@ -106,12 +110,22 @@ enum
   CpuXOP,
   /* LWP support required */
   CpuLWP,
-  /* MOVBE Instuction support required */
+  /* BMI support required */
+  CpuBMI,
+  /* TBM support required */
+  CpuTBM,
+  /* MOVBE Instruction support required */
   CpuMovbe,
   /* EPT Instructions required */
   CpuEPT,
-  /* RDTSCP Instuction support required */
+  /* RDTSCP Instruction support required */
   CpuRdtscp,
+  /* FSGSBASE Instructions required */
+  CpuFSGSBase,
+  /* RDRND Instructions required */
+  CpuRdRnd,
+  /* F16C Instructions required */
+  CpuF16C,
   /* 64bit support available, used by -march= in assembler.  */
   CpuLM,
   /* 64bit support required  */
@@ -144,6 +158,7 @@ typedef union i386_cpu_flags
       unsigned int cpui586:1;
       unsigned int cpui686:1;
       unsigned int cpuclflush:1;
+      unsigned int cpunop:1;
       unsigned int cpusyscall:1;
       unsigned int cpu8087:1;
       unsigned int cpu287:1;
@@ -168,15 +183,21 @@ typedef union i386_cpu_flags
       unsigned int cpuavx:1;
       unsigned int cpul1om:1;
       unsigned int cpuxsave:1;
+      unsigned int cpuxsaveopt:1;
       unsigned int cpuaes:1;
       unsigned int cpupclmul:1;
       unsigned int cpufma:1;
       unsigned int cpufma4:1;
       unsigned int cpuxop:1;
       unsigned int cpulwp:1;
+      unsigned int cpubmi:1;
+      unsigned int cputbm:1;
       unsigned int cpumovbe:1;
       unsigned int cpuept:1;
       unsigned int cpurdtscp:1;
+      unsigned int cpufsgsbase:1;
+      unsigned int cpurdrnd:1;
+      unsigned int cpuf16c:1;
       unsigned int cpulm:1;
       unsigned int cpu64:1;
       unsigned int cpuno64:1;
@@ -222,6 +243,8 @@ enum
   Size32,
   /* needs size prefix if in 64-bit mode */
   Size64,
+  /* check register size.  */
+  CheckRegSize,
   /* instruction ignores operand size prefix and in Intel mode ignores
      mnemonic size suffix check.  */
   IgnoreSize,
@@ -360,6 +383,7 @@ typedef struct i386_opcode_modifier
   unsigned int size16:1;
   unsigned int size32:1;
   unsigned int size64:1;
+  unsigned int checkregsize:1;
   unsigned int ignoresize:1;
   unsigned int defaultsize:1;
   unsigned int no_bsuf:1;

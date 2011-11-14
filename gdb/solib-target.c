@@ -1,6 +1,6 @@
 /* Definitions for targets which report shared library events.
 
-   Copyright (C) 2007, 2008, 2009, 2010 Free Software Foundation, Inc.
+   Copyright (C) 2007, 2008, 2009, 2010, 2011 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -86,7 +86,7 @@ library_list_start_segment (struct gdb_xml_parser *parser,
 {
   VEC(lm_info_p) **list = user_data;
   struct lm_info *last = VEC_last (lm_info_p, *list);
-  ULONGEST *address_p = VEC_index (gdb_xml_value_s, attributes, 0)->value;
+  ULONGEST *address_p = xml_find_attribute (attributes, "address")->value;
   CORE_ADDR address = (CORE_ADDR) *address_p;
 
   if (last->section_bases != NULL)
@@ -103,7 +103,7 @@ library_list_start_section (struct gdb_xml_parser *parser,
 {
   VEC(lm_info_p) **list = user_data;
   struct lm_info *last = VEC_last (lm_info_p, *list);
-  ULONGEST *address_p = VEC_index (gdb_xml_value_s, attributes, 0)->value;
+  ULONGEST *address_p = xml_find_attribute (attributes, "address")->value;
   CORE_ADDR address = (CORE_ADDR) *address_p;
 
   if (last->segment_bases != NULL)
@@ -122,7 +122,7 @@ library_list_start_library (struct gdb_xml_parser *parser,
 {
   VEC(lm_info_p) **list = user_data;
   struct lm_info *item = XZALLOC (struct lm_info);
-  const char *name = VEC_index (gdb_xml_value_s, attributes, 0)->value;
+  const char *name = xml_find_attribute (attributes, "name")->value;
 
   item->name = xstrdup (name);
   VEC_safe_push (lm_info_p, *list, item);
@@ -135,6 +135,7 @@ library_list_end_library (struct gdb_xml_parser *parser,
 {
   VEC(lm_info_p) **list = user_data;
   struct lm_info *lm_info = VEC_last (lm_info_p, *list);
+
   if (lm_info->segment_bases == NULL
       && lm_info->section_bases == NULL)
     gdb_xml_error (parser,
@@ -149,7 +150,7 @@ library_list_start_list (struct gdb_xml_parser *parser,
 			 const struct gdb_xml_element *element,
 			 void *user_data, VEC(gdb_xml_value_s) *attributes)
 {
-  char *version = VEC_index (gdb_xml_value_s, attributes, 0)->value;
+  char *version = xml_find_attribute (attributes, "version")->value;
 
   if (strcmp (version, "1.0") != 0)
     gdb_xml_error (parser,
@@ -226,24 +227,20 @@ const struct gdb_xml_element library_list_elements[] = {
 static VEC(lm_info_p) *
 solib_target_parse_libraries (const char *library)
 {
-  struct gdb_xml_parser *parser;
   VEC(lm_info_p) *result = NULL;
-  struct cleanup *before_deleting_result, *back_to;
+  struct cleanup *back_to = make_cleanup (solib_target_free_library_list,
+					  &result);
 
-  back_to = make_cleanup (null_cleanup, NULL);
-  parser = gdb_xml_create_parser_and_cleanup (_("target library list"),
-					      library_list_elements, &result);
-  gdb_xml_use_dtd (parser, "library-list.dtd");
-
-  before_deleting_result = make_cleanup (solib_target_free_library_list,
-					 &result);
-
-  if (gdb_xml_parse (parser, library) == 0)
-    /* Parsed successfully, don't need to delete the result.  */
-    discard_cleanups (before_deleting_result);
+  if (gdb_xml_parse_quick (_("target library list"), "library-list.dtd",
+			   library_list_elements, library, &result) == 0)
+    {
+      /* Parsed successfully, keep the result.  */
+      discard_cleanups (back_to);
+      return result;
+    }
 
   do_cleanups (back_to);
-  return result;
+  return NULL;
 }
 #endif
 
@@ -364,6 +361,7 @@ Could not relocate shared library \"%s\": wrong number of ALLOC sections"),
 	      int bases_index = 0;
 	      int found_range = 0;
 	      CORE_ADDR *section_bases;
+
 	      section_bases = VEC_address (CORE_ADDR,
 					   so->lm_info->section_bases);
 
@@ -378,6 +376,7 @@ Could not relocate shared library \"%s\": wrong number of ALLOC sections"),
 		  if (bfd_section_size (so->abfd, sect) > 0)
 		    {
 		      CORE_ADDR low, high;
+
 		      low = section_bases[i];
 		      high = low + bfd_section_size (so->abfd, sect) - 1;
 
@@ -388,7 +387,8 @@ Could not relocate shared library \"%s\": wrong number of ALLOC sections"),
 		      gdb_assert (so->addr_low <= so->addr_high);
 		      found_range = 1;
 		    }
-		  so->lm_info->offsets->offsets[i] = section_bases[bases_index];
+		  so->lm_info->offsets->offsets[i]
+		    = section_bases[bases_index];
 		  bases_index++;
 		}
 	      if (!found_range)
@@ -399,6 +399,7 @@ Could not relocate shared library \"%s\": wrong number of ALLOC sections"),
       else if (so->lm_info->segment_bases)
 	{
 	  struct symfile_segment_data *data;
+
 	  data = get_symfile_segment_data (so->abfd);
 	  if (data == NULL)
 	    warning (_("\
@@ -474,7 +475,8 @@ solib_target_in_dynsym_resolve_code (CORE_ADDR pc)
 
 struct target_so_ops solib_target_so_ops;
 
-extern initialize_file_ftype _initialize_solib_target; /* -Wmissing-prototypes */
+/* -Wmissing-prototypes */
+extern initialize_file_ftype _initialize_solib_target;
 
 void
 _initialize_solib_target (void)
@@ -493,4 +495,9 @@ _initialize_solib_target (void)
   solib_target_so_ops.in_dynsym_resolve_code
     = solib_target_in_dynsym_resolve_code;
   solib_target_so_ops.bfd_open = solib_bfd_open;
+
+  /* Set current_target_so_ops to solib_target_so_ops if not already
+     set.  */
+  if (current_target_so_ops == 0)
+    current_target_so_ops = &solib_target_so_ops;
 }

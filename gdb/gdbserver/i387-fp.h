@@ -1,5 +1,5 @@
 /* i387-specific utility functions, for the remote server for GDB.
-   Copyright (C) 2000, 2001, 2002, 2007, 2008, 2009, 2010
+   Copyright (C) 2000, 2001, 2002, 2007, 2008, 2009, 2010, 2011
    Free Software Foundation, Inc.
 
    This file is part of GDB.
@@ -25,6 +25,11 @@ void i387_fsave_to_cache (struct regcache *regcache, const void *buf);
 
 void i387_cache_to_fxsave (struct regcache *regcache, void *buf);
 void i387_fxsave_to_cache (struct regcache *regcache, const void *buf);
+
+void i387_cache_to_xsave (struct regcache *regcache, void *buf);
+void i387_xsave_to_cache (struct regcache *regcache, const void *buf);
+
+extern unsigned long long x86_xcr0;
 
 extern int num_xmm_registers;
 

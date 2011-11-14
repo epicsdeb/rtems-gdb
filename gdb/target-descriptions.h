@@ -1,6 +1,7 @@
 /* Target description support for GDB.
 
-   Copyright (C) 2006, 2007, 2008, 2009, 2010 Free Software Foundation, Inc.
+   Copyright (C) 2006, 2007, 2008, 2009, 2010, 2011
+   Free Software Foundation, Inc.
 
    Contributed by CodeSourcery.
 
@@ -176,7 +177,7 @@ const char *tdesc_register_name (struct gdbarch *gdbarch, int regno);
 
 struct type *tdesc_register_type (struct gdbarch *gdbarch, int regno);
 
-/* Return the type associated with ID, from the target description. */
+/* Return the type associated with ID, from the target description.  */
 
 struct type *tdesc_find_type (struct gdbarch *gdbarch, const char *id);
 
@@ -205,10 +206,20 @@ struct tdesc_type *tdesc_create_vector (struct tdesc_feature *feature,
 					const char *name,
 					struct tdesc_type *field_type,
 					int count);
+struct tdesc_type *tdesc_create_struct (struct tdesc_feature *feature,
+					const char *name);
+void tdesc_set_struct_size (struct tdesc_type *type, LONGEST size);
 struct tdesc_type *tdesc_create_union (struct tdesc_feature *feature,
 				       const char *name);
+struct tdesc_type *tdesc_create_flags (struct tdesc_feature *feature,
+				       const char *name,
+				       LONGEST size);
 void tdesc_add_field (struct tdesc_type *type, const char *field_name,
 		      struct tdesc_type *field_type);
+void tdesc_add_bitfield (struct tdesc_type *type, const char *field_name,
+			 int start, int end);
+void tdesc_add_flag (struct tdesc_type *type, int start,
+		     const char *flag_name);
 void tdesc_create_reg (struct tdesc_feature *feature, const char *name,
 		       int regnum, int save_restore, const char *group,
 		       int bitsize, const char *type);

@@ -1,5 +1,6 @@
 /* BFD back-end for TMS320C30 a.out binaries.
-   Copyright 1998, 1999, 2000, 2001, 2002, 2003, 2004, 2005, 2007, 2009
+   Copyright 1998, 1999, 2000, 2001, 2002, 2003, 2004, 2005, 2007, 2009,
+   2010
    Free Software Foundation, Inc.
    Contributed by Steven Haworth (steve@pm.cse.rmit.edu.au)
 
@@ -857,6 +858,9 @@ tic30_aout_set_arch_mach (bfd *abfd,
 #ifndef	MY_core_file_matches_executable_p
 #define	MY_core_file_matches_executable_p	\
 				_bfd_nocore_core_file_matches_executable_p
+#endif
+#ifndef	MY_core_file_pid
+#define	MY_core_file_pid  		_bfd_nocore_core_file_pid
 #endif
 #ifndef	MY_core_file_p
 #define	MY_core_file_p			_bfd_dummy_target

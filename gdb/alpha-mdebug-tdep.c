@@ -1,6 +1,6 @@
 /* Target-dependent mdebug code for the ALPHA architecture.
    Copyright (C) 1993, 1994, 1995, 1996, 1997, 1998, 1999, 2000, 2001, 2002,
-   2003, 2007, 2008, 2009, 2010 Free Software Foundation, Inc.
+   2003, 2007, 2008, 2009, 2010, 2011 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -115,7 +115,7 @@ find_proc_desc (CORE_ADDR pc)
 
   if (sym)
     {
-      proc_desc = (struct mdebug_extra_func_info *) SYMBOL_VALUE (sym);
+      proc_desc = (struct mdebug_extra_func_info *) SYMBOL_VALUE_BYTES (sym);
 
       /* Correct incorrect setjmp procedure descriptor from the library
          to make backtrace through setjmp work.  */
@@ -136,18 +136,27 @@ find_proc_desc (CORE_ADDR pc)
   return proc_desc;
 }
 
+/* Return a non-zero result if the function is frameless; zero otherwise.  */
+
+static int
+alpha_mdebug_frameless (struct mdebug_extra_func_info *proc_desc)
+{
+  return (PROC_FRAME_REG (proc_desc) == ALPHA_SP_REGNUM
+	  && PROC_FRAME_OFFSET (proc_desc) == 0);
+}
+
 /* This returns the PC of the first inst after the prologue.  If we can't
    find the prologue, then return 0.  */
 
 static CORE_ADDR
-alpha_mdebug_after_prologue (CORE_ADDR pc, struct mdebug_extra_func_info *proc_desc)
+alpha_mdebug_after_prologue (CORE_ADDR pc,
+			     struct mdebug_extra_func_info *proc_desc)
 {
   if (proc_desc)
     {
       /* If function is frameless, then we need to do it the hard way.  I
-         strongly suspect that frameless always means prologueless... */
-      if (PROC_FRAME_REG (proc_desc) == ALPHA_SP_REGNUM
-	  && PROC_FRAME_OFFSET (proc_desc) == 0)
+         strongly suspect that frameless always means prologueless...  */
+      if (alpha_mdebug_frameless (proc_desc))
 	return 0;
     }
 
@@ -158,7 +167,8 @@ alpha_mdebug_after_prologue (CORE_ADDR pc, struct mdebug_extra_func_info *proc_d
    if we are definitively *not* in a function prologue.  */
 
 static int
-alpha_mdebug_in_prologue (CORE_ADDR pc, struct mdebug_extra_func_info *proc_desc)
+alpha_mdebug_in_prologue (CORE_ADDR pc,
+			  struct mdebug_extra_func_info *proc_desc)
 {
   CORE_ADDR after_prologue_pc = alpha_mdebug_after_prologue (pc, proc_desc);
   return (after_prologue_pc == 0 || pc < after_prologue_pc);
@@ -219,7 +229,7 @@ alpha_mdebug_frame_unwind_cache (struct frame_info *this_frame,
      register number.  */
   if (mask & (1 << returnreg))
     {
-      /* Clear bit for RA so we don't save it again later. */
+      /* Clear bit for RA so we don't save it again later.  */
       mask &= ~(1 << returnreg);
 
       info->saved_regs[returnreg].addr = reg_position;
@@ -283,6 +293,20 @@ alpha_mdebug_frame_prev_register (struct frame_info *this_frame,
   return trad_frame_get_prev_register (this_frame, info->saved_regs, regnum);
 }
 
+/* Return a non-zero result if the size of the stack frame exceeds the
+   maximum debuggable frame size (512 Kbytes); zero otherwise.  */
+
+static int
+alpha_mdebug_max_frame_size_exceeded (struct mdebug_extra_func_info *proc_desc)
+{
+  /* If frame offset is null, we can be in two cases: either the
+     function is frameless (the stack frame is null) or its
+     frame exceeds the maximum debuggable frame size (512 Kbytes).  */
+
+  return (PROC_FRAME_OFFSET (proc_desc) == 0
+	  && !alpha_mdebug_frameless (proc_desc));
+}
+
 static int
 alpha_mdebug_frame_sniffer (const struct frame_unwind *self,
                             struct frame_info *this_frame,
@@ -302,11 +326,17 @@ alpha_mdebug_frame_sniffer (const struct frame_unwind *self,
   if (alpha_mdebug_in_prologue (pc, proc_desc))
     return 0;
 
+  /* If the maximum debuggable frame size has been exceeded, the
+     proc desc is bogus.  Fall back on the heuristic unwinder.  */
+  if (alpha_mdebug_max_frame_size_exceeded (proc_desc))
+    return 0;
+
   return 1;
 }
 
 static const struct frame_unwind alpha_mdebug_frame_unwind = {
   NORMAL_FRAME,
+  default_frame_unwind_stop_reason,
   alpha_mdebug_frame_this_id,
   alpha_mdebug_frame_prev_register,
   NULL,
@@ -361,6 +391,11 @@ alpha_mdebug_frame_base_sniffer (struct frame_info *this_frame)
   proc_desc = find_proc_desc (pc);
   if (proc_desc == NULL)
     return NULL;
+
+  /* If the maximum debuggable frame size has been exceeded, the
+     proc desc is bogus.  Fall back on the heuristic unwinder.  */
+  if (alpha_mdebug_max_frame_size_exceeded (proc_desc))
+    return 0;
 
   return &alpha_mdebug_frame_base;
 }

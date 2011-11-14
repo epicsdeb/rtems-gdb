@@ -1,6 +1,6 @@
 /* Convenience functions implemented in Python.
 
-   Copyright (C) 2008, 2009, 2010 Free Software Foundation, Inc.
+   Copyright (C) 2008, 2009, 2010, 2011 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -38,6 +38,7 @@ convert_values_to_python (int argc, struct value **argv)
 {
   int i;
   PyObject *result = PyTuple_New (argc);
+
   for (i = 0; i < argc; ++i)
     {
       PyObject *elt = value_to_value_object (argv[i]);
@@ -57,7 +58,6 @@ static struct value *
 fnpy_call (struct gdbarch *gdbarch, const struct language_defn *language,
 	   void *cookie, int argc, struct value **argv)
 {
-  int i;
   struct value *value = NULL;
   PyObject *result, *callable, *args;
   struct cleanup *cleanup;
@@ -79,8 +79,55 @@ fnpy_call (struct gdbarch *gdbarch, const struct language_defn *language,
 
   if (!result)
     {
-      gdbpy_print_stack ();
-      error (_("Error while executing Python code."));
+      PyObject *ptype, *pvalue, *ptraceback;
+      char *msg;
+
+      PyErr_Fetch (&ptype, &pvalue, &ptraceback);
+
+      /* Try to fetch an error message contained within ptype, pvalue.
+	 When fetching the error message we need to make our own copy,
+	 we no longer own ptype, pvalue after the call to PyErr_Restore.  */
+
+      msg = gdbpy_exception_to_string (ptype, pvalue);
+      make_cleanup (xfree, msg);
+
+      if (msg == NULL)
+	{
+	  /* An error occurred computing the string representation of the
+	     error message.  This is rare, but we should inform the user.  */
+
+	  printf_filtered (_("An error occurred in a Python "
+			     "convenience function\n"
+			     "and then another occurred computing the "
+			     "error message.\n"));
+	  gdbpy_print_stack ();
+	}
+
+      /* Don't print the stack for gdb.GdbError exceptions.
+	 It is generally used to flag user errors.
+
+	 We also don't want to print "Error occurred in Python command"
+	 for user errors.  However, a missing message for gdb.GdbError
+	 exceptions is arguably a bug, so we flag it as such.  */
+
+      if (!PyErr_GivenExceptionMatches (ptype, gdbpy_gdberror_exc)
+	  || msg == NULL || *msg == '\0')
+	{
+	  PyErr_Restore (ptype, pvalue, ptraceback);
+	  gdbpy_print_stack ();
+	  if (msg != NULL && *msg != '\0')
+	    error (_("Error occurred in Python convenience function: %s"),
+		   msg);
+	  else
+	    error (_("Error occurred in Python convenience function."));
+	}
+      else
+	{
+	  Py_XDECREF (ptype);
+	  Py_XDECREF (pvalue);
+	  Py_XDECREF (ptraceback);
+	  error ("%s", msg);
+	}
     }
 
   value = convert_value_from_python (result);
@@ -104,6 +151,7 @@ static int
 fnpy_init (PyObject *self, PyObject *args, PyObject *kwds)
 {
   char *name, *docstring = NULL;
+
   if (! PyArg_ParseTuple (args, "s", &name))
     return -1;
   Py_INCREF (self);
@@ -112,7 +160,14 @@ fnpy_init (PyObject *self, PyObject *args, PyObject *kwds)
     {
       PyObject *ds_obj = PyObject_GetAttrString (self, "__doc__");
       if (ds_obj && gdbpy_is_string (ds_obj))
-	docstring = python_string_to_host_string (ds_obj);
+	{
+	  docstring = python_string_to_host_string (ds_obj);
+	  if (docstring == NULL)
+	    {
+	      Py_DECREF (self);
+	      return -1;
+	    }
+	}
     }
   if (! docstring)
     docstring = xstrdup (_("This function is not documented."));
