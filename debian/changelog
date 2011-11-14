@@ -1,3 +1,10 @@
+gdb-rtems4.10 (7.3.1-1) unstable; urgency=low
+
+  * New upstream gdb
+  * Apply RTEMS patch 20110919
+
+ -- Michael Davidsaver <mdavidsaver@bnl.gov>  Mon, 14 Nov 2011 11:31:18 -0500
+
 gdb-rtems4.10 (7.1-1) unstable; urgency=low
 
   * New upstream gdb
