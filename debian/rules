@@ -1,13 +1,6 @@
 #!/usr/bin/make -f
-# -*- makefile -*-
-# Sample debian/rules that uses debhelper.
-# This file was originally written by Joey Hess and Craig Small.
-# As a special exception, when this file is copied by dh-make into a
-# dh-make output file, you may use that output file without restriction.
-# This special exception was added by Craig Small in version 0.37 of dh-make.
 
-# Uncomment this to turn on verbose mode.
-#export DH_VERBOSE=1
+export DH_VERBOSE=1
 
 ifeq (,$(findstring debug,$(DEB_BUILD_OPTIONS)))
 CFLAGS:=$(filter-out -g,$(CFLAGS))
@@ -32,13 +25,10 @@ CONFIG= --target $(call DEB_TARGET_GNU_TYPE,$(1)) --build $(DEB_BUILD_GNU_TYPE) 
 --disable-werror \
 CFLAGS="$(CFLAGS)" LDFLAGS="-Wl,-z,defs"
 
+%:
+	dh $@
 
-build: build-stamp
-
-build-stamp:
-
-	dh build --before auto_configure
-
+override_dh_auto_configure:
 ifneq "$(wildcard /usr/share/misc/config.sub)" ""
 	cp -f /usr/share/misc/config.sub config.sub
 endif
@@ -51,29 +41,24 @@ endif
 	install -d build-i386
 	cd build-i386 && ../configure $(call CONFIG,i386)
 
+override_dh_auto_build:
 	$(MAKE) -C build-powerpc $(PMAKEFLAGS)
 	$(MAKE) -C build-i386 $(PMAKEFLAGS)
- 
-	dh build --after auto_test
-	touch $@
 
-clean: 
-	dh clean --before auto_clean
+override_dh_auto_test:
 
-	rm -f build-stamp 
 
+override_dh_auto_clean: 
 	rm -rf build-powerpc
 	rm -rf build-i386
 
 	rm -f config.sub config.guess
 
-	dh clean --after auto_clean
+	dh_auto_clean
 
 tprefix=$(CURDIR)/debian/gdb-$(1)-rtems$(RTEMS_VER)/usr
 
-install: build
-	dh install --before auto_install
-
+override_dh_auto_install:
 	$(MAKE) -C build-powerpc prefix=$(call tprefix,powerpc) install
 
 	rm -rf $(call tprefix,powerpc)/lib
@@ -84,14 +69,4 @@ install: build
 	rm -rf $(call tprefix,i386)/lib
 	rm -rf $(call tprefix,i386)/share/info
 
-	dh install --after auto_install
-
-
-binary-indep: #install
-	#dh binary-indep
-
-binary-arch: install
-	dh binary-arch
-
-binary: binary-indep binary-arch
-.PHONY: build clean binary-indep binary-arch binary install 
+override_dh_install: # already installed by auto_install step
