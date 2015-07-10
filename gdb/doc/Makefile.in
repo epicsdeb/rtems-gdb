@@ -331,8 +331,7 @@ gdb.pdf: ${GDB_DOC_FILES}
 
 # GDB MANUAL: info file
 gdb.info: ${GDB_DOC_FILES}
-	$(MAKEINFO) -I ${READLINE_DIR} -I ${GDBMI_DIR} -I $(srcdir) \
-		-o gdb.info $(srcdir)/gdb.texinfo
+	touch $@
 
 # GDB MANUAL: roff translations
 # Try to use a recent texi2roff.  v2 was put on prep in jan91.
@@ -407,7 +406,7 @@ gdb.mm: $(GDB_DOC_FILES) links2roff
 # GDB MANUAL: HTML file
 
 gdb_toc.html: ${GDB_DOC_FILES}
-	$(MAKEHTML) $(MAKEHTMLFLAGS) -I ${READLINE_DIR} -I ${GDBMI_DIR} -I $(srcdir) $(srcdir)/gdb.texinfo
+	touch $@
 
 # Clean these up before each run.  Avoids a catch 22 with not being
 # able to re-generate these files (to fix a corruption) because these
@@ -417,33 +416,31 @@ GDBINT_TEX_TMPS = gdbint.aux gdbint.cp* gdbint.fn* gdbint.ky* \
 
 # GDB INTERNALS MANUAL: TeX dvi file
 gdbint.dvi: $(GDBINT_DOC_FILES)
-	rm -f $(GDBINT_TEX_TMPS)
-	$(SET_TEXINPUTS) $(TEXI2DVI) $(srcdir)/gdbint.texinfo
+	touch $@
 
 gdbint.ps : gdbint.dvi
-	$(DVIPS) -o $@ $?
+	touch $@
 
 gdbint.pdf: $(GDBINT_DOC_FILES)
-	rm -f $(GDBINT_TEX_TMPS)
-	$(SET_TEXINPUTS) $(TEXI2DVI) --pdf $(srcdir)/gdbint.texinfo
+	touch $@
 
 # GDB INTERNALS MANUAL: info file
 
 gdbint.info: $(GDBINT_DOC_FILES)
-	$(MAKEINFO) -I $(srcdir) -o gdbint.info $(srcdir)/gdbint.texinfo
+	touch $@
 
 # GDB INTERNALS MANUAL: HTML file
 
 gdbint_toc.html: $(GDBINT_DOC_FILES)
-	$(MAKEHTML) $(MAKEHTMLFLAGS) $(srcdir)/gdbint.texinfo
+	touch $@
 
 stabs.info: $(STABS_DOC_FILES)
-	$(MAKEINFO) -I $(srcdir) -o stabs.info $(srcdir)/stabs.texinfo
+	touch $@
 
 # STABS DOCUMENTATION: HTML file
 
 stabs_toc.html: $(STABS_DOC_FILES)
-	$(MAKEHTML) $(MAKEHTMLFLAGS) $(srcdir)/stabs.texinfo
+	touch $@
 
 # Clean these up before each run.  Avoids a catch 22 with not being
 # able to re-generate these files (to fix a corruption) because these
@@ -453,15 +450,13 @@ STABS_TEX_TMPS = stabs.aux stabs.cp* stabs.fn* stabs.ky* \
 
 # STABS DOCUMENTATION: TeX dvi file
 stabs.dvi : $(STABS_DOC_FILES)
-	rm -f $(STABS_TEX_TMPS)
-	$(SET_TEXINPUTS) $(TEXI2DVI) $(srcdir)/stabs.texinfo
+	touch $@
 
 stabs.ps: stabs.dvi
-	$(DVIPS) -o $@ $?
+	touch $@
 
 stabs.pdf: $(STABS_DOC_FILES)
-	rm -f $(STABS_TEX_TMPS)
-	$(SET_TEXINPUTS) $(TEXI2DVI) --pdf $(srcdir)/stabs.texinfo
+	touch $@
 
 # Clean these up before each run.  Avoids a catch 22 with not being
 # able to re-generate these files (to fix a corruption) because these
@@ -471,21 +466,19 @@ ANNOTATE_TEX_TMPS = annotate.aux annotate.cp* annotate.fn* annotate.ky* \
 
 # ANNOTATE DOCUMENTATION: TeX dvi file
 annotate.dvi : $(ANNOTATE_DOC_FILES)
-	rm -f $(ANNOTATE_TEX_TMPS)
-	$(SET_TEXINPUTS) $(TEXI2DVI) $(srcdir)/annotate.texinfo
+	touch $@
 
 annotate.ps: annotate.dvi
-	$(DVIPS) -o $@ $?
+	touch $@
 
 annotate.pdf: $(ANNOTATE_DOC_FILES)
-	rm -f $(ANNOTATE_TEX_TMPS)
-	$(SET_TEXINPUTS) $(TEXI2DVI) --pdf $(srcdir)/annotate.texinfo
+	touch $@
 
 annotate.info: $(ANNOTATE_DOC_FILES)
-	$(MAKEINFO)  -I $(srcdir) -o annotate.info $(srcdir)/annotate.texinfo
+	touch $@
 
 annotate_toc.html: $(ANNOTATE_DOC_FILES)
-	$(MAKEHTML) $(MAKEHTMLFLAGS) $(srcdir)/annotate.texinfo
+	touch $@
 
 force:
 

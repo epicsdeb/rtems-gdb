@@ -1419,7 +1419,7 @@ do-maintainer-clean:
 		subdir_do
 
 diststuff: $(DISTSTUFF) $(PACKAGE).pot $(CATALOGS)
-	cd doc; $(MAKE) $(MFLAGS) diststuff
+	echo "Removed"
 
 subdir_do: force
 	@for i in $(DODIRS); do \
@@ -1462,19 +1462,19 @@ force:
 # Documentation!
 # GDB QUICK REFERENCE (TeX dvi file, CM fonts)
 doc/refcard.dvi:
-	cd doc; $(MAKE) refcard.dvi $(FLAGS_TO_PASS)
+	echo "Removed" && touch $@
 
 # GDB QUICK REFERENCE (PostScript output, common PS fonts)
 doc/refcard.ps:
-	cd doc; $(MAKE) refcard.ps $(FLAGS_TO_PASS)
+	echo "Removed" && touch $@
 
 # GDB MANUAL: TeX dvi file
 doc/gdb.dvi:
-	cd doc; $(MAKE) gdb.dvi $(FLAGS_TO_PASS)
+	echo "Removed" && touch $@
 
 # GDB MANUAL: info file
 doc/gdb.info:
-	cd doc; $(MAKE) gdb.info $(FLAGS_TO_PASS)
+	echo "Removed" && touch $@
 
 # Make copying.c from COPYING
 $(srcdir)/copying.c: @MAINTAINER_MODE_TRUE@ \
