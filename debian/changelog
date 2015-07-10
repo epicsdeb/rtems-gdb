@@ -1,3 +1,14 @@
+gdb-rtems4.9 (6.8-4) unstable; urgency=medium
+
+  [ Michael Davidsaver ]
+  * set gbp branch name
+  * skip doc gen (texinfo syntax change breaks build)
+
+  [ Joachim Rahn ]
+  * unneeded dependency to package gcc-<ARCH>-rtems4.9 removed
+
+ -- Michael Davidsaver <mdavidsaver@bnl.gov>  Fri, 10 Jul 2015 12:53:31 -0400
+
 gdb-rtems4.9 (6.8-3) unstable; urgency=low
 
   * Omit -Werror.  Causing (apparently) spurious build failures
